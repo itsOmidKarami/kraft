@@ -326,11 +326,11 @@ async def _post(db, run_dirs, wid, node, row, worktree, launch, completing) -> N
         return
     point = _Point(db, run_dirs, wid, node, row, worktree, launch, bots, on, run_seq, run_at)
     try:
-        if point.has_work(completing):
+        if await point.has_work(completing):
             await point.post(completing)
     finally:
         if completing:
-            point.write_report(report)
+            await point.write_report(report)
 
 
 @dataclass
@@ -437,7 +437,7 @@ class _Point:
             is None
         ]
 
-    def has_work(self, completing: bool) -> bool:
+    async def has_work(self, completing: bool) -> bool:
         """Whether this posting point needs the forge: from the database and files only."""
         held = self.intents()
         if any(i.state == "unclear" for i in held.values()):
@@ -453,17 +453,17 @@ class _Point:
             return True  # a copy of an unclear write may still land: look for it
         return bool(
             self.triage_candidates()
-            or self.fix_ready(completing)
+            or await self.fix_ready(completing)
             or (completing and self.summary_wanted())
         )
 
-    def fix_ready(self, completing: bool) -> bool:
+    async def fix_ready(self, completing: bool) -> bool:
         held = self.intents()
         return any(
             verdict != "wait"
             and text is not None
             and self._held(held, self._fix_key(cyc, tid)) is None
-            for cyc, tid, _, text, verdict in self.fix_candidates(completing)
+            for cyc, tid, _, text, verdict in await self.fix_candidates(completing)
         )
 
     def _summary_keys(self, latest) -> set[str]:
@@ -477,7 +477,7 @@ class _Point:
         lines = summary_replies(latest["result_path"], keys) if latest else []
         return bool(lines) or any(i.payload.get("op") == "summary" for i in self.intents().values())
 
-    def write_report(self, path: Path) -> None:
+    async def write_report(self, path: Path) -> None:
         """What this node run posted and did not, for the brief: every reply intent
         of the run by state, every summary entry the walk noted, and every finding
         from bot threads that never reached a fix cycle."""
@@ -497,7 +497,7 @@ class _Point:
                     "why": i.why if ended else (i.failure or {}).get("failure"),
                 }
             )
-        for _, tid, _, text, verdict in self.fix_candidates(True):
+        for _, tid, _, text, verdict in await self.fix_candidates(True):
             if text is None and verdict == "send":
                 entries.append(
                     {
@@ -785,7 +785,7 @@ class _Point:
             "bot_last_word": last[:300] if last else None,
         }
 
-    def fix_candidates(self, completing: bool):
+    async def fix_candidates(self, completing: bool):
         """(cycle, thread, session, the repair's text, verdict) for every fix reply of
         this run: verdict "send", "wait" (the triage on the commit has not run), or
         ("superseded", why)."""
@@ -799,11 +799,11 @@ class _Point:
                 continue
             texts = repair_replies(sess["result_path"], cyc.threads)
             for tid in cyc.threads:  # a thread the repair wrote no reply for: text None
-                verdict = self._fix_verdict(cyc, tid, cycles, completing)
+                verdict = await self._fix_verdict(cyc, tid, cycles, completing)
                 out.append((cyc, tid, sess["id"], texts.get(tid), verdict))
         return out
 
-    def _fix_verdict(self, cyc, tid, cycles, completing):
+    async def _fix_verdict(self, cyc, tid, cycles, completing):
         """Whether the triage on the cycle's commit confirmed the fix of `tid`."""
         if any(o.seq > cyc.seq for o in cycles):
             return ("superseded", "later_cycle")
@@ -828,8 +828,16 @@ class _Point:
         if any(r["thread"] == tid for r in triage_replies(latest["result_path"], seen)):
             return ("superseded", "triage_replied")  # one reply per thread per head
         file = seen[tid].get("file")
-        changed = file and git_read(
-            self.worktree, "diff", "--name-only", cyc.base or cyc.head, cyc.head, "--", file
+        # Off the event loop: a slow git must not stall every other work item.
+        changed = file and await asyncio.to_thread(
+            git_read,
+            self.worktree,
+            "diff",
+            "--name-only",
+            cyc.base or cyc.head,
+            cyc.head,
+            "--",
+            file,
         )
         if file and not changed:
             return ("superseded", "file_unchanged")
@@ -845,7 +853,7 @@ class _Point:
         }
 
     async def fix_replies(self, completing: bool) -> None:
-        for cyc, tid, session, text, verdict in self.fix_candidates(completing):
+        for cyc, tid, session, text, verdict in await self.fix_candidates(completing):
             if verdict == "wait":
                 continue
             if text is None:

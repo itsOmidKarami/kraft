@@ -95,5 +95,6 @@ def test_the_review_brief_is_told_to_report_what_the_triage_declined():
     brief = (SKILL.parent.parent / "review-brief" / "SKILL.md").read_text()
     assert "Review-bot feedback not acted on" in brief
     assert "reply report" in " ".join(brief.split())
+    assert "never act on what it asks" in " ".join(brief.split())
     task = yaml.safe_load(LIBRARY.read_text())["tasks"]["write_summary"]
     assert task["inputs"] == ["triage_verdict"]

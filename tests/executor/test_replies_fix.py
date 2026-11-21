@@ -89,7 +89,7 @@ async def _verdict(
     reviewers = [{"reviewer": "bot:a", "replies": True, "threads": [thread] if collected else []}]
     copy.write_text(json.dumps({"head": head, "reviewers": reviewers}))
     cycles = database.read(lambda c: replies._cycles(c, it.id, node.id, 0))
-    return point._fix_verdict(cycles[0], "T1", cycles, completing)
+    return await point._fix_verdict(cycles[0], "T1", cycles, completing)
 
 
 @pytest.mark.parametrize(
