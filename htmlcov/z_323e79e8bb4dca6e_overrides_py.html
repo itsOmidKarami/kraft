@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_paths_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.3">coverage.py v7.17.3</a>,
-            created at 2026-11-20 23:25 +0000
+            created at 2026-11-21 00:42 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -92,7 +92,7 @@
     <p class="pln"><span class="n"><a id="t10" href="#t10">10</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t11" href="#t11">11</a></span><span class="t"><span class="key">from</span> <span class="nam">pydantic</span> <span class="key">import</span> <span class="nam">BaseModel</span><span class="op">,</span> <span class="nam">ConfigDict</span><span class="op">,</span> <span class="nam">Field</span><span class="op">,</span> <span class="nam">StrictBool</span><span class="op">,</span> <span class="nam">StrictInt</span><span class="op">,</span> <span class="nam">StrictStr</span><span class="op">,</span> <span class="nam">ValidationError</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t12" href="#t12">12</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t13" href="#t13">13</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">automated_review</span> <span class="key">import</span> <span class="nam">AutomatedReview</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t13" href="#t13">13</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">automated_review</span> <span class="key">import</span> <span class="nam">Reviewer</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t14" href="#t14">14</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t15" href="#t15">15</a></span><span class="t"><span class="com">#: The levels an override&#x27;s `effort` may take. Checked at the API rather than at</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t16" href="#t16">16</a></span><span class="t"><span class="com">#: dispatch: a typo reaching the CLI fails the node *after* the work item has</span>&nbsp;</span><span class="r"></span></p>
@@ -188,7 +188,7 @@
     <p class="run"><span class="n"><a id="t106" href="#t106">106</a></span><span class="t">    <span class="nam">extra_prompt</span><span class="op">:</span> <span class="nam">StrictStr</span> <span class="op">|</span> <span class="key">None</span> <span class="op">=</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t107" href="#t107">107</a></span><span class="t">    <span class="com">#: The reviewers this node&#x27;s `mr.automated_review` tasks wait for, over the</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t108" href="#t108">108</a></span><span class="t">    <span class="com">#: repository&#x27;s and the task&#x27;s own (`dispatch._reviewers`). `[]` expects none.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t109" href="#t109">109</a></span><span class="t">    <span class="nam">reviewers</span><span class="op">:</span> <span class="nam">list</span><span class="op">[</span><span class="nam">AutomatedReview</span><span class="op">]</span> <span class="op">|</span> <span class="key">None</span> <span class="op">=</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t109" href="#t109">109</a></span><span class="t">    <span class="nam">reviewers</span><span class="op">:</span> <span class="nam">list</span><span class="op">[</span><span class="nam">Reviewer</span><span class="op">]</span> <span class="op">|</span> <span class="key">None</span> <span class="op">=</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t110" href="#t110">110</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t111" href="#t111">111</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t112" href="#t112">112</a></span><span class="t"><span class="key">def</span> <span class="nam">_errors</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -347,7 +347,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_paths_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.3">coverage.py v7.17.3</a>,
-            created at 2026-11-20 23:25 +0000
+            created at 2026-11-21 00:42 +0000
         </p>
     </div>
 </footer>
