@@ -163,6 +163,9 @@ def previous_review_note(row, *, run_dirs) -> str:
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY, run_dirs=run_dirs)
 
 
+#: The verdict's last sentence: it yields to the reply report's own rule.
+_OMIT = " Leave the section out when it declined nothing."
+
 #: What the review brief is told about the bots' feedback the triage did not
 #: act on (`triage-verdict-is-delivered-to-the-review-brief`). Like the
 #: deferred findings above, it exists so a decision made without a person
@@ -172,17 +175,26 @@ _TRIAGE_VERDICT = (
     "before it reached you, and acted on those it found right. Its latest verdict is the "
     "result file at {result_path}{summary}.\n"
     'Add a short section, "Review-bot feedback not acted on", naming each comment it '
-    "declined, who made it, and why it was declined, in its own words where you can. "
-    "Leave the section out when it declined nothing."
+    "declined, who made it, and why it was declined, in its own words where you can." + _OMIT
 )
 _TRIAGE_VERDICT_SUMMARY = " and its session summary at {summary_ref}, which lists what it declined"
+#: Added when Kraft replied on the merge request (`executor.replies` wrote a report).
+_REPLY_REPORT = (
+    "\n\nKraft replied on the merge request for the bots that take replies. What it "
+    "posted, and every reply it could not post or never got to, is in {path}. Add a "
+    'short section, "Review-bot feedback not acted on", built from that file: each '
+    "thread declined or answered, each reply not posted and why, and each finding "
+    "from a bot thread that was never fixed. Leave the section out only when that "
+    "file lists no entry and the triage declined nothing."
+)
 
 
 def triage_verdict_note(db, work_item_id: str, row, *, run_dirs) -> str:
     """Where the latest verdict of the item's triage task is, by path, for a
-    task declaring `inputs: [triage_verdict]`; "" when the chain has no triage
-    or none has judged anything yet (a skipped one, which found nothing to
-    read, is no verdict: `last_review_session` reads only sessions at a head).
+    task declaring `inputs: [triage_verdict]`, and where the reply report is when
+    there is one; "" when the chain has no triage or none has judged anything yet
+    (a skipped one, which found nothing to read, is no verdict:
+    `last_review_session` reads only sessions at a head) and no report was written.
 
     The triage is the task of the item's chain that declares `bot_feedback`."""
     chain = store.materialized_chain_of(row).chain
@@ -192,10 +204,17 @@ def triage_verdict_note(db, work_item_id: str, row, *, run_dirs) -> str:
         for t in node.tasks()
         if isinstance(t.task, AgentTask) and AgentInput.BOT_FEEDBACK in t.task.inputs
     ]
+    # Not `replies.report_path`: `replies` imports `dispatch`, which imports this module.
+    report = item_paths.item_dir(run_dirs, work_item_id) / item_paths.REPLY_REPORT
+    # Named whether or not a verdict is found: a replies-on run whose triage never
+    # judged a head still has a report.
+    tail = _REPLY_REPORT.format(path=report) if report.exists() else ""
     for hook in hooks:
         if (found := last_review_session(db, work_item_id, hook)) is not None:
-            return _session_note(found, _TRIAGE_VERDICT, _TRIAGE_VERDICT_SUMMARY, run_dirs=run_dirs)
-    return ""
+            note = _session_note(found, _TRIAGE_VERDICT, _TRIAGE_VERDICT_SUMMARY, run_dirs=run_dirs)
+            # The verdict's "leave the section out" yields to the report's own rule.
+            return note.replace(_OMIT, "") + tail if tail else note
+    return tail
 
 
 def fix_attempt_note(row, *, run_dirs) -> str:

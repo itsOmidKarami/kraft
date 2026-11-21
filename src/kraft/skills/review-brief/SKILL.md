@@ -82,8 +82,13 @@ In this order, leaving out a conditional part when its condition doesn't hold:
   a person: name each one, who made it, where, and why it was declined, from the
   summary your instructions name. Say that it is still unresolved on the merge
   request, because a repository that requires resolved conversations holds the
-  merge until a person resolves it. Leave the section out when there is no
-  verdict or it declined nothing.
+  merge until a person resolves it. When your instructions also name Kraft's reply
+  report, build the section from it: each thread declined or answered on the merge
+  request, each reply Kraft could not post and why (a person wrote in the thread,
+  the cap, a refused body, a moved head), and each finding from a bot thread that
+  was never fixed. Otherwise build it from the triage's summary, as above. Leave
+  the section out when there is no verdict and no reply report, or neither names
+  anything.
 - **What was deliberately left out**, and why, when a plan task or something
   the spec asks for has no change behind it.
 - **What you are unsure about**, when there is something you could not read or

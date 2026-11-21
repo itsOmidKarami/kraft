@@ -22,7 +22,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from kraft import events, inplace, store
+from kraft import events, inplace, item_paths, store
 from kraft import findings as _findings
 from kraft import forges as forges_mod
 from kraft.adapters.forge import run as forge_run
@@ -98,6 +98,19 @@ def summary_replies(result_path, reviewers: Collection[str]) -> list[dict]:
         for r in _rows(_result(result_path), "summary_replies")
         if r.get("reviewer") in reviewers and _text(r)
     ]
+
+
+def report_path(run_dirs, work_item_id: str) -> Path:
+    return item_paths.item_dir(run_dirs, work_item_id) / item_paths.REPLY_REPORT
+
+
+def _drop_report(path: Path, node_id: str) -> None:
+    """Remove the report when it is this node's: one item may have two review nodes."""
+    try:
+        if json.loads(path.read_text()).get("node_id") == node_id:
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def _own(node) -> list:
@@ -300,15 +313,24 @@ async def _post(db, run_dirs, wid, node, row, worktree, launch, completing) -> N
     reviewers = dispatch._reviewers(wait.task, node.id, row, launch)
     bots = tuple(r.bot for r in reviewers if r.bot is not None)
     on = tuple(r.bot for r in reviewers if r.bot is not None and r.replies)
+    report = report_path(run_dirs, wid)
     if not on:
+        if completing:
+            _drop_report(report, node.id)  # replies off now: this node's old report misleads
         return
     run_seq, run_at = db.read(lambda c: _run_start(c, wid, node.id))
     if (reason := _inert_reason(db, wid, node)) is not None:
         await _record_inert(db, wid, node.id, reason, run_seq)
+        if completing:
+            _drop_report(report, node.id)
         return
     point = _Point(db, run_dirs, wid, node, row, worktree, launch, bots, on, run_seq, run_at)
-    if point.has_work(completing):
-        await point.post(completing)
+    try:
+        if point.has_work(completing):
+            await point.post(completing)
+    finally:
+        if completing:
+            point.write_report(report)
 
 
 @dataclass
@@ -456,7 +478,92 @@ class _Point:
         return bool(lines) or any(i.payload.get("op") == "summary" for i in self.intents().values())
 
     def write_report(self, path: Path) -> None:
-        pass  # part 2b: the reply report
+        """What this node run posted and did not, for the brief: every reply intent
+        of the run by state, every summary entry the walk noted, and every finding
+        from bot threads that never reached a fix cycle."""
+        latest = self.latest()
+        entries = []
+        for i in self.intents().values():
+            p = i.payload
+            mine = p.get("node_id") == self.node.id and p.get("run") == self.run_seq
+            if p.get("op") != "reply" or not mine:
+                continue
+            ended = i.state in ("posted", "refused", "superseded", "given_up")
+            entries.append(
+                {
+                    **self.where(p["thread"]),
+                    "kind": p.get("kind"),
+                    "outcome": i.state if ended else "unsent",
+                    "why": i.why if ended else (i.failure or {}).get("failure"),
+                }
+            )
+        for _, tid, _, text, verdict in self.fix_candidates(True):
+            if text is None and verdict == "send":
+                entries.append(
+                    {
+                        **self.where(tid),
+                        "kind": "fixed",
+                        "outcome": "no_reply",
+                        "why": "confirmed; the repair wrote no reply",
+                    }
+                )
+        entries += self.notes
+        entries += self._never_fixed()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "node_id": self.node.id,
+            "head": latest["head_sha"] if latest else None,
+            "entries": entries,
+        }
+        path.write_text(json.dumps(report, indent=2) + "\n")
+
+    def _never_fixed(self) -> list[dict]:
+        """Threads the run's last measurement still raises as findings with no
+        "Fixed in" posted: taken by a cycle and raised again, declined by the judge,
+        or never handed to a cycle (below the loop's severities)."""
+
+        def read(c):
+            rows = c.execute(
+                "SELECT type, payload FROM events WHERE work_item_id = ? AND seq > ? "
+                "AND type IN (?, ?) ORDER BY seq",
+                (self.wid, self.run_seq, ChainEvent.FINDINGS_MEASURED, ChainEvent.JUDGE_VERDICT),
+            ).fetchall()
+            return [(r["type"], json.loads(r["payload"])) for r in rows]
+
+        rows = [(t, p) for t, p in self.db.read(read) if p.get("node_id") == self.node.id]
+        measured = [p for t, p in rows if t == ChainEvent.FINDINGS_MEASURED]
+        if not measured:
+            return []
+        declined = {
+            _findings.from_payload(f).fingerprint
+            for t, p in rows
+            if t == ChainEvent.JUDGE_VERDICT and p.get("verdict") == "stop_downgrade"
+            for f in p.get("findings") or ()
+        }
+        cycles = self.db.read(lambda c: _cycles(c, self.wid, self.node.id, self.run_seq))
+        taken = {tid: cyc.cycle for cyc in cycles for tid in cyc.threads}
+        fixed = {
+            i.payload.get("thread")
+            for i in self.intents().values()
+            if i.payload.get("kind") == "fixed"
+            and i.state == "posted"
+            and i.payload.get("run") == self.run_seq
+        }
+        out = []
+        for f in map(_findings.from_payload, measured[-1].get("findings") or ()):
+            for tid in f.threads:
+                if tid in fixed:
+                    continue
+                if f.fingerprint in declined:
+                    why = "the judge declined it"
+                elif tid in taken:
+                    why = f"still raised after cycle {taken[tid]}"
+                else:
+                    why = "never reached a fix"
+                out.append(
+                    {**self.where(tid), "kind": "finding", "outcome": "not_fixed", "why": why}
+                )
+        return out
 
     async def post(self, completing: bool) -> None:
         forges, forges_error = self.forges()
@@ -742,15 +849,7 @@ class _Point:
             if verdict == "wait":
                 continue
             if text is None:
-                # Fixed with no reply: nothing to post; the report names it.
-                if completing:
-                    why = (
-                        "confirmed; the repair wrote no reply" if verdict == "send" else verdict[1]
-                    )
-                    self.notes.append(
-                        {**self.where(tid), "kind": "fixed", "outcome": "no_reply", "why": why}
-                    )
-                continue
+                continue  # fixed with no reply: nothing to post; the report names it
             lead = f"Fixed in {cyc.head[:7]}:"
             intent = await self.intend(
                 self._fix_key(cyc, tid),

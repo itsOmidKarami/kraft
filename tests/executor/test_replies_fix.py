@@ -15,6 +15,7 @@ from support.review_rig import (  # noqa: F401
     FIXED,
     FLAG,
     bot_on,
+    filed,
     fix_walk,
     review_node,
     rig,
@@ -43,6 +44,21 @@ _FP = _findings.prose_fingerprint(
 )
 
 
+async def _direct(item_on, database, run_dirs):
+    """The review node filed, and a posting point of its run 0 to call directly:
+    `(item, node, point, event)`, `event(type, payload)` appending to the item."""
+    it = await item_on([review_node(30, reviewers=(bot_on(),), loop=True)])
+    node = store.materialized_chain_of(it.row()).chain.nodes[0]
+
+    async def event(type_, payload):
+        await database.write(lambda c: events.append(c, it.id, type_, payload))
+
+    point = replies._Point(
+        database, run_dirs, it.id, node, it.row(), it.worktree, None, ("a",), ("a",), 0, ""
+    )
+    return it, node, point, event
+
+
 async def _verdict(
     item_on,
     database,
@@ -57,13 +73,8 @@ async def _verdict(
     """`_fix_verdict` for T1 of cycle 1 (from head B0 to commit C1), with the heads
     Kraft pushed since in `pushes`, a later cycle when `later`, and the latest triage
     `(head, findings, T1 collected)`."""
-    it = await item_on([review_node(30, reviewers=(bot_on(),), loop=True)])
-    node = store.materialized_chain_of(it.row()).chain.nodes[0]
+    it, node, point, event = await _direct(item_on, database, run_dirs)
     repo = str(Path(it.row()["repo"]))
-
-    async def event(type_, payload):
-        await database.write(lambda c: events.append(c, it.id, type_, payload))
-
     started = {"node_id": node.id, "cycle": 1, "threads": {"T1": _FP}, "head_sha": "B0"}
     await event(ChainEvent.FIX_CYCLE_STARTED, started)
     await event(
@@ -83,9 +94,6 @@ async def _verdict(
     thread = {"id": "T1", "file": file, "line": 1, "notes": [{"id": "N1", "by": "bot"}]}
     reviewers = [{"reviewer": "bot:a", "replies": True, "threads": [thread] if collected else []}]
     copy.write_text(json.dumps({"head": head, "reviewers": reviewers}))
-    point = replies._Point(
-        database, run_dirs, it.id, node, it.row(), it.worktree, None, ("a",), ("a",), 0, ""
-    )
     cycles = database.read(lambda c: replies._cycles(c, it.id, node.id, 0))
     return point._fix_verdict(cycles[0], "T1", cycles, completing)
 
@@ -284,6 +292,10 @@ async def test_a_failed_read_skips_one_reply_not_the_rest(rig, monkeypatch, repl
     intended = {e["payload"]["thread"] for e in _of(rig, ForgeEvent.REPLY_INTENDED)}
     posted = _of(rig, ForgeEvent.REPLY_POSTED)
     assert intended == {"T1", "T2"} and len(posted) == 1
+    assert [(e["thread"], e["outcome"]) for e in _report(rig)["entries"]] == [
+        ("T1", "unsent"),
+        ("T2", "posted"),
+    ]
 
 
 async def test_a_reply_left_unsent_is_never_sent_by_a_later_run(
@@ -298,6 +310,7 @@ async def test_a_reply_left_unsent_is_never_sent_by_a_later_run(
     attempts = list(fake.writes)
     intended = len(_of(rig, ForgeEvent.REPLY_INTENDED))
     assert attempts and not _of(rig, ForgeEvent.REPLY_POSTED)
+    assert _entries(rig) == [("T1", "unsent", "rate_limited")]
 
     # The node's `node_completed` began a new run: its cycles are not this run's.
     fake.write_script = []
@@ -314,6 +327,7 @@ async def test_a_reply_left_unsent_is_never_sent_by_a_later_run(
         completing=True,
     )
 
+    assert _report(rig)["entries"] == []  # the new run lists nothing for T1
     assert fake.writes == attempts
     assert len(_of(rig, ForgeEvent.REPLY_INTENDED)) == intended  # nor is it intended again
 
@@ -384,6 +398,8 @@ async def _declines(rig, monkeypatch, lines, *, seed=None, replies_off=False, mo
 _LINE = {"reviewer": "bot:a", "body": "The walkthrough asks for nothing."}
 
 
+#: What the reply report says about the summary, for the rows that it names.
+_SUMMARY_REPORTED = {"deleted-by-someone": "deleted", "a-refused-line": "refused"}
 _OLD = "the comment as someone left it"
 _NONE = "- a: The walkthrough asks for nothing."
 
@@ -435,7 +451,17 @@ _NONE = "- a: The walkthrough asks for nothing."
     ],
 )
 async def test_top_level_declines_go_in_one_comment(
-    rig, monkeypatch, replies_on, database, seed, lines, replies_off, moved, writes, comment
+    request,
+    rig,
+    monkeypatch,
+    replies_on,
+    database,
+    seed,
+    lines,
+    replies_off,
+    moved,
+    writes,
+    comment,
 ):
     async def seeded(fake):
         """The record holds what Kraft posted before: a summary intent, posted, and
@@ -473,3 +499,111 @@ async def test_top_level_declines_go_in_one_comment(
     else:
         expected = [_summary(rig, comment)]
     assert [c.body for c in fake.comments] == expected
+    named = [e["outcome"] for e in _report(rig)["entries"] if e["kind"] == "summary"]
+    want = _SUMMARY_REPORTED.get(request.node.callspec.id)
+    assert named == ([want] if want else [])
+
+
+def _report(rig) -> dict:
+    return json.loads(replies.report_path(rig.item.run_dirs, rig.item.id).read_text())
+
+
+def _entries(rig) -> list[tuple]:
+    return [(e["thread"], e["outcome"], e["why"]) for e in _report(rig)["entries"]]
+
+
+_DECLINE = {"thread": "T1", "kind": "declined", "body": "The caller reads it, so it stays."}
+
+
+def _t1():
+    return bot_thread("T1", note("N1", "a", "fix"))
+
+
+async def test_the_reply_report_lists_what_was_and_was_not_posted(rig, monkeypatch, replies_on):
+    t1 = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
+    t2 = bot_thread(
+        "T2", note("N2", "a", "rename y"), note("P", "alice", "I disagree", type_="User")
+    )
+    t3 = bot_thread("T3", note("N3", "a", "rename z"), file="repaired.txt")
+    fake = await filed(rig, monkeypatch, t1, t2, t3)
+    rig.verdicts = [
+        {
+            "findings": [{**FLAG, "severity": "minor", "threads": ["T3"]}],
+            "replies": [_DECLINE, {**_DECLINE, "thread": "T2"}],
+        }
+    ]
+    await walk_to_completion(rig)
+
+    assert fake.writes == [("reply", "T1")]
+    assert sorted(_entries(rig)) == [
+        ("T1", "posted", None),
+        ("T2", "refused", "person_written"),
+        ("T3", "not_fixed", "never reached a fix"),
+    ]
+    report = _report(rig)
+    assert report["node_id"] == "feedback"
+    assert all(len(e) == 8 for e in report["entries"])
+    [first] = [e for e in report["entries"] if e["thread"] == "T1"]
+    assert first["bot_last_word"] == "rename x" and first["reviewer"] == "bot:a"
+
+
+async def test_a_finding_still_raised_after_its_cycle_is_not_fixed(
+    item_on, database, run_dirs, replies_on
+):
+    it, node, point, event = await _direct(item_on, database, run_dirs)
+    await event(
+        ChainEvent.FIX_CYCLE_STARTED,
+        {"node_id": node.id, "cycle": 1, "threads": {"T1": _FP}, "head_sha": "B0"},
+    )
+    again = {"node_id": node.id, "cycle": 1, "findings": [_findings.payload_of(_flag())]}
+    await event(ChainEvent.FINDINGS_MEASURED, again)
+
+    [entry] = point._never_fixed()
+    assert (entry["thread"], entry["outcome"], entry["why"]) == (
+        "T1",
+        "not_fixed",
+        "still raised after cycle 1",
+    )
+
+    # Once its "Fixed in" went out it is not listed.
+    iid = record.new_id(it.id)
+    fixed = {
+        "op": "reply",
+        "kind": "fixed",
+        "thread": "T1",
+        "node_id": node.id,
+        "run": 0,
+        "body_sha256": "h",
+    }
+    await database.write(lambda c: record.intend(c, it.id, iid, fixed))
+    posted = forge.models.Posted(("1",), "t", "b")
+    await database.write(lambda c: record.posted(c, it.id, iid, posted, via="send"))
+    assert point._never_fixed() == []
+
+
+def _flag():
+    return _findings.Finding(**{k: v for k, v in FLAG.items() if k != "threads"}, threads=("T1",))
+
+
+async def test_a_fix_with_no_reply_is_reported(rig, monkeypatch, replies_on):
+    fake = await fix_walk(rig, monkeypatch, [], repair={})
+
+    assert fake.writes == []
+    assert _entries(rig) == [("T1", "no_reply", "confirmed; the repair wrote no reply")]
+
+
+@pytest.mark.parametrize(
+    "report_of", ["feedback", "another"], ids=["this-node-s", "another-node-s"]
+)
+async def test_a_completion_with_replies_off_removes_the_report(
+    rig, monkeypatch, replies_on, report_of
+):
+    fake = await filed(rig, monkeypatch, _t1(), bot=BotReviewer(bot="a"))
+    path = replies.report_path(rig.item.run_dirs, rig.item.id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"node_id": report_of, "head": None, "entries": []}))
+
+    await walk_to_completion(rig)
+
+    assert fake.writes == []
+    assert path.exists() is (report_of != "feedback")

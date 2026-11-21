@@ -259,3 +259,20 @@ is declined when no decline is left, leaving it alone when no triage judged the
 current head, and never creating it again after someone deleted it.
 enforced-by: tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[first], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[edited-in-place], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[unchanged], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[nothing-declined-now], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[a-bot-with-replies-off], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[deleted-by-someone], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[a-refused-line], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[no-triage-on-the-current-head]
 origin: src/kraft/executor/replies.py §_Point.summary
+
+## REQ posting-never-parks-and-ends-with-the-node-run
+WHEN a reply cannot be posted at a posting point, the system SHALL NOT park or
+stop the work item, SHALL try again only at later posting points of the same node
+run, and SHALL list every reply of the run still unposted, refused or superseded
+when the node completes, and never post it later.
+enforced-by: tests/executor/test_replies_fix.py::test_the_reply_report_lists_what_was_and_was_not_posted, tests/executor/test_replies_fix.py::test_a_reply_left_unsent_is_never_sent_by_a_later_run, tests/executor/test_replies_fix.py::test_a_failed_read_skips_one_reply_not_the_rest, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads
+origin: src/kraft/executor/replies.py §posting_point -- Omid, 2026-11-20: a reply still unposted when the node completes is listed in the brief and dropped; posting never parks the item.
+
+## REQ the-brief-reads-the-reply-report
+WHEN a node with replies on completes, the system SHALL write what it posted and
+did not, and every finding from a bot thread that never reached a fix, to a
+report the review brief is pointed at, built into its section whenever the
+report lists anything, and SHALL remove its own node's report when the node
+completes with replies off.
+enforced-by: tests/executor/test_replies_fix.py::test_the_reply_report_lists_what_was_and_was_not_posted, tests/executor/test_replies_fix.py::test_a_fix_with_no_reply_is_reported, tests/executor/test_replies_fix.py::test_a_finding_still_raised_after_its_cycle_is_not_fixed, tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[this-node-s], tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[another-node-s], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-beside-the-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-alone], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
+origin: src/kraft/executor/replies.py §_Point.write_report

@@ -44,6 +44,7 @@ class Intent:
     #: duplicate sweep reads. A send that posted cleanly never is.
     ever_unclear: bool = False
     failure: dict | None = None  # the newest reply_send_failed payload, plus "at"
+    why: str | None = None  # the `reply_ended` reason, once it ended
     posted: dict | None = None  # the newest reply_posted payload
 
 
@@ -146,7 +147,7 @@ def fold(rows: Iterable[dict]) -> dict[str, Intent]:
         elif kind == ForgeEvent.REPLY_NOT_FOUND:
             out[cur.id] = replace(cur, state="pending", ever_unclear=True)
         elif kind == ForgeEvent.REPLY_ENDED:
-            out[cur.id] = replace(cur, state=p["outcome"])
+            out[cur.id] = replace(cur, state=p["outcome"], why=p.get("why"))
     return out
 
 
