@@ -168,8 +168,9 @@ origin: src/kraft/adapters/forge/settle.py §decide
 WHERE no reviewer of a node's review wait has replies on, the system SHALL make
 no forge call for replies. A collecting wait with such a reviewer SHALL read the
 login Kraft writes as once and keep it for the wait, and mark each collected note
-Kraft wrote as Kraft's.
-enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer
+Kraft wrote as Kraft's. An unreadable viewer SHALL post nothing at that posting
+point.
+enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads
 origin: src/kraft/adapters/forge/run.py §_collect_review
 
 ## REQ a-triage-reply-respects-the-cap-and-kraft-s-last-word
@@ -181,3 +182,39 @@ over the item's life, deleted, unclear and unrecorded marked ones included, have
 reached the cap.
 enforced-by: tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-person-wrote-in-it], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-kraft-note-edited], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[the-bot-from-a-user-account], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[started-by-a-bot-with-replies-off], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[locked], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[after-kraft], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[at-the-cap], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[an-unclear-send-counts], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[marked-notes-the-record-lost], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[a-fix-reply-does-not-count]
 origin: src/kraft/adapters/forge/replies/gate.py §triage_refusal
+
+## REQ replies-work-only-where-a-fix-loop-can-act
+WHERE a node's review wait names a bot with replies on, but the node has no fix
+loop or no triage among its own steps, or the item has several repositories, the
+system SHALL post nothing for it and SHALL record why once per node run; it SHALL
+do the same when the login Kraft writes as is one of the configured bots. A node
+whose review wait names no bot with replies on SHALL make no forge call for
+replies and record nothing.
+enforced-by: tests/executor/test_replies.py::test_replies_have_no_effect_where_nothing_can_act[no-fix-loop], tests/executor/test_replies.py::test_replies_have_no_effect_where_nothing_can_act[no-triage], tests/executor/test_replies.py::test_replies_have_no_effect_where_nothing_can_act[the-viewer-is-the-bot], tests/executor/test_replies.py::test_posting_point_has_no_effect_on_a_multi_repo_item_or_with_no_forge[multi-repo], tests/executor/test_replies.py::test_posting_point_has_no_effect_on_a_multi_repo_item_or_with_no_forge[no-forge], tests/executor/test_replies.py::test_replies_off_posts_nothing_and_asks_the_forge_nothing, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads
+origin: src/kraft/executor/replies.py §_post -- Omid, 2026-11-20: on a node without a fix loop, replies have no effect.
+
+## REQ triage-replies-come-from-the-latest-triage
+WHEN Kraft posts a triage's replies, the system SHALL take them only from the
+node's latest triage in its current run that started an agent and finished with a
+result, SHALL NOT take any from a skipped triage, SHALL supersede a reply of an
+earlier session, and SHALL NOT post a reply in a thread the same triage raised
+as a finding.
+enforced-by: tests/executor/test_replies.py::test_a_reply_never_goes_beside_a_finding_on_the_same_thread, tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-skip-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-failure-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[before-the-run-began], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[a-thread-not-collected]
+origin: src/kraft/executor/replies.py §latest_triage
+
+## REQ a-triage-reply-is-posted-only-on-a-current-head
+WHEN Kraft is about to post a triage reply, IF the triage session's head, its
+collection's head, the checkout's head and the forge's head of the merge request
+are not one commit, or the thread holds a bot's or a person's note the triage
+never read, THEN the system SHALL supersede it and never post it.
+enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-forge-head-moved], tests/executor/test_replies.py::test_the_thread_moved_since_the_triage_read_it
+origin: src/kraft/executor/replies.py §_Point.stale
+
+## REQ a-reply-is-intended-once-whatever-the-wakes
+WHEN a node's measurement returns again and again on the same head (a parked wait
+woken), the system SHALL create one intent per reply and post it at most once: a
+write whose answer was lost SHALL be reconciled at a later posting point, not
+sent again, and a copy that lands late SHALL be found and deleted at a later
+posting point.
+enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_posted_once_across_wakes, tests/executor/test_replies.py::test_a_lost_write_is_reconciled_not_sent_again, tests/executor/test_replies.py::test_a_late_copy_of_an_unclear_write_is_deleted
+origin: src/kraft/executor/replies.py §_Point.intend

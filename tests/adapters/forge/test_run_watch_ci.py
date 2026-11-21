@@ -10,6 +10,10 @@ from pathlib import Path
 
 import pytest
 from support.harness import own_files
+from support.review_rig import A as _A
+from support.review_rig import feedback as _feedback
+from support.review_rig import review_node as _review_node
+from support.review_rig import rig  # noqa: F401 -- the fixture
 
 from kraft import events, store
 from kraft.adapters import forge
@@ -19,13 +23,7 @@ from kraft.executor.round_prompts import CI_LOG_NOTE
 
 from .test_run_chain import RED, _run_task
 from .test_run_push import on_branch  # noqa: F401 -- the fixture
-from .test_run_review import (
-    _A,
-    _both_halves_changed,
-    _feedback,
-    _review_node,
-    rig,  # noqa: F401 -- the fixture
-)
+from .test_run_review import _both_halves_changed
 
 _WAIT, _CI = "feedback.settle.review", "feedback.ci.await_ci"
 

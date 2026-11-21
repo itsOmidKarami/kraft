@@ -54,6 +54,10 @@ class ForgeEvent(StrEnum):
     REPLY_ENDED = "reply_ended"
     #: A duplicate check deleted a later copy of a reply and kept the earliest.
     REPLY_DUPLICATE_DELETED = "reply_duplicate_deleted"
+    #: A node's review wait names a bot with replies on, but nothing in the node can
+    #: act on a reply (no fix loop, no triage, a multi-repo item), the forge cannot
+    #: be resolved, or Kraft writes as one of the bots. Once per node run and reason.
+    REPLIES_INERT = "replies_inert"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
     #: Kraft rewrote the head the final review approved itself -- a clean
     #: rebase, a pointer bump -- and pinned the new one (`kraft.reviewed_head`).
@@ -94,6 +98,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.REPLY_NOT_FOUND: _PLAIN,
         ForgeEvent.REPLY_ENDED: _PLAIN,
         ForgeEvent.REPLY_DUPLICATE_DELETED: _PLAIN,
+        ForgeEvent.REPLIES_INERT: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
         ForgeEvent.REVIEWED_HEAD_REPINNED: _PLAIN,
         ForgeEvent.MERGE_REFUSED_UNREVIEWED: _PLAIN,

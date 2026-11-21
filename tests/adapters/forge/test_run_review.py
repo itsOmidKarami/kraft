@@ -2,6 +2,8 @@
 reviewers reach the task (`dispatch._reviewers`), and where a task may name
 them. What each reviewer's read returns is test_automated_review.py."""
 
+# ruff: noqa: F811 -- `rig` is an imported fixture, taken by name.
+
 from __future__ import annotations
 
 import json
@@ -9,20 +11,21 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import ValidationError
-from support.harness import commit_all, entry_of, fake_harness_home, git, v1_resolved, write
+from support.harness import commit_all, entry_of, v1_resolved, write
+from support.review_rig import A as _A
+from support.review_rig import B as _B
+from support.review_rig import feedback as _feedback
+from support.review_rig import review_node as _review_node
+from support.review_rig import rig  # noqa: F401 -- the fixture
 
-from kraft import builtins as _builtins
-from kraft import executor, policy, store, waits
+from kraft import executor, store, waits
 from kraft.adapters import forge
-from kraft.automated_review import BotReviewer, CheckReviewer, as_reviewers
-from kraft.executor import dispatch
+from kraft.automated_review import CheckReviewer, as_reviewers
 
 from .nodes import forge_node
 from .test_run_chain import _multi_repo_item, _run_task, _with_origin
 
-ROOT = Path(__file__).resolve().parents[3]
 _BOT = {"bot": "coderabbitai"}
 _TASK_BOT = {"bot": "task-bot"}
 _ITEM_CHECK = {"check": "item-check"}
@@ -206,156 +209,6 @@ def test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node(nodes, refused):
 
 
 # --- the collect path ------------------------------------------------------------
-
-_A, _B = BotReviewer(bot="a"), BotReviewer(bot="b")
-
-
-def _feedback(reviewer, active=None, *, threads=()):
-    """What `reviewer` has said, its newest activity `active` seconds after the
-    clock's start (the item's head is dated there)."""
-    from datetime import UTC, datetime
-
-    at = None if active is None else datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=active)
-    return forge.ReviewerFeedback(
-        reviewer,
-        at,
-        threads=tuple({"id": t, "file": "calc.py", "line": 1, "body": f"fix {t}"} for t in threads),
-    )
-
-
-def _shipped_triage_step() -> dict:
-    """The step the shipped `post_draft_feedback` runs after its review wait,
-    its task as the shipped library defines it, on the test's fake harness."""
-    library = yaml.safe_load((ROOT / "config" / "library.yaml").read_text())
-    [step] = [
-        s for s in library["nodes"]["post_draft_feedback"]["steps"] if s["id"] == "review_feedback"
-    ]
-    [task] = step["tasks"]
-    shipped = library["tasks"][task["extends"]]
-    # The harness and what it selects are the test's own; everything else is the library's.
-    own = {k: v for k, v in shipped.items() if k not in ("harness", "profile", "skill")}
-    return {**step, "tasks": [{"id": task["id"], **own, "harness": "fake"}]}
-
-
-def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False, watch_ci=False):
-    """One node: the review wait, and (when `reads`) a task that reads what it
-    collected, in the step after. `loop` gives it the recovery the shipped
-    `post_draft_feedback` has: `on_failure` for a failed check, a fix loop for
-    findings."""
-    wait = {
-        "id": "review",
-        "kind": "forge",
-        "target": "mr.automated_review",
-        "config": {"reviewers": [r.model_dump(exclude_none=True) for r in reviewers]},
-        "policy": {"total_time_cap_minutes": minutes},
-        "wait": {"polling": {"initial_interval": "30s", "max_interval": "2m"}},
-    }
-    if watch_ci:
-        wait["config"]["watch_ci"] = True
-    steps = [{"id": "settle", "tasks": [wait]}]
-    if reads:
-        steps.append(_shipped_triage_step())
-    if watch_ci:
-        steps.append(
-            {"id": "ci", "tasks": [{"id": "await_ci", "kind": "forge", "target": "mr.ci"}]}
-        )
-    node = {"id": "feedback", "kind": "exec", "steps": steps}
-    if loop:
-
-        def repair(id):
-            return {"id": id, "kind": "agent", "harness": "fake", "prompt": "Fix it."}
-
-        node["on_failure"] = {"steps": [{"id": "checks", "tasks": [repair("repair_checks")]}]}
-        node["fix_loop"] = {
-            "steps": [{"id": "fix", "tasks": [repair("repair")]}],
-            "max_attempts": 2,
-        }
-    return node
-
-
-@pytest.fixture
-def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
-    """`await rig(node, fake)` files the node as an item; `await rig.walk()`
-    walks it from its own cursor with the clock where `rig.clock` put it.
-    `rig.triaged` lists the tasks the walk launched an agent for, and each
-    `triage` among them answers the next of `rig.verdicts` (the findings it
-    writes) as a session of its own."""
-
-    class Rig:
-        triaged: list[str] = []
-        #: The instruction each launch was given, parallel to `triaged`.
-        instructions: list[str] = []
-        verdicts: list[list[dict]] = []
-
-        async def __call__(self, node, fake):
-            monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-            # A harness for the reading task to select; what it launches is
-            # replaced below, since only whether it is reached is asked.
-            monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["true"])))
-            self.triaged, self.instructions, self.verdicts = [], [], []
-
-            async def launched(db, run_dirs, t, node, row, worktree, *, task, common, **_):
-                self.triaged.append(task.path)
-                self.instructions.append(_.get("instruction", ""))
-                if ".fix_loop." in task.path:
-                    # A repair that changes nothing stops the loop.
-                    (Path(worktree) / "repaired.txt").write_text("x")
-                    git(worktree, "add", "repaired.txt")
-                    git(worktree, "commit", "-qm", "repair")
-                found = self.verdicts.pop(0) if t.id == "triage" and self.verdicts else []
-                _, log, result = await _builtins.start_session(db, run_dirs, **common)
-                status = await _builtins.finish_session(
-                    db,
-                    log,
-                    result,
-                    session_id=common["session_id"],
-                    work_item_id=common["work_item_id"],
-                    status="done",
-                    log="scripted\n",
-                    findings=found,
-                )
-                return status, True
-
-            monkeypatch.setattr(dispatch, "_launch_agent", launched)
-            self.item = await item_on([node])
-            return self
-
-        def moment(self, seconds):
-            return wait_clock.start + timedelta(seconds=seconds)
-
-        def clock(self, seconds):
-            wait_clock.now = self.moment(seconds)
-
-        async def walk(self):
-            if self.item.status() == "waiting":
-                await database.write(lambda c: store.mark_reentered(c, self.item.id))
-            return await executor.run(
-                database,
-                run_dirs,
-                work_item_id=self.item.id,
-                policy=policy.Policy(
-                    loops={},
-                    default=policy.Cap(attempts=3, wall_clock_s=3600),
-                    auto_escalate_stuck=False,
-                ),
-                launch=executor.LaunchContext(
-                    repo_entry=entry_of({"setup_command": "", "forge": "github"})
-                ),
-            )
-
-        def wait_session(self) -> dict:
-            [wait] = [
-                s
-                for s in self.item.sessions("feedback")
-                if s["hook_point"] == "feedback.settle.review"
-            ]
-            return wait
-
-        def collection(self) -> dict | None:
-            path = self.item.files(self.wait_session()["id"]).folder / "bot_feedback.json"
-            return json.loads(path.read_text()) if path.exists() else None
-
-    return Rig()
 
 
 @pytest.mark.parametrize(

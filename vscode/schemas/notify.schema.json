@@ -102,6 +102,7 @@
           "remote_machine_reconnected",
           "remote_step_given_up",
           "remote_step_waiting",
+          "replies_inert",
           "reply_agent_failed",
           "reply_agent_skipped",
           "reply_agent_wrote",

@@ -17,6 +17,7 @@ from kraft.adapters import forge as forge_mod
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor import read_only as _read_only
+from kraft.executor import replies as _replies
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -2023,6 +2024,10 @@ async def _walk_node_once(
                     facts=facts or None,
                     escalatable=not _red_pipeline_only(failed),
                 )
+        # Only records `no_fix_loop` when a bot has replies on: nothing here can act.
+        await _replies.posting_point(
+            db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
+        )
         await node_runs.completed(
             db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
         )
@@ -2109,6 +2114,11 @@ async def _walk_node_once(
             spent=spent,
             preserve=preserve,
         )
+        # Before the walk acts on the verdict: the fix loop never starts ahead of
+        # the replies it may answer. Not after a pause (a person said stop) or a
+        # read-only violation (the triage changed the tree: its replies are not trusted).
+        if verdict not in ("paused", READ_ONLY_VIOLATED):
+            await _replies.posting_point(db, run_dirs, work_item_id, node, row, worktree, launch)
         resume_step = 0
         preserve = frozenset()
         if verdict == BASE_MOVED:
@@ -2189,6 +2199,11 @@ async def _walk_node_once(
                 loop_severities=loop_severities,
                 spent=spent,
             )
+            # A doubted repair re-measured nothing: no posting point.
+            if r_verdict not in (REPAIR_DOUBTED, "paused", READ_ONLY_VIOLATED):
+                await _replies.posting_point(
+                    db, run_dirs, work_item_id, node, row, worktree, launch
+                )
             # `recover_node`'s re-measure is a real `dispatch.measure_node` call
             # against the node's own tasks again -- every sentinel that call can
             # produce for the ordinary top-of-loop measure can just as well come
@@ -2222,6 +2237,9 @@ async def _walk_node_once(
             if r_verdict == "ok":
                 if loop.early:
                     await db.write(lambda c: store.end_measurement(c, work_item_id))
+                await _replies.posting_point(
+                    db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
+                )
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,
@@ -2441,6 +2459,9 @@ async def _walk_node_once(
             if ended_early:
                 await _continue()
                 continue
+            await _replies.posting_point(
+                db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
+            )
             await node_runs.completed(
                 db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
             )
@@ -2603,6 +2624,9 @@ async def _walk_node_once(
                     # keeps those findings from coming back on this commit.
                     await _continue()
                     continue
+                await _replies.posting_point(
+                    db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
+                )
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,
