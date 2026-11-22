@@ -19,6 +19,9 @@ export const RESOLVED = {
     daily_usd: leaf(50),
     max_attempts: { default: leaf(3), maximum: leaf<number>(null) },
     timeout_minutes: { default: leaf(60), maximum: leaf(180) },
+    reply_cap_per_thread: { default: leaf<number>(null), maximum: leaf<number>(null) },
+    reply_rounds_per_head: { default: leaf<number>(null), maximum: leaf<number>(null) },
+    reply_timeout_minutes: { default: leaf<number>(null), maximum: leaf<number>(null) },
   },
   loops: {
     default: { attempts: 3, wall_clock_s: 3600 },

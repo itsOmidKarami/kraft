@@ -50,6 +50,24 @@ export function Loops({ ctx }: { ctx: Ctx }) {
             <PolicyCell draft={draft} k={KEYS.wallMax} label="wall clock maximum" value={p.limits.timeout_minutes.maximum.value} bound change={changes.get(KEYS.wallMax.key)} problem={problemAt(ctx, KEYS.wallMax.key)} />
             <span className="pol-help">{live.length ? `all ${live.length} ${live.length === 1 ? "loop" : "loops"} in published chains · a chain or node may set its own` : "—"}</span>
           </div>
+          <div className="pol-row" role="group" aria-label="Replies per thread">
+            <span className="pol-k">replies per thread</span>
+            <PolicyCell draft={draft} k={KEYS.replyCapDefault} label="replies per thread default" value={p.limits.reply_cap_per_thread.default.value} change={changes.get(KEYS.replyCapDefault.key)} problem={problemAt(ctx, KEYS.replyCapDefault.key)} />
+            <PolicyCell draft={draft} k={KEYS.replyCapMax} label="replies per thread maximum" value={p.limits.reply_cap_per_thread.maximum.value} bound change={changes.get(KEYS.replyCapMax.key)} problem={problemAt(ctx, KEYS.replyCapMax.key)} />
+            <span className="pol-help">used where a review bot has replies on; unset reads 2</span>
+          </div>
+          <div className="pol-row" role="group" aria-label="Reply rounds per head">
+            <span className="pol-k">reply rounds per head</span>
+            <PolicyCell draft={draft} k={KEYS.replyRoundsDefault} label="reply rounds per head default" value={p.limits.reply_rounds_per_head.default.value} change={changes.get(KEYS.replyRoundsDefault.key)} problem={problemAt(ctx, KEYS.replyRoundsDefault.key)} />
+            <PolicyCell draft={draft} k={KEYS.replyRoundsMax} label="reply rounds per head maximum" value={p.limits.reply_rounds_per_head.maximum.value} bound change={changes.get(KEYS.replyRoundsMax.key)} problem={problemAt(ctx, KEYS.replyRoundsMax.key)} />
+            <span className="pol-help">used where a review bot has replies on; unset reads 2</span>
+          </div>
+          <div className="pol-row" role="group" aria-label="Reply wait">
+            <span className="pol-k">reply wait</span>
+            <PolicyCell draft={draft} k={KEYS.replyTimeoutDefault} label="reply wait default" value={p.limits.reply_timeout_minutes.default.value} change={changes.get(KEYS.replyTimeoutDefault.key)} problem={problemAt(ctx, KEYS.replyTimeoutDefault.key)} />
+            <PolicyCell draft={draft} k={KEYS.replyTimeoutMax} label="reply wait maximum" value={p.limits.reply_timeout_minutes.maximum.value} bound change={changes.get(KEYS.replyTimeoutMax.key)} problem={problemAt(ctx, KEYS.replyTimeoutMax.key)} />
+            <span className="pol-help">used where a review bot has replies on; unset reads 5 minutes</span>
+          </div>
         </div>
         <p className="pol-note">{LOOP_WINS}</p>
       </section>

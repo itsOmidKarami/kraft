@@ -8,7 +8,7 @@ export const SECTIONS: { id: Section; label: string; sub: string; icon: string }
 /** The section a `policy.yaml` key belongs to (Decisions §12: Limits, Loops, Housekeeping). */
 export function sectionOfKey(key: string): Section | null {
   if (/^(budget\.|(defaults|maxima)\.(work_item|nodes|steps|tasks)\.)/.test(key)) return "limits";
-  if (/^((defaults|maxima)\.(max_attempts|timeout_minutes)|loops\.|default\.|findings\.|auto_escalate_|auto_review_attempts)/.test(key)) return "loops";
+  if (/^((defaults|maxima)\.(max_attempts|timeout_minutes|reply_cap_per_thread|reply_rounds_per_head|reply_timeout_minutes)|loops\.|default\.|findings\.|auto_escalate_|auto_review_attempts)/.test(key)) return "loops";
   if (/^(max_concurrent|archive\.|storage\.|attribution\.|rate_limit_retries|forge_cli_timeout_s)/.test(key)) return "housekeeping";
   return null;
 }

@@ -119,6 +119,16 @@ describe("Policy loops (N.1)", () => {
     expect(screen.getByRole("switch", { name: /auto-escalate/ })).toBeChecked();
   });
 
+  it("lists the reply limits under the fix loops and sends their keys", async () => {
+    const { calls } = open("loops");
+    const rows = ["replies per thread", "reply rounds per head", "reply wait"];
+    for (const r of rows) expect(await screen.findByRole("button", { name: new RegExp(`^${r}`) })).toHaveTextContent("default not set");
+    await userEvent.click(screen.getByRole("button", { name: /^reply wait/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Edit maximum/ }));
+    await userEvent.type(screen.getByLabelText("reply wait maximum", { selector: "input" }), "9{Enter}");
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "limits", key: "maxima.reply_timeout_minutes", value: 9 }]));
+  });
+
   it("a loop's own attempts are written with set_loop; a blank is refused", async () => {
     const { calls } = open("loops");
     await userEvent.click(await screen.findByRole("button", { name: /^merge_request_feedback · default/ }));

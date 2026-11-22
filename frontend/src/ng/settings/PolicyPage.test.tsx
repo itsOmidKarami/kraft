@@ -221,6 +221,18 @@ describe("Policy page: Loops", () => {
     await edit(/^wall clock default, 60 min/, "45");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "limits", key: "defaults.timeout_minutes", value: 45 }));
   });
+
+  it("sets the reply limits through limits keys", async () => {
+    mount("/settings/policy/loops");
+    await screen.findByRole("group", { name: "Replies per thread" });
+    await edit(/^replies per thread default, not set/, "3");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "limits", key: "defaults.reply_cap_per_thread", value: 3 }));
+    await edit(/^reply rounds per head maximum, no bound/, "4");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "limits", key: "maxima.reply_rounds_per_head", value: 4 }));
+    await edit(/^reply wait maximum, no bound/, "9");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "limits", key: "maxima.reply_timeout_minutes", value: 9 }));
+    expect(screen.getAllByText(/used where a review bot has replies on/)).toHaveLength(3);
+  });
 });
 
 describe("Policy page: Housekeeping", () => {

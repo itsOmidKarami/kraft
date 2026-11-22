@@ -37,6 +37,9 @@ export interface PolicyResolved {
     daily_usd: Leaf<number>;
     max_attempts: { default: Leaf<number>; maximum: Leaf<number> };
     timeout_minutes: { default: Leaf<number>; maximum: Leaf<number> };
+    reply_cap_per_thread: { default: Leaf<number>; maximum: Leaf<number> };
+    reply_rounds_per_head: { default: Leaf<number>; maximum: Leaf<number> };
+    reply_timeout_minutes: { default: Leaf<number>; maximum: Leaf<number> };
   };
   loops: {
     default: { attempts: number; wall_clock_s: number };
