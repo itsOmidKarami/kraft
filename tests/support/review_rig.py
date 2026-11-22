@@ -273,8 +273,8 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
                 self.instructions.append(_.get("instruction", ""))
                 repair = ".fix_loop." in task.path and t.id != "judge"  # the judge only answers
                 if repair:
-                    # A repair that changes nothing stops the loop.
-                    (Path(worktree) / "repaired.txt").write_text("x")
+                    # A repair that changes nothing stops the loop: each one writes something new.
+                    (Path(worktree) / "repaired.txt").write_text(f"x{len(self.triaged)}")
                     git(worktree, "add", "repaired.txt")
                     git(worktree, "commit", "-qm", "repair")
                 if AgentInput.BOT_FEEDBACK in t.inputs:

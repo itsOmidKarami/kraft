@@ -6,6 +6,7 @@ times. Through the executor against a `FakeForge` with live bot threads (`suppor
 
 import json
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from support.bot_threads import bot_thread, kraft_note, note
@@ -162,9 +163,6 @@ async def test_a_round_starts_from_the_judge_s_stop_downgrade_exit(rig, monkeypa
     assert fake.writes == [("reply", "T2")]
 
 
-ANSWER_AT = "2026-01-01T00:01:40Z"  # after Kraft's first reply (+1 s) and the first triage's read
-
-
 async def _walk_answering(rig, fake, answers, *, walks=14, step=63):
     """Walk to completion; once a reply round has started, the bot answers thread T1 with the next
     of `answers` (a body) -- once per round. Returns each walk's status."""
@@ -175,7 +173,9 @@ async def _walk_answering(rig, fake, answers, *, walks=14, step=63):
         if seen[-1] == "completed":
             return seen
         if len(events_of(rig, "reply_round_started")) > answered and answered < len(answers):
-            bot_says(fake, "T1", note(f"A{answered}", "a", answers[answered], at=ANSWER_AT))
+            # The bot answers just after the clock's now: after every read so far, before the next.
+            at = (waits.now() + timedelta(seconds=1)).isoformat()
+            bot_says(fake, "T1", note(f"A{answered}", "a", answers[answered], at=at))
             answered += 1
     raise AssertionError(f"not completed after {walks} walks: {seen}")
 
