@@ -18,6 +18,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor import read_only as _read_only
 from kraft.executor import replies as _replies
+from kraft.executor import reply_round as _reply_round
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -2342,6 +2343,15 @@ async def _walk_node_once(
         # the stuck detector.
         dropped_findings: dict[str, int] = {}
         has_session: dict[str, bool] = {}
+        # A measurement the node makes after Kraft replied, on the head it was about to
+        # complete on (`reply_round.current`): not `head_sha`, which is `rev-parse HEAD`, since
+        # an in-place item's head is its branch tip.
+        in_reply = (
+            await _reply_round.current(
+                db, work_item_id, node.id, lambda: _reply_round.item_head(row, worktree)
+            )
+            is not None
+        )
         found, reported_hooks = dispatch.collect_findings(
             db,
             work_item_id,
@@ -2350,6 +2360,7 @@ async def _walk_node_once(
             dropped=dropped_findings,
             has_session=has_session,
             run_dirs=run_dirs,
+            reply_round=in_reply,
         )
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
@@ -2368,10 +2379,13 @@ async def _walk_node_once(
             found,
             known={f.fingerprint for f in [*(previous_found or []), *previous_unmeasured]},
         )
-        if loop.early:
+        if loop.early or in_reply:
             # What the fix loop declined on this commit is not collected again: not
-            # recorded, not eligible, not in the list to fix, not before the judge.
-            declined = dispatch.declined_fingerprints(db, work_item_id, node.id, head_sha)
+            # recorded, not eligible, not in the list to fix, not before the judge. A reply
+            # round honours every decline on its head, whatever the node's shape.
+            declined = dispatch.declined_fingerprints(
+                db, work_item_id, node.id, head_sha, every=in_reply
+            )
             found = [f for f in found if f.fingerprint not in declined]
         # Parallel to `found`, never a dict keyed on fingerprint: two findings in
         # one round can share a tag if the reviewer pointed both at the same
@@ -2395,7 +2409,7 @@ async def _walk_node_once(
                 sorted(p for p, ran in has_session.items() if not ran),
                 found,
             )
-            if ended_early
+            if ended_early or (in_reply and not all(has_session.values()))
             else []
         )
         # Built here rather than inside the lambda, the same way `judge_payload`
@@ -2422,6 +2436,13 @@ async def _walk_node_once(
                 for f, s in zip(found, as_reported, strict=True)
             ],
             "fingerprints": prints,
+            # Only in a reply round, and an amend keeps the mark of the record it amends: the
+            # judge reads such a record as following no fix. Absent otherwise.
+            **(
+                {"reply_round": True}
+                if in_reply or (amends is not None and latest["payload"].get("reply_round"))
+                else {}
+            ),
             # Only on an early end, and only when it left some: every other record
             # keeps today's shape. Apart from `findings`, so never eligible or fixed.
             **({"unmeasured": unmeasured} if unmeasured else {}),
