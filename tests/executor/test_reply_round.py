@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from support.harness import v1_node, v1_task
 
@@ -59,9 +61,24 @@ async def test_in_a_reply_round_reads_the_event_the_record_and_the_head(
     it = await item_on(_CHAIN, _NODE)
     await _seed(database, it.id, *seeded)
 
-    got = reply_round.current(database, it.id, _NODE, head if callable(head) else (lambda: head))
+    head_of = head if callable(head) else (lambda: head)
+    got = await reply_round.current(database, it.id, _NODE, head_of)
 
     assert (got.head, got.round, got.threads) == expected if expected else got is None
+
+
+async def test_the_head_is_read_off_the_event_loop(item_on, database):
+    it = await item_on(_CHAIN, _NODE)
+    await _seed(database, it.id, _round())
+    loop_thread = threading.get_ident()
+    ran_on = []
+
+    def head_of():
+        ran_on.append(threading.get_ident())
+        return "h1"
+
+    assert await reply_round.current(database, it.id, _NODE, head_of) is not None
+    assert ran_on and ran_on != [loop_thread]
 
 
 @pytest.mark.parametrize(

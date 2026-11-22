@@ -1903,7 +1903,7 @@ async def _dispatch_task_in(
         # round asks (`current` reads the head only then), so a node with none pays a DB read.
         reply = None
         if t.target is ForgeAction.MR_AUTOMATED_REVIEW:
-            round_ = _reply_round.current(
+            round_ = await _reply_round.current(
                 db,
                 work_item_row["id"],
                 node.id,

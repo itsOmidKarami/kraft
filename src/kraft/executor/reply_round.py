@@ -4,6 +4,7 @@ does not move), so the per-head limit counts its events in the run."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -38,11 +39,12 @@ def item_head(row, worktree) -> str | None:
     return git_read(Path(worktree), "rev-parse", inplace.head_ref(row)) if worktree else None
 
 
-def current(db, work_item_id: str, node_id: str, head_of) -> ReplyRound | None:
+async def current(db, work_item_id: str, node_id: str, head_of) -> ReplyRound | None:
     """The reply round `node_id` is in: its newest `reply_round_started` of this run, no
     `findings_measured` of the node after it, and the item's head (`head_of()`) still the head
     the event names. `head_of` is called only once an open event is found, so a repository
-    that never starts a round pays a DB read and no `git rev-parse`."""
+    that never starts a round pays a DB read and no `git rev-parse`; it runs on a thread, since
+    that is a git call and the caller is on the event loop."""
 
     def read(c) -> ReplyRound | None:
         found = None
@@ -57,7 +59,10 @@ def current(db, work_item_id: str, node_id: str, head_of) -> ReplyRound | None:
         return found
 
     found = db.read(read)
-    return found if found is not None and found.head == head_of() else None
+    if found is None:
+        return None
+    head = await asyncio.to_thread(head_of)
+    return found if found.head == head else None
 
 
 def started_count(c, work_item_id: str, node_id: str, head: str) -> int:
