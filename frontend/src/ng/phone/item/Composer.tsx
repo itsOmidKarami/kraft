@@ -1,7 +1,7 @@
 import { useReason } from "../../ui/Reason";
 import { ADD_NOTE, WRITE_FIRST } from "../../ui/reasons";
 import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
-import { nameOf } from "../../board/rowText";
+import { mrRefText, nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -120,7 +120,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
 
   const flagLabel =
     kind === "escalate" && (item.escalation_threads?.length ?? 0) > 0 ? "Start a new thread"
-    : kind === "cancel" && preview?.mr?.state === "open" ? `Also close !${preview.mr.ref} on the forge`
+    : kind === "cancel" && preview?.mr?.state === "open" ? `Also close ${mrRefText({ number: preview.mr.ref, url: preview.mr.url })} on the forge`
     : kind === "complete" ? "Also close its beads"
     : null;
   const target = spec.target?.(item) ?? null;

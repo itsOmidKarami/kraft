@@ -1,7 +1,7 @@
 import type { KraftEvent } from "../../types";
 import type { EventType } from "../../types/vocab.generated";
 import { elapsed } from "../../format";
-import { gateName, nameOf, queuedVerbWords, waitingForCheckout } from "../board/rowText";
+import { gateName, mrRefText, nameOf, queuedVerbWords, waitingForCheckout } from "../board/rowText";
 import { taskName } from "./paths";
 
 type Nodes = Parameters<typeof nameOf>[0];
@@ -43,6 +43,9 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
   const at = node && nameOf(nodes, node);
   // A gate the event names (`gate`), else the node it is on, each as a reader names it.
   const gate = p.gate ? gateName(nodes, s(p.gate)) : at;
+  // A merge request's number with its forge's sign (`mrRefText`); a missing
+  // number keeps the old `!` alone, as the line read before.
+  const mrRef = (n: unknown) => (n != null ? mrRefText({ number: Number(n), url: typeof p.url === "string" ? p.url : null }) : "!");
   switch (e.type) {
     case "work_item_created": return "filed";
     case "node_started": return `${at} started`;
@@ -93,9 +96,9 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
     case "work_item_restored": return "restored";
     case "one_off_chain_approved": return "one-off chain approved";
-    case "mr_opened": return `MR !${s(p.number)} opened`;
-    case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
-    case "mr_reopened": return `MR !${s(p.ref)} reopened`;
+    case "mr_opened": return `MR ${mrRef(p.number)} opened`;
+    case "mr_closed": return `MR ${mrRef(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
+    case "mr_reopened": return `MR ${mrRef(p.ref)} reopened`;
     case "merge_refused_unreviewed":
       return p.source === "forge"
         ? `${at} · not merged: a commit reached the merge request after the review; ${p.fast_forwarded ? "it is on the item's branch to review" : "pull it into the branch by hand"}`

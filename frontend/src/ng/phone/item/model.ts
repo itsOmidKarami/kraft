@@ -10,7 +10,7 @@ import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
-import { CHECKOUT_FREES, gateName, IN_USE_BY, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../../board/rowText";
+import { CHECKOUT_FREES, gateName, IN_USE_BY, mrRefText, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../../board/rowText";
 import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, slicesWaitText, waitTitle, REMOVE_FROM_QUEUE, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
@@ -119,10 +119,11 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         }
         case "mr_closed": {
           const ref = str(facts.ref) ?? (item.mr_ref ? String(item.mr_ref.number) : "");
+          const refText = ref ? mrRefText({ number: Number(ref), url: str(facts.url) ?? item.mr_ref?.url ?? null }) : "!";
           const closed = [...events].reverse().find((e) => e.type === "mr_closed");
           const by = str(closed?.payload.by);
           return {
-            tone: "warn", title: `MR !${ref} was closed on the forge`,
+            tone: "warn", title: `MR ${refText} was closed on the forge`,
             where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
             text: MR_SYNC_STOPPED, facts: [],
           };
@@ -155,7 +156,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         facts: broken ? [["broken by", broken.by, broken.by], ...(broken.bead ? [["follow-up", broken.bead] as [string, string]] : [])] : [],
       };
     }
-    case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: doneText(item), facts: spent(item) };
+    case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR ${mrRefText(item.mr_ref)} merged` : undefined, text: doneText(item), facts: spent(item) };
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
       const at = str(ev?.payload.node_id) ?? item.current_node_id;
@@ -265,7 +266,7 @@ export function kebabOf(item: ItemDetail): Act[] {
   // The desktop's "Check the repo settings": a failed card whose cause the repo's settings can answer (`failedFix`).
   if (status === "failed" && failedFix(item) === "repo") out.push(a("repo", CHECK_REPO_SETTINGS));
   if (item.current_node_id) out.push(a("settings", "Item settings"));
-  if (item.mr_ref) out.push(a("open-mr", `Open MR !${item.mr_ref.number}`));
+  if (item.mr_ref) out.push(a("open-mr", `Open MR ${mrRefText(item.mr_ref)}`));
   out.push(a("duplicate", "Duplicate"));
   if (hs.panel.includes("archive") && archivable(item)) out.push(a("archive", "Archive"));
   if (hs.panel.includes("complete")) out.push(a("complete", MARK_COMPLETE));

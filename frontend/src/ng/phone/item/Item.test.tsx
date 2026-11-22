@@ -467,6 +467,13 @@ describe("the other composers (C.7)", () => {
     expect(screen.queryByText(/branch|worktree/)).toBeNull();
   });
 
+  it("Cancel names a GitHub MR with # on the close switch", async () => {
+    mount(item("running"), "/work-items/w1?compose=cancel", {
+      "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "kraft/x", worktree: "/w", findings: 2, threads: 1 }, mr: { ref: 142, url: "https://github.com/o/r/pull/142", state: "open" }, spend: { spent_usd: 3.72, cap_usd: 10 } }],
+    });
+    await screen.findByRole("switch", { name: "Also close #142 on the forge" });
+  });
+
   it("keeps a refusal under the button and the text in the box", async () => {
     mount(gateItem(), "/work-items/w1?compose=reject", { "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await userEvent.type(await screen.findByRole("textbox"), "no");

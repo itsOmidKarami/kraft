@@ -534,6 +534,31 @@ describe("StateCard", () => {
     expect(h.onCancel).toHaveBeenCalled();
   });
 
+  it("MR closed on GitHub reads #N on the card and the Reopen button", async () => {
+    const calls = stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [
+      { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
+      { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
+    ]] });
+    const { h } = show({ display_status: "needs_you", stop: stop("mr_closed", { node: "mr_checks", task: null, facts: { ref: 142, url: "https://github.com/o/r/pull/142" } }) });
+    const card = screen.getByRole("region", { name: "MR #142 was closed on the forge" });
+    await within(card).findByText(/closed by mara/);
+    await userEvent.click(within(card).getByRole("button", { name: "Reopen #142" }));
+    await waitFor(() => expect(posts(calls)).toEqual([
+      { method: "POST", path: "/work-items/w1/reopen-mr", body: {} },
+    ]));
+    expect(h.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("MR closed without a URL in the stop reads #N from the item's MR ref", async () => {
+    stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [
+      { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
+      { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
+    ]] });
+    show({ display_status: "needs_you", stop: stop("mr_closed", { node: "mr_checks", task: null, facts: { ref: 142 } }), mr_ref: { number: 142, url: "https://github.com/o/r/pull/142" } });
+    const card = screen.getByRole("region", { name: "MR #142 was closed on the forge" });
+    within(card).getByRole("button", { name: "Reopen #142" });
+  });
+
   it("done leads with the outcome: the MR, the diff, spend against the cap, the time taken; Archive is its one action", async () => {
     const calls = stubFetch({ ...WRITES, "POST /work-items/w1/archive": [200, {}] });
     const files = [{ path: "a.py", insertions: 12, deletions: 3 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];

@@ -507,3 +507,53 @@ def test_archive_results_has_one_line_per_id():
         ]
     }
     assert render.archive_results(payload) == "archived w1\nnot archived w2: not found"
+
+
+@pytest.mark.parametrize(
+    ("mr", "line"),
+    [
+        (
+            {
+                "number": 42,
+                "title": "Fix it",
+                "state": "open",
+                "labels": ["a"],
+                "url": "https://github.com/o/r/pull/42",
+            },
+            "#42 Fix it [open] a https://github.com/o/r/pull/42",
+        ),
+        (
+            {
+                "number": 42,
+                "title": "Fix it",
+                "state": "open",
+                "labels": ["a"],
+                "url": "https://forge/mr/42",
+            },
+            "!42 Fix it [open] a https://forge/mr/42",
+        ),
+    ],
+)
+def test_forge_mr_writes_a_github_pr_with_a_hash(mr, line):
+    assert render.forge_mr(mr) == line
+
+
+def test_forge_merged_writes_github_prs_with_a_hash():
+    assert (
+        render.forge_merged(
+            [
+                {
+                    "number": 42,
+                    "title": "Fix it",
+                    "labels": ["a"],
+                    "url": "https://github.com/o/r/pull/42",
+                },
+                {"number": 7, "title": "Tidy", "labels": [], "url": "https://forge/mr/7"},
+            ]
+        )
+        == "#42 Fix it a https://github.com/o/r/pull/42\n!7 Tidy https://forge/mr/7"
+    )
+
+
+def test_forge_merged_says_so_when_there_is_nothing():
+    assert render.forge_merged([]) == "no merged merge requests"

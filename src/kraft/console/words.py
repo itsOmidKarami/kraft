@@ -188,6 +188,12 @@ def mr_ref_text(ref: dict | None) -> str:
     return f"{'#' if _PULL.search(ref.get('url') or '') else '!'}{ref['number']}"
 
 
+def _mr_ref(payload: dict, key: str) -> str:
+    """`mr_ref_text` for an event payload: the old lone `!` when the number is missing."""
+    number = payload.get(key)
+    return mr_ref_text({"number": number, "url": payload.get("url")}) if number is not None else "!"
+
+
 def _tail(row: dict, stop: dict, node: str, now: float) -> str:
     # An item with no node to name reads without "at ...", and without a leading separator.
     where = f" at {node}" if node else ""
@@ -720,13 +726,13 @@ def event_line(
         case "work_item_restored":
             return "restored"
         case "mr_opened":
-            return f"MR !{_s(p.get('number'))} opened"
+            return f"MR {_mr_ref(p, 'number')} opened"
         case "mr_closed":
             by = p.get("by")
             closer = f" by {_s(by)}" if by and by != "cancel" else ""
-            return f"MR !{_s(p.get('ref'))} closed{closer}"
+            return f"MR {_mr_ref(p, 'ref')} closed{closer}"
         case "mr_reopened":
-            return f"MR !{_s(p.get('ref'))} reopened"
+            return f"MR {_mr_ref(p, 'ref')} reopened"
         case "merge_refused_unreviewed":
             if p.get("source") == "forge":
                 where = (
