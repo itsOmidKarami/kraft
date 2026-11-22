@@ -2238,9 +2238,23 @@ async def _walk_node_once(
             if r_verdict == "ok":
                 if loop.early:
                     await db.write(lambda c: store.end_measurement(c, work_item_id))
-                await _replies.posting_point(
-                    db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
-                )
+                if (
+                    started := await _replies.posting_point(
+                        db,
+                        run_dirs,
+                        work_item_id,
+                        node,
+                        row,
+                        worktree,
+                        launch,
+                        completing=True,
+                        loop_key=key,
+                    )
+                ) is not None:
+                    # A reply round is a fresh measurement: no doubt and no old exception
+                    # carries into it.
+                    round, resume_step, repair_doubted, fix_excs = started.round, 0, [], []
+                    continue
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,
@@ -2480,9 +2494,21 @@ async def _walk_node_once(
             if ended_early:
                 await _continue()
                 continue
-            await _replies.posting_point(
-                db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
-            )
+            if (
+                started := await _replies.posting_point(
+                    db,
+                    run_dirs,
+                    work_item_id,
+                    node,
+                    row,
+                    worktree,
+                    launch,
+                    completing=True,
+                    loop_key=key,
+                )
+            ) is not None:
+                round, resume_step, repair_doubted, fix_excs = started.round, 0, [], []
+                continue
             await node_runs.completed(
                 db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
             )
@@ -2645,9 +2671,21 @@ async def _walk_node_once(
                     # keeps those findings from coming back on this commit.
                     await _continue()
                     continue
-                await _replies.posting_point(
-                    db, run_dirs, work_item_id, node, row, worktree, launch, completing=True
-                )
+                if (
+                    started := await _replies.posting_point(
+                        db,
+                        run_dirs,
+                        work_item_id,
+                        node,
+                        row,
+                        worktree,
+                        launch,
+                        completing=True,
+                        loop_key=key,
+                    )
+                ) is not None:
+                    round, resume_step, repair_doubted, fix_excs = started.round, 0, [], []
+                    continue
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,

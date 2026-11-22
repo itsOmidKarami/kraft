@@ -2,13 +2,16 @@
 earlier measurement's findings and the judge's history of a round. The reader's own tests
 are in `test_reply_round.py`."""
 
+# ruff: noqa: F811 -- `judge` is an imported fixture, taken by name.
+
 import json
 
 import pytest
 
 from kraft import events, store
 from kraft import policy as _policy
-from kraft.executor import dispatch, reply_round, walk
+from kraft.executor import dispatch, replies, reply_round, walk
+from kraft.executor.reply_round import ReplyRound
 
 from .test_measurement import _NEEDS_CONTEXT_NODE
 from .test_walk_early import (  # noqa: F401 -- the walk's own rig, and its judge fixture
@@ -18,6 +21,7 @@ from .test_walk_early import (  # noqa: F401 -- the walk's own rig, and its judg
     _cycles,
     _found,
     _node,
+    _reporting,
     _walk,
     judge,
 )
@@ -209,7 +213,7 @@ async def test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_hea
     assert "fix" not in script.calls
 
 
-async def test_an_amend_keeps_the_reply_round_mark(item_on, script, judge, tmp_path):  # noqa: F811
+async def test_an_amend_keeps_the_reply_round_mark(item_on, script, judge, tmp_path):
     """`a-reply-round-s-record-pairs-no-fix`: the judge declines the early start of a reply
     round's measurement, the measurement goes on and amends its record, which keeps its mark
     (the round is over once the record is written, so the continuation is not in it)."""
@@ -296,3 +300,42 @@ async def test_a_reply_round_record_keeps_the_earlier_triage_findings_as_unmeasu
     assert [f["message"] for f in record["unmeasured"]] == ["rename"]
     assert record["findings"] == []
     assert fake_agent.argv() == []
+
+
+async def test_a_round_started_after_a_doubted_repair_does_not_re_serve_the_doubts(
+    item_on, script, judge, tmp_path, monkeypatch
+):
+    """The node's repair finished with concerns and the node then reached its completion exit (the
+    red check's finding is below the loop's severities), where a reply round starts. The round is a
+    fresh measurement: its fix cycle is not preceded by the judge, and its instruction carries no
+    note of the old repair's doubts."""
+    doubt = {"status": "done_with_concerns", "findings": [], "concerns": "needs a code change"}
+    node = _node(
+        tmp_path,
+        triage=(CLEAN, _found("rename"), CLEAN),
+        ci=(_found("lint failed", "minor", status="failed"), CLEAN),
+        on_failure=True,
+        early=False,
+    )
+    node["on_failure"]["tasks"] = [_reporting(tmp_path, "repair", [doubt])]
+    it = await item_on([node])
+    script.real = REAL | {"repair"}
+    started = []
+
+    async def start_once(db, run_dirs, wid, node, row, worktree, launch, *, completing=False, **_):
+        if not completing or started:
+            return None
+        started.append(1)
+        head = reply_round.item_head(row, worktree)
+        round_ = ReplyRound(0, head, 0, ("T1",))
+        await reply_round.begin(db, wid, round_, node.id)
+        return round_
+
+    monkeypatch.setattr(replies, "posting_point", start_once)
+
+    assert await _walk(it) == "ok"
+
+    assert started and script.calls.count("repair") == 1
+    assert judge.rounds == []  # a stale doubt would have made the judge due on the round's cycle
+    [instruction] = script.instructions["fix"]
+    assert "needs a code change" not in instruction

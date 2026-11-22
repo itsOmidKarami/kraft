@@ -19,6 +19,9 @@ class ReplyWait:
 
     threads: tuple[str, ...]
     timeout: timedelta
+    #: When the round the wait belongs to ends (its start plus the reply timeout): it bounds
+    #: the round's CI look (`run.ci_poll`), which never stops the item. None for a bare wait.
+    deadline: datetime | None = None
 
 
 @dataclass(frozen=True)

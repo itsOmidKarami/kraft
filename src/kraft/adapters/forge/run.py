@@ -1632,6 +1632,23 @@ async def _run_one(
                     status = "waiting"
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
+            if (
+                reply is not None
+                and reply.deadline is not None
+                and status in ("waiting", "ci_pending")
+            ):
+                # A reply round on a head already measured green: CI still pending (a check a
+                # reply's workflow added) is bounded by the round's time, never by the CI wait's
+                # own timeout. Red is not touched here: it fails as ever. A new head has no `reply`.
+                at = waits.now()
+                over = at >= reply.deadline
+                note = WaitNote(None, {}, over, at, deadline=reply.deadline)
+                if over:
+                    log += (
+                        "reply round: CI is still pending and the round's time is up; "
+                        "completing on this head's earlier green measurement\n"
+                    )
+                    status = "done"
         case "pipeline_wait":
             log, status, findings, note = await _pipeline_wait(
                 forge,

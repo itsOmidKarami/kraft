@@ -27,7 +27,7 @@ from kraft import builtins as _builtins
 from kraft import executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.automated_review import BotReviewer
-from kraft.executor import dispatch, round_prompts
+from kraft.executor import dispatch, replies, round_prompts
 from kraft.templates.models import AgentInput
 from support.bot_threads import bot_thread, note
 from support.harness import entry_of, fake_harness_home, git
@@ -107,6 +107,11 @@ FLAG = {
     "threads": ["T1"],
 }
 FIXED = {"replies": [{"thread": "T1", "body": "Renamed it."}]}
+#: A triage verdict that finds nothing and declines T1's comment.
+DECLINE = {
+    "findings": [],
+    "replies": [{"thread": "T1", "kind": "declined", "body": "The call is right."}],
+}
 
 
 def bot_on():
@@ -114,10 +119,21 @@ def bot_on():
 
 
 async def filed(
-    rig, monkeypatch, *threads, bot=None, loop=True, reads=True, watch_ci=False, **fake
+    rig,
+    monkeypatch,
+    *threads,
+    bot=None,
+    loop=True,
+    reads=True,
+    watch_ci=False,
+    tweak=None,
+    policy=None,
+    **fake,
 ):
     """The review node with a fix loop, filed on a fake whose bot `a` (replies on)
-    has `threads` open, and whose merge request is open at the checkout's head."""
+    has `threads` open, and whose merge request is open at the checkout's head.
+    `tweak(node)` changes the node's definition before it is filed, `policy` is the item's own
+    policy override (`{"reply_rounds_per_head": 1}`)."""
     raw = [r for r, _ in threads]
     bot = bot or bot_on()
     fake = forge.FakeForge(
@@ -126,7 +142,9 @@ async def filed(
         **fake,
     )
     node = review_node(30, reviewers=(bot,), loop=loop, reads=reads, watch_ci=watch_ci)
-    await rig(node, fake)
+    if tweak:
+        tweak(node)
+    await rig(node, fake, **({"policy_override": policy} if policy else {}))
 
     async def details(*, repo, branch):
         head = git(rig.item.worktree, "rev-parse", "HEAD")
@@ -150,6 +168,11 @@ def t1():
 def events_of(rig, *types) -> list[dict]:
     """The filed item's events of the given types, oldest first."""
     return [e for e in rig.item.events() if e["type"] in types]
+
+
+def report_of(rig) -> dict:
+    """The filed item's reply report, as the brief reads it."""
+    return json.loads(replies.report_path(rig.item.run_dirs, rig.item.id).read_text())
 
 
 async def walk_to_completion(rig, *, start=10, step=63, walks=8) -> list[str]:
@@ -235,18 +258,21 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
         repairs: list[dict] = []
         fake: forge.FakeForge | None = None
 
-        async def __call__(self, node, fake):
+        async def __call__(self, node, fake, **item):
             monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
             # A harness for the reading task to select; what it launches is
             # replaced below, since only whether it is reached is asked.
             monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["true"])))
             self.triaged, self.instructions, self.verdicts, self.repairs = [], [], [], []
+            #: What the judge answers, in turn: its `verdict` and the keys it writes.
+            self.judges = []
             self.fake = fake
 
             async def launched(db, run_dirs, t, node, row, worktree, *, task, common, **_):
                 self.triaged.append(task.path)
                 self.instructions.append(_.get("instruction", ""))
-                if ".fix_loop." in task.path:
+                repair = ".fix_loop." in task.path and t.id != "judge"  # the judge only answers
+                if repair:
                     # A repair that changes nothing stops the loop.
                     (Path(worktree) / "repaired.txt").write_text("x")
                     git(worktree, "add", "repaired.txt")
@@ -254,9 +280,17 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
                 if AgentInput.BOT_FEEDBACK in t.inputs:
                     # The session's own copy of the collection, as the real launch makes.
                     round_prompts.bot_feedback(
-                        db, run_dirs, row["id"], node, common["round"], common["session_id"]
+                        db,
+                        run_dirs,
+                        row["id"],
+                        node,
+                        common["round"],
+                        common["session_id"],
+                        reply=await dispatch._reply_round_of(db, row, node, worktree),
                     )
                 verdict = self.verdicts.pop(0) if t.id == "triage" and self.verdicts else []
+                if t.id == "judge" and self.judges:
+                    verdict = self.judges.pop(0)
                 found = verdict.get("findings", []) if isinstance(verdict, dict) else verdict
                 _, log, result = await _builtins.start_session(db, run_dirs, **common)
                 status = await _builtins.finish_session(
@@ -269,7 +303,7 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
                     log="scripted\n",
                     findings=found,
                 )
-                if ".fix_loop." in task.path and self.repairs:
+                if repair and self.repairs:
                     extra = self.repairs.pop(0)
                 elif isinstance(verdict, dict):
                     extra = {k: v for k, v in verdict.items() if k != "findings"}
@@ -281,7 +315,7 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
                 return status, True
 
             monkeypatch.setattr(dispatch, "_launch_agent", launched)
-            self.item = await item_on([node])
+            self.item = await item_on([node], **item)
             return self
 
         def moment(self, seconds):

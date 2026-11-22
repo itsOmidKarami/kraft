@@ -1917,17 +1917,16 @@ async def _dispatch_task_in(
         # The review wait of a node in a reply round waits for the answers in the round's
         # threads, each bounded by the review task's own `reply_timeout_minutes`. Only an open
         # round asks (`current` reads the head only then), so a node with none pays a DB read.
+        # The CI look of such a round takes it too: pending past the round's deadline completes
+        # the node on the head's earlier green measurement instead of stopping the item.
         reply = None
-        if t.target is ForgeAction.MR_AUTOMATED_REVIEW:
-            round_ = await _reply_round.current(
-                db,
-                work_item_row["id"],
-                node.id,
-                lambda: _reply_round.item_head(work_item_row, worktree),
-            )
+        if t.target in (ForgeAction.MR_AUTOMATED_REVIEW, ForgeAction.MR_CI):
+            round_ = await _reply_round_of(db, work_item_row, node, worktree)
             if round_ is not None:
                 reply = _owed.ReplyWait(
-                    round_.threads, timedelta(minutes=task_policy.reply_timeout_minutes)
+                    round_.threads,
+                    timedelta(minutes=task_policy.reply_timeout_minutes),
+                    round_.deadline,
                 )
         return await _forge.run_task(
             db,

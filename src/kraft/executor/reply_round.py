@@ -23,6 +23,7 @@ class ReplyRound:
     head: str
     round: int
     threads: tuple[str, ...]  # the threads it was started for
+    deadline: datetime | None = None  # its start plus the reply timeout: bounds the CI look
 
 
 def when(value) -> datetime | None:
@@ -67,7 +68,9 @@ async def current(db, work_item_id: str, node_id: str, head_of) -> ReplyRound | 
                 continue
             if e["type"] == ChainEvent.REPLY_ROUND_STARTED:
                 p = e["payload"]
-                found = ReplyRound(e["seq"], p["head"], p["round"], tuple(p["threads"]))
+                found = ReplyRound(
+                    e["seq"], p["head"], p["round"], tuple(p["threads"]), when(p.get("deadline"))
+                )
             elif e["type"] == ChainEvent.FINDINGS_MEASURED:
                 found = None
         return found
@@ -104,6 +107,7 @@ async def begin(db, work_item_id: str, round_: ReplyRound, node_id: str) -> None
                 "head": round_.head,
                 "round": round_.round,
                 "threads": list(round_.threads),
+                "deadline": round_.deadline.isoformat() if round_.deadline else None,
             },
         )
         store.set_current_step(c, work_item_id, 0)

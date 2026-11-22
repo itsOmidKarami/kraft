@@ -503,7 +503,10 @@ async def test_top_level_declines_go_in_one_comment(
 
 
 def _report(rig) -> dict:
-    return json.loads(replies.report_path(rig.item.run_dirs, rig.item.id).read_text())
+    """The reply report, less its `owed` entries: a thread Kraft replied in and the (static) bot
+    never answered is owed a look at completion, which `test_reply_round_walks.py` pins."""
+    report = json.loads(replies.report_path(rig.item.run_dirs, rig.item.id).read_text())
+    return {**report, "entries": [e for e in report["entries"] if e["kind"] != "owed"]}
 
 
 def _entries(rig) -> list[tuple]:

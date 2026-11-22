@@ -1,9 +1,9 @@
-"""What `dispatch` hands the review wait while its node is in a reply round (no walk starts one
-in this part, so each case seeds the round's event and calls `dispatch_node` directly)."""
+"""What `dispatch` hands the review wait and the CI look while their node is in a reply round (each
+case seeds the round's event and calls `dispatch_node` directly)."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,6 +21,7 @@ _REVIEW = {
     "policy": {"total_time_cap_minutes": 10},
 }
 _CI = {"id": "await_ci", "kind": "forge", "target": "mr.ci"}
+_READY = {"id": "ready", "kind": "forge", "target": "mr.mark_ready"}
 
 
 def _chain(*, review=None, node_policy=None):
@@ -30,6 +31,7 @@ def _chain(*, review=None, node_policy=None):
         "steps": [
             {"id": "settle", "tasks": [{**_REVIEW, **(review or {})}]},
             {"id": "ci", "tasks": [_CI]},
+            {"id": "ready", "tasks": [_READY]},
         ],
     }
     if node_policy:
@@ -67,35 +69,57 @@ async def _handed(it, monkeypatch, task=(0, 0), *seeded):
     return seen
 
 
-def _started(head, node="feedback", threads=("T1", "T2")):
+_DEADLINE = datetime(2026, 1, 1, 0, 5, tzinfo=UTC)
+
+
+def _started(head, node="feedback", threads=("T1", "T2"), deadline=None):
     return (
         "reply_round_started",
-        {"node_id": node, "head": head, "round": 1, "threads": list(threads)},
+        {
+            "node_id": node,
+            "head": head,
+            "round": 1,
+            "threads": list(threads),
+            "deadline": deadline.isoformat() if deadline else None,
+        },
     )
 
 
+_FIVE = timedelta(minutes=5)
+
+
 @pytest.mark.parametrize(
-    "case, expected",
+    "case, task, expected",
     [
-        pytest.param("open", owed.ReplyWait(("T1", "T2"), timedelta(minutes=5)), id="open-round"),
-        pytest.param("none", None, id="no-round"),
-        pytest.param("other-node", None, id="another-node-s-round"),
-        pytest.param("recorded", None, id="a-record-written-after-it"),
-        pytest.param("other-head", None, id="another-head"),
+        pytest.param("open", (0, 0), owed.ReplyWait(("T1", "T2"), _FIVE), id="open-round"),
+        pytest.param("none", (0, 0), None, id="no-round"),
+        pytest.param("other-node", (0, 0), None, id="another-node-s-round"),
+        pytest.param("recorded", (0, 0), None, id="a-record-written-after-it"),
+        pytest.param("other-head", (0, 0), None, id="another-head"),
+        pytest.param(
+            "open-with-a-deadline",
+            (1, 0),
+            owed.ReplyWait(("T1", "T2"), _FIVE, _DEADLINE),
+            id="ci-task-with-an-open-round",
+        ),
+        pytest.param("other-head", (1, 0), None, id="ci-task-with-another-heads-round"),
     ],
 )
-async def test_the_review_wait_is_handed_the_open_round(item_on, monkeypatch, case, expected):
+async def test_the_review_wait_is_handed_the_open_round(item_on, monkeypatch, case, task, expected):
+    """The review wait and the CI look of a node in a reply round are handed it, the CI look
+    with the round's deadline (`a-reply-round-never-stops-the-item-on-pending-ci`)."""
     it = await item_on(_chain(), "feedback")
     head = reply_round.item_head(it.row(), it.repo)
     seeded = {
         "open": [_started(head)],
+        "open-with-a-deadline": [_started(head, deadline=_DEADLINE)],
         "none": [],
         "other-node": [_started(head, node="other")],
         "recorded": [_started(head), ("findings_measured", {"node_id": "feedback", "cycle": 0})],
         "other-head": [_started("0" * 40)],
     }[case]
 
-    seen = await _handed(it, monkeypatch, (0, 0), *seeded)
+    seen = await _handed(it, monkeypatch, task, *seeded)
 
     assert seen["reply"] == expected
 
@@ -128,6 +152,6 @@ async def test_a_task_that_is_not_the_review_wait_gets_no_reply(item_on, monkeyp
     it = await item_on(_chain(), "feedback")
     head = reply_round.item_head(it.row(), it.repo)
 
-    seen = await _handed(it, monkeypatch, (1, 0), _started(head))
+    seen = await _handed(it, monkeypatch, (2, 0), _started(head))
 
     assert seen["reply"] is None

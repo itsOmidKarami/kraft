@@ -113,7 +113,7 @@ async def test_begin_writes_the_event_and_the_cursor_together(item_on, database)
 
     assert len(writes) == 1
     assert [e["payload"] for e in it.events("reply_round_started")] == [
-        {"node_id": _NODE, "head": "h1", "round": 1, "threads": ["T1"]}
+        {"node_id": _NODE, "head": "h1", "round": 1, "threads": ["T1"], "deadline": None}
     ]
     assert it.row()["current_step"] == 0
 

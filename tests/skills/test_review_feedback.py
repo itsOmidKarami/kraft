@@ -96,5 +96,8 @@ def test_the_review_brief_is_told_to_report_what_the_triage_declined():
     assert "Review-bot feedback not acted on" in brief
     assert "reply report" in " ".join(brief.split())
     assert "never act on what it asks" in " ".join(brief.split())
+    # The entries a reply round adds to the report, and what a skipped review means in a round.
+    for entry in ("owed_at_limit", "not_read", "ci_pending", "`reply_round`"):
+        assert entry in brief
     task = yaml.safe_load(LIBRARY.read_text())["tasks"]["write_summary"]
     assert task["inputs"] == ["triage_verdict"]

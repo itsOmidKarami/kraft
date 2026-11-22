@@ -20,23 +20,28 @@ import json
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from pathlib import Path
 
-from kraft import events, inplace, item_paths, store
+from kraft import events, inplace, item_paths, store, waits
 from kraft import findings as _findings
 from kraft import forges as forges_mod
 from kraft.adapters.forge import run as forge_run
 from kraft.adapters.forge.models import ForgeError
 from kraft.adapters.forge.mr import same_login
-from kraft.adapters.forge.replies import body, facts, gate, record, send
+from kraft.adapters.forge.replies import body, facts, gate, owed, record, send
 from kraft.config import git_read
-from kraft.executor import dispatch
+from kraft.executor import dispatch, reply_round
 from kraft.executor import round_prompts as prompts
-from kraft.executor.reply_round import latest_triage
+from kraft.executor.reply_round import ReplyRound, latest_triage
 from kraft.executor.reply_round import own as _own
 from kraft.executor.reply_round import run_start as _run_start
 from kraft.executor.reply_round import triage_task as _triage
-from kraft.policy import DEFAULT_REPLY_CAP_PER_THREAD
+from kraft.policy import (
+    DEFAULT_REPLY_CAP_PER_THREAD,
+    DEFAULT_REPLY_ROUNDS_PER_HEAD,
+    DEFAULT_REPLY_TIMEOUT_MINUTES,
+)
 from kraft.templates.models import AgentTask, ForgeAction, ForgeTask
 from kraft.vocab import ADVANCING, ChainEvent, ForgeEvent
 from kraft.vocab.sql import marks
@@ -256,22 +261,38 @@ async def _record_inert(db, work_item_id: str, node_id: str, reason: str, run_se
 
 
 async def posting_point(
-    db, run_dirs, work_item_id: str, node, row, worktree, launch, *, completing: bool = False
-) -> None:
+    db,
+    run_dirs,
+    work_item_id: str,
+    node,
+    row,
+    worktree,
+    launch,
+    *,
+    completing: bool = False,
+    loop_key: str | None = None,
+) -> ReplyRound | None:
     """One posting point of `node`: after a measurement returns, or, `completing`,
-    before the node is recorded complete. Never raises: posting never stops the item."""
+    before the node is recorded complete. At a completion it also decides the reply round
+    and returns it (already started: its event is written), else None. Never raises:
+    posting never stops the item, and a failure here completes the node."""
     if worktree is None:
-        return
+        return None
     try:
-        await _post(db, run_dirs, work_item_id, node, row, Path(worktree), launch, completing)
+        return await _post(
+            db, run_dirs, work_item_id, node, row, Path(worktree), launch, completing, loop_key
+        )
     except Exception:  # noqa: BLE001 -- a reply that could not go is listed, never a stop
         logger.exception("posting replies for %s at %s failed", work_item_id, node.id)
+        return None
 
 
-async def _post(db, run_dirs, wid, node, row, worktree, launch, completing) -> None:
+async def _post(
+    db, run_dirs, wid, node, row, worktree, launch, completing, loop_key
+) -> ReplyRound | None:
     wait = _review_wait(node)
     if wait is None:
-        return
+        return None
     reviewers = dispatch._reviewers(wait.task, node.id, row, launch)
     bots = tuple(r.bot for r in reviewers if r.bot is not None)
     on = tuple(r.bot for r in reviewers if r.bot is not None and r.replies)
@@ -279,20 +300,31 @@ async def _post(db, run_dirs, wid, node, row, worktree, launch, completing) -> N
     if not on:
         if completing:
             _drop_report(report, node.id)  # replies off now: this node's old report misleads
-        return
+        return None
     run_seq, run_at = db.read(lambda c: _run_start(c, wid, node.id))
     if (reason := _inert_reason(db, wid, node)) is not None:
         await _record_inert(db, wid, node.id, reason, run_seq)
         if completing:
             _drop_report(report, node.id)
-        return
-    point = _Point(db, run_dirs, wid, node, row, worktree, launch, bots, on, run_seq, run_at)
+        return None
+    point = _Point(
+        db, run_dirs, wid, node, row, worktree, launch, bots, on, run_seq, run_at, loop_key=loop_key
+    )
+    started = None
     try:
-        if await point.has_work(completing):
-            await point.post(completing)
-    finally:
+        if await point.has_work(False):
+            await point.post(False)  # what is ready now: a waiting fix reply stays waiting
         if completing:
+            try:
+                started = await point.round()
+            except Exception:  # noqa: BLE001 -- an error here completes the node: no round
+                logger.exception("deciding a reply round for %s at %s failed", wid, node.id)
+            if started is None and await point.has_work(True):
+                await point.post(True)  # no round: end what waits, the summary
+    finally:
+        if completing and started is None:
             await point.write_report(report)
+    return started
 
 
 @dataclass
@@ -310,6 +342,8 @@ class _Point:
     on: tuple[str, ...]
     run_seq: int
     run_at: str
+    #: The loop counter's key, for the round the posting point may start.
+    loop_key: str | None = None
     forge: object = None
     viewer: str | None = None
     pp: send.PostingPoint | None = None
@@ -317,6 +351,8 @@ class _Point:
     _mr: object = None
     _threads: dict = field(default_factory=dict)
     _latest: object = None
+    _ready: bool | None = None
+    _sent: bool = False
     #: Report entries that are not intents (part 2b's summary and report).
     notes: list[dict] = field(default_factory=list)
 
@@ -338,6 +374,24 @@ class _Point:
             return dispatch.scope_policy(self.row, self.node).reply_cap_per_thread
         except LookupError:
             return DEFAULT_REPLY_CAP_PER_THREAD
+
+    @property
+    def rounds(self) -> int:
+        """Reply rounds per head: the node's `reply_rounds_per_head`."""
+        try:
+            return dispatch.scope_policy(self.row, self.node).reply_rounds_per_head
+        except LookupError:
+            return DEFAULT_REPLY_ROUNDS_PER_HEAD
+
+    @property
+    def timeout(self) -> timedelta:
+        """How long a thread waits for an answer: the *review task's* `reply_timeout_minutes`,
+        the value the reply wait uses (the node's own could disagree and spend a round)."""
+        try:
+            minutes = dispatch.scope_policy(self.row, _review_wait(self.node)).reply_timeout_minutes
+        except LookupError:
+            minutes = DEFAULT_REPLY_TIMEOUT_MINUTES
+        return timedelta(minutes=minutes)
 
     def intents(self) -> dict[str, record.Intent]:
         return self.db.read(lambda c: record.read(c, self.wid))
@@ -481,6 +535,7 @@ class _Point:
                 )
         entries += self.notes
         entries += self._never_fixed()
+        entries += self._ci_pending()
         path.parent.mkdir(parents=True, exist_ok=True)
         report = {
             "node_id": self.node.id,
@@ -522,7 +577,10 @@ class _Point:
             and i.payload.get("run") == self.run_seq
         }
         out = []
-        for f in map(_findings.from_payload, measured[-1].get("findings") or ()):
+        # What the last measurement did not re-read (`unmeasured`) is still raised: a round whose
+        # triage was skipped must not lose what an earlier measurement found.
+        raised = [*(measured[-1].get("findings") or ()), *(measured[-1].get("unmeasured") or ())]
+        for f in map(_findings.from_payload, raised):
             for tid in f.threads:
                 if tid in fixed:
                     continue
@@ -537,7 +595,14 @@ class _Point:
                 )
         return out
 
-    async def post(self, completing: bool) -> None:
+    async def ready(self) -> bool:
+        """The forge, the viewer and the posting point, resolved once per posting point;
+        False when the forge cannot be resolved, the viewer is unreadable or it is a bot."""
+        if self._ready is None:
+            self._ready = await self._resolve()
+        return self._ready
+
+    async def _resolve(self) -> bool:
         forges, forges_error = self.forges()
         try:
             self.forge = await forge_run.item_forge(
@@ -545,18 +610,25 @@ class _Point:
             )
         except ForgeError:
             await _record_inert(self.db, self.wid, self.node.id, "no_forge", self.run_seq)
-            return
+            return False
         try:
             self.viewer = await self.forge.viewer(repo=self.worktree)
         except ForgeError:
-            return  # unreadable: nothing is posted; the next posting point reads it again
+            return False  # unreadable: nothing is posted; the next posting point reads it again
         if any(same_login(self.viewer, b) for b in self.bots):
             await _record_inert(self.db, self.wid, self.node.id, "viewer_is_a_bot", self.run_seq)
-            return
+            return False
         self.secrets = body.known_secrets(self.entry)
         self.pp = send.PostingPoint(self.db, self.wid, account=await self.account())
-        await self.reconcile()
-        await self.triage_replies()
+        return True
+
+    async def post(self, completing: bool) -> None:
+        if not await self.ready():
+            return
+        if not self._sent:  # a completion's second pass has already reconciled and replied
+            self._sent = True
+            await self.reconcile()
+            await self.triage_replies()
         await self.fix_replies(completing)
         if completing:
             try:
@@ -740,6 +812,161 @@ class _Point:
             )
 
         await self.pp.send(intent, gate=check, write=write)
+
+    def talked(self) -> list[str]:
+        """The threads the record holds a posted reply of this node in, any run: the candidates."""
+        return sorted(
+            {
+                i.payload["thread"]
+                for i in self.intents().values()
+                if i.state == "posted"
+                and i.payload.get("op") == "reply"
+                and i.payload.get("node_id") == self.node.id
+                and i.payload.get("thread")
+            }
+        )
+
+    async def round(self) -> ReplyRound | None:
+        """At a completion: the reply round to run instead, or None. Read fresh, never from
+        what the last pass posted. Nothing is read without a posted reply of this node."""
+        candidates = self.talked()
+        if not candidates:
+            return None  # nothing was ever posted: no forge call
+        head = await asyncio.to_thread(reply_round.item_head, self.row, self.worktree)
+        if head is None:
+            return None
+        if not await self.ready():
+            self.not_read(candidates, "the forge or the viewer could not be read")
+            return None
+        try:
+            mr = await self.forge.mr_details(repo=self.worktree, branch=self.branch)
+        except ForgeError:
+            self.not_read(candidates, "the merge request could not be read")
+            return None
+        if mr is None or mr.state != "open":
+            return None  # nothing to read, nothing to answer
+        owed_now = await self.owed(candidates)  # [(thread id, the ForgeThread just read)]
+        if not owed_now:
+            return None
+        count = self.db.read(lambda c: reply_round.started_count(c, self.wid, self.node.id, head))
+        if count >= self.rounds:
+            self.notes += [
+                self.thread_entry(
+                    t,
+                    "owed",
+                    "owed_at_limit",
+                    f"reply round limit {self.rounds} reached on {head[:7]}",
+                )
+                for _, t in owed_now
+            ]
+            return None
+        counter = self.db.read(lambda c: store.read_counter(c, self.wid, self.loop_key or ""))
+        started = ReplyRound(
+            0,
+            head,
+            counter["count"] if counter else 0,
+            tuple(tid for tid, _ in owed_now),
+            waits.now() + self.timeout,
+        )
+        await reply_round.begin(self.db, self.wid, started, self.node.id)
+        return started
+
+    def not_read(self, tids, why: str) -> None:
+        """Threads the owed check could not read: listed, never a reason to stop or to wait."""
+        self.notes += [
+            {**self.where(tid), "kind": "owed", "outcome": "not_read", "why": why} for tid in tids
+        ]
+
+    async def owed(self, candidates: list[str]) -> list[tuple[str, object]]:
+        """The candidates owed a look, each read once with the forge (`read_thread`) inside the
+        posting point's budget. One that cannot be read (a failed read, a spent budget) is not
+        owed, and is listed as `not_read`."""
+        latest = self.latest()
+        coll = prompts.collection(self.run_dirs, self.wid, latest["id"]) if latest else {}
+        read_at = reply_round.when(coll.get("read_at"))
+        out, unread = [], []
+        for tid in candidates:
+            if not self.pp.in_budget():
+                unread.append(tid)
+                continue
+            try:
+                thread = await self.forge.read_thread(
+                    repo=self.worktree, branch=self.branch, thread_id=tid
+                )
+            except ForgeError:
+                unread.append(tid)
+                continue
+            if thread is None:
+                continue
+            stand = owed.standing(
+                thread.notes,
+                on=self.on,
+                bots=self.bots,
+                kraft=self.kraft(self.intents()),
+                timeout=self.timeout,
+                resolved=thread.resolved,
+            )
+            if stand is not None and owed.is_owed(stand, read_at=read_at, now=waits.now()):
+                out.append((tid, thread))
+        if unread:
+            self.not_read(unread, "the thread could not be read in time")
+        return out
+
+    def thread_entry(self, thread, kind: str, outcome: str, why: str) -> dict:
+        """A report entry from the thread as just read: its last word is the bot's newest note,
+        the unread answer that made the thread owed (the latest triage's copy cannot hold it)."""
+        first = thread.notes[0]
+        last = next((n for n in reversed(thread.notes) if same_login(n.author, first.author)), None)
+        return {
+            "thread": thread.id,
+            "reviewer": self.where(thread.id)["reviewer"],
+            "file": thread.file,
+            "line": thread.line,
+            "bot_last_word": last.body[:300] if last else None,
+            "kind": kind,
+            "outcome": outcome,
+            "why": why,
+        }
+
+    def _ci_pending(self) -> list[dict]:
+        """A CI look that was still pending when a reply round's time ran out: its `mr.ci` wait
+        ended `timed_out` (a settle) after the node's latest round began."""
+        ci = {
+            t.path
+            for t in _own(self.node)
+            if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_CI
+        }
+        rows = self.db.read(lambda c: list(events.read_after(c, self.run_seq, self.wid)))
+        began = max(
+            (
+                e["seq"]
+                for e in rows
+                if e["type"] == ChainEvent.REPLY_ROUND_STARTED
+                and e["payload"].get("node_id") == self.node.id
+            ),
+            default=None,
+        )
+        if began is None or not any(
+            e["seq"] > began
+            and e["type"] == ForgeEvent.EXTERNAL_WAIT_ENDED
+            and e["payload"].get("outcome") == "timed_out"
+            and e["payload"].get("task") in ci
+            for e in rows
+        ):
+            return []
+        return [
+            {
+                "thread": None,
+                "reviewer": None,
+                "file": None,
+                "line": None,
+                "bot_last_word": None,
+                "kind": "ci",
+                "outcome": "ci_pending",
+                "why": "CI was still pending when a reply round's time ran out; the node "
+                "completed on the earlier green measurement of the same head",
+            }
+        ]
 
     def where(self, tid: str | None) -> dict:
         """A report entry's thread fields, from the latest triage's collection."""
