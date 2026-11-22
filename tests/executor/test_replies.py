@@ -679,3 +679,20 @@ async def test_the_thread_moved_since_the_triage_read_it(rig, monkeypatch, repli
     got = [(e["payload"]["outcome"], e["payload"]["why"]) for e in rig.item.events("reply_ended")]
     assert got == [("superseded", "thread_moved")]
     assert fake.writes == []
+
+
+@pytest.mark.parametrize(
+    "found, expected",
+    [(3, 3), (LookupError("no snapshot"), 2)],
+    ids=["the-nodes-key", "no-snapshot-reads-the-code-default"],
+)
+def test_the_triage_cap_is_the_nodes_policy_key(monkeypatch, found, expected):
+    def scope_policy(row, node):
+        if isinstance(found, Exception):
+            raise found
+        return type("Policy", (), {"reply_cap_per_thread": found})()
+
+    monkeypatch.setattr(dispatch, "scope_policy", scope_policy)
+    point = replies._Point(None, None, "w", None, None, None, None, (), (), 0, "")
+
+    assert point.cap == expected

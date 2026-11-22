@@ -7,8 +7,11 @@ from dataclasses import replace
 
 import pytest
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
+from support.harness import v1_node, v1_task
 
-from kraft.adapters.forge.replies import facts
+from kraft import store
+from kraft.adapters.forge.models import Posted
+from kraft.adapters.forge.replies import facts, record
 from kraft.adapters.forge.replies.gate import fix_refusal, thread_refusal, triage_refusal
 from kraft.adapters.forge.replies.record import Intent, new_id
 
@@ -71,33 +74,39 @@ def test_the_gate_reads_the_thread(thread, on, posted, expected):
 
 
 @pytest.mark.parametrize(
-    "thread, intents, expected",
+    "thread, intents, expected, cap",
     [
-        pytest.param(_thread(B), {}, None, id="first-word"),
-        pytest.param(_thread(B, K), {}, "last_is_kraft", id="after-kraft"),
-        pytest.param(_thread(B, K, B), _by_id(_intent("posted", id=K_ID)), None, id="bot-answered"),
+        pytest.param(_thread(B), {}, None, 2, id="first-word"),
+        pytest.param(_thread(B, K), {}, "last_is_kraft", 2, id="after-kraft"),
+        pytest.param(
+            _thread(B, K, B), _by_id(_intent("posted", id=K_ID)), None, 2, id="bot-answered"
+        ),
         pytest.param(
             _thread(B, K, B, K2, B),
             _by_id(_intent("posted", id=K_ID), _intent("posted", id=K2_ID, kind="answered")),
             "cap",
+            2,
             id="at-the-cap",
         ),
         pytest.param(
             _thread(B),
             _by_id(_intent("posted", id=K_ID), _intent("unclear", id=K2_ID)),
             "cap",
+            2,
             id="an-unclear-send-counts",
         ),
         pytest.param(
             _thread(B),
             _by_id(_intent("posted", id=K_ID), _intent("posted", id=K2_ID)),
             "cap",
+            2,
             id="a-deleted-reply-counts",
         ),
         pytest.param(
             _thread(B, K, B),
             _by_id(_intent("posted", id=K_ID), _intent("posted", id=K2_ID, kind="fixed")),
             None,
+            2,
             id="a-fix-reply-does-not-count",
         ),
         pytest.param(
@@ -106,13 +115,21 @@ def test_the_gate_reads_the_thread(thread, on, posted, expected):
                 _intent("posted", id=K_ID, thread="T2"), _intent("posted", id=K2_ID, thread="T2")
             ),
             None,
+            2,
             id="another-thread-s-replies",
         ),
-        pytest.param(_thread(B, K, B, K2, B), {}, "cap", id="marked-notes-the-record-lost"),
+        pytest.param(_thread(B, K, B, K2, B), {}, "cap", 2, id="marked-notes-the-record-lost"),
+        pytest.param(
+            _thread(B, K, B),
+            _by_id(_intent("posted", id=K_ID), _intent("posted", id=K2_ID)),
+            None,
+            3,
+            id="cap-three-allows-a-third",
+        ),
     ],
 )
-def test_a_triage_reply_waits_its_turn(thread, intents, expected):
-    got = triage_refusal(thread, bots=(BOT,), on=(BOT,), kraft=_kraft(), intents=intents)
+def test_a_triage_reply_waits_its_turn(thread, intents, expected, cap):
+    got = triage_refusal(thread, bots=(BOT,), on=(BOT,), kraft=_kraft(), intents=intents, cap=cap)
     assert got == expected
 
 
@@ -146,3 +163,35 @@ def test_a_fix_reply_goes_once_per_finding(thread, intents, expected):
         thread, bots=(BOT,), on=(BOT,), kraft=_kraft(), intents=intents, finding="fp1"
     )
     assert got == expected
+
+
+async def test_the_cap_survives_a_retry(item_on, database):
+    """A person's retry forks the run, and the argument count still reads every reply."""
+    it = await item_on([v1_node("n", tasks=[v1_task("t")])])
+    for n in ("0123456789ab", "fedcba987654"):
+        intent = f"{it.id}-{n}"
+        payload = {
+            "op": "reply",
+            "node_id": "n",
+            "repo": "/repo",
+            "thread": "T1",
+            "kind": "declined",
+            "body_sha256": "0" * 64,
+            "head": "abc123",
+            "round": 0,
+            "session": "s1",
+        }
+        await database.write(lambda c, i=intent, p=payload: record.intend(c, it.id, i, p))
+        await database.write(
+            lambda c, i=intent: record.posted(
+                c, it.id, i, Posted(("1", "N1"), "t", "b"), via="send"
+            )
+        )
+    await database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
+
+    held = database.read(lambda c: record.read(c, it.id))
+
+    assert len(held) == 2
+    kraft = facts.Kraft(VIEWER, it.id, {})
+    got = triage_refusal(_thread(B), bots=(BOT,), on=(BOT,), kraft=kraft, intents=held, cap=2)
+    assert got == "cap"

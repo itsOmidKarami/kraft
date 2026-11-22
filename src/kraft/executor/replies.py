@@ -33,6 +33,7 @@ from kraft.ci_reruns import node_run_start
 from kraft.config import git_read
 from kraft.executor import dispatch
 from kraft.executor import round_prompts as prompts
+from kraft.policy import DEFAULT_REPLY_CAP_PER_THREAD
 from kraft.templates.models import AgentInput, AgentTask, ForgeAction, ForgeTask
 from kraft.vocab import ADVANCING, ChainEvent, ForgeEvent
 from kraft.vocab.sql import marks
@@ -368,6 +369,14 @@ class _Point:
 
     def forges(self):
         return self.launch.forges() if self.launch and self.launch.forges else (None, None)
+
+    @property
+    def cap(self) -> int:
+        """Kraft's triage replies per thread: the node's `reply_cap_per_thread`."""
+        try:
+            return dispatch.scope_policy(self.row, self.node).reply_cap_per_thread
+        except LookupError:
+            return DEFAULT_REPLY_CAP_PER_THREAD
 
     def intents(self) -> dict[str, record.Intent]:
         return self.db.read(lambda c: record.read(c, self.wid))
@@ -964,7 +973,9 @@ class _Point:
             thread = await self.thread(p["thread"])
             held = self.intents()
             kraft = self.kraft(held)
-            why = gate.triage_refusal(thread, bots=self.bots, on=self.on, kraft=kraft, intents=held)
+            why = gate.triage_refusal(
+                thread, bots=self.bots, on=self.on, kraft=kraft, intents=held, cap=self.cap
+            )
             if why is not None:
                 return ("refused", why)
             seen = prompts.collected_threads(self.run_dirs, self.wid, latest["id"])

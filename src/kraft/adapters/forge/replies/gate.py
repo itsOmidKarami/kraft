@@ -11,9 +11,6 @@ from kraft.adapters.forge.mr import same_login
 from kraft.adapters.forge.replies import facts
 from kraft.adapters.forge.replies.record import Intent
 
-#: Kraft's triage replies in one thread over the work item's life, deleted ones
-#: included; Part 2's third item makes it the `reply_cap_per_thread` policy key.
-REPLY_CAP_PER_THREAD = 2
 #: What a triage reply may be: `fixed` is the repair's, never the triage's.
 TRIAGE_KINDS = ("declined", "answered")
 _HELD = ("posted", "unclear")  # an unclear send may have landed
@@ -72,9 +69,11 @@ def triage_refusal(
     on: Iterable[str],
     kraft: facts.Kraft,
     intents: Mapping[str, Intent],
-    cap: int = REPLY_CAP_PER_THREAD,
+    cap: int,
 ) -> str | None:
-    """`thread_refusal`, then: never after Kraft's own note, never past the cap."""
+    """`thread_refusal`, then: never after Kraft's own note, never past `cap`: Kraft's
+    triage replies in one thread over the work item's life, deleted ones included (the
+    `reply_cap_per_thread` policy key)."""
     if (why := thread_refusal(thread, bots=bots, on=on, kraft=kraft)) is not None:
         return why
     assert thread is not None  # thread_refusal refuses a missing one

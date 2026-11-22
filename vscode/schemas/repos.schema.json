@@ -771,6 +771,45 @@
           "default": null,
           "title": "Max Attempts"
         },
+        "reply_cap_per_thread": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Cap Per Thread"
+        },
+        "reply_rounds_per_head": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Rounds Per Head"
+        },
+        "reply_timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Timeout Minutes"
+        },
         "sandbox": {
           "anyOf": [
             {

@@ -1427,7 +1427,7 @@ class ExecNode(ExecutionShape):
     #: steps, its recovery plan, its fix loop and judge, its escalation task,
     #: its conflict handler, its merge-rejection repair -- and only here may
     #: `max_attempts`/`timeout_minutes` appear, because they bound this node's
-    #: fix loop.
+    #: fix loop, and `reply_cap_per_thread`/`reply_rounds_per_head`, its reply rounds.
     policy: TemplatePolicyOverride | None = None
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
@@ -2825,11 +2825,15 @@ class MaterializedChain:
             except PathError as exc:
                 raise PolicyError(f"{where}: {exc}", field=where) from exc
             on_exec_node = at.scope is ControlScope.NODE and isinstance(at.node.node, ExecNode)
-            for name in ("max_attempts", "timeout_minutes"):
+            for name in (
+                "max_attempts",
+                "timeout_minutes",
+                "reply_cap_per_thread",
+                "reply_rounds_per_head",
+            ):
                 if getattr(layer, name) is not None and not on_exec_node:
                     raise PolicyError(
-                        f"{where}.{name}: bounds an execution node's fix loop, and {path!r} "
-                        "is not an execution node",
+                        f"{where}.{name}: applies to an execution node, and {path!r} is not one",
                         field=f"{where}.{name}",
                     )
         layered = replace(self, item_policy=item)

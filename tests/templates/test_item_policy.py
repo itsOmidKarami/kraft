@@ -268,3 +268,42 @@ def test_an_override_naming_a_rule_not_a_tool_is_refused(override, field):
 
     assert refused.value.field == field
     assert "Bash" in str(refused.value) or "mcp__" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("path", "key", "refused"),
+    [
+        ("verification.check", "reply_cap_per_thread", True),
+        ("verification.check", "reply_rounds_per_head", True),
+        ("verification", "reply_cap_per_thread", False),
+        ("verification", "reply_rounds_per_head", False),
+    ],
+    ids=["step-refused", "step-refused-rounds", "execution-node-accepted", "node-accepted-rounds"],
+)
+def test_a_reply_key_on_an_item_path(path, key, refused):
+    """The two node keys belong to an execution node: a step's path names the key and the reason."""
+    if refused:
+        with pytest.raises(PolicyError, match=rf"policy\.paths\.{path}\.{key}.*not one") as why:
+            _chain().with_item_policy({"paths": {path: {key: 3}}})
+        assert why.value.field == f"policy.paths.{path}.{key}"
+    else:
+        assert _chain().with_item_policy({"paths": {path: {key: 3}}}).item_policy is not None
+
+
+def test_a_snapshot_stored_before_the_reply_keys_loads():
+    """An item filed before the keys has none in its snapshot: it reads the code defaults."""
+    import json
+
+    stored = json.loads(_chain().to_json())
+    keys = ("reply_cap_per_thread", "reply_rounds_per_head", "reply_timeout_minutes")
+    for policy in (stored["policy"], *stored.get("repository_policies", {}).values()):
+        for key in keys:
+            policy.pop(key, None)
+
+    loaded = MaterializedChain.from_json(json.dumps(stored))
+
+    assert (
+        loaded.policy.reply_cap_per_thread,
+        loaded.policy.reply_rounds_per_head,
+        loaded.policy.reply_timeout_minutes,
+    ) == (2, 2, 5)

@@ -1120,7 +1120,7 @@ origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, Kraft-ec66w: the
 IF an approved chain revision cannot be read, or its revised chain does not
 validate under the model and policy intake uses, THEN the system SHALL refuse the
 approval with the reason and SHALL leave the item's chain unchanged.
-enforced-by: tests/executor/test_chain_revision.py::test_an_invalid_revision_never_reaches_the_chain, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[unknown-key], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[skip-a-reject-target], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-before-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[cap-above-its-parent], tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_an_added_node_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unreadable], tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unappliable]
+enforced-by: tests/executor/test_chain_revision.py::test_an_invalid_revision_never_reaches_the_chain, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[unknown-key], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[skip-a-reject-target], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-before-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[cap-above-its-parent], tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima[attempts], tests/templates/test_revision.py::test_an_added_node_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unreadable], tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unappliable]
 origin: src/kraft/api/routes/gates.py §_revise
 
 ## REQ unchanged-chain-revision-advances-without-a-human
@@ -2384,8 +2384,10 @@ enforced-by: tests/templates/test_workspace_publication.py::test_blocked_child_m
 ## REQ template-policy-may-replace-operational-defaults
 
 Template policy overrides MAY replace operational defaults, including timeouts
-and retry or wait timing, in either direction.
-enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/executor/test_policy_enforcement.py::test_a_fix_loops_bounds_come_from_its_nodes_policy[v1-policy-replaces-it], tests/executor/test_policy_enforcement.py::test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves
+and retry or wait timing, in either direction; the reply limits
+(`reply_cap_per_thread`, `reply_rounds_per_head`, `reply_timeout_minutes`) are
+operational numbers too, with code defaults.
+enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/test_policy_reply_limits.py::test_the_reply_keys_have_code_defaults[a-default-moves-it], tests/test_policy_reply_limits.py::test_an_override_above_the_administrator_maximum_is_refused[reply-cap], tests/executor/test_policy_enforcement.py::test_a_fix_loops_bounds_come_from_its_nodes_policy[v1-policy-replaces-it], tests/executor/test_policy_enforcement.py::test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves
 
 ## REQ work-item-policy-may-exceed-default-ceilings-within-admin-maximum
 

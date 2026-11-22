@@ -173,14 +173,31 @@ point.
 enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads
 origin: src/kraft/adapters/forge/run.py §_collect_review
 
+## REQ the-reply-limits-are-policy-keys-with-code-defaults
+WHERE a repository has a review bot with replies on, the system SHALL read three
+policy keys, `reply_cap_per_thread` (2), `reply_rounds_per_head` (2) and
+`reply_timeout_minutes` (5), from the node's resolved policy; a key no layer sets, in
+`policy.yaml`, a chain or an item's stored snapshot, SHALL read its code default. Each
+SHALL be a positive integer, SHALL stay within its administrator maximum, and the two
+node keys SHALL be refused on a scope that is not an execution node.
+enforced-by: tests/test_policy_reply_limits.py::test_the_reply_keys_have_code_defaults[code-defaults], tests/test_policy_reply_limits.py::test_the_reply_keys_have_code_defaults[a-default-moves-it], tests/test_policy_reply_limits.py::test_the_reply_keys_have_code_defaults[maximum-holds-the-code-default], tests/test_policy_reply_limits.py::test_a_reply_default_above_its_maximum_is_rejected[reply-cap], tests/test_policy_reply_limits.py::test_a_reply_default_above_its_maximum_is_rejected[reply-rounds], tests/test_policy_reply_limits.py::test_a_reply_default_above_its_maximum_is_rejected[reply-timeout], tests/test_policy_reply_limits.py::test_an_override_above_the_administrator_maximum_is_refused[reply-cap], tests/test_policy_reply_limits.py::test_an_override_above_the_administrator_maximum_is_refused[reply-rounds], tests/test_policy_reply_limits.py::test_an_override_above_the_administrator_maximum_is_refused[reply-timeout], tests/test_policy_reply_limits.py::test_a_node_only_key_is_refused_below_a_node[task-refuses-cap], tests/test_policy_reply_limits.py::test_a_node_only_key_is_refused_below_a_node[template-accepts-cap], tests/test_policy_reply_limits.py::test_a_node_only_key_is_refused_below_a_node[task-accepts-timeout], tests/test_policy_reply_limits.py::test_a_reply_key_is_a_positive_integer[zero], tests/test_policy_reply_limits.py::test_a_reply_key_is_a_positive_integer[none-string], tests/test_policy_reply_limits.py::test_a_reply_key_is_a_positive_integer[negative], tests/test_policy_reply_limits.py::test_a_reply_key_is_a_positive_integer[float], tests/test_policy_reply_limits.py::test_the_meet_takes_the_smallest_reply_value, tests/templates/test_item_policy.py::test_a_reply_key_on_an_item_path[step-refused], tests/templates/test_item_policy.py::test_a_reply_key_on_an_item_path[execution-node-accepted], tests/templates/test_item_policy.py::test_a_snapshot_stored_before_the_reply_keys_loads, tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima[attempts], tests/addons/test_update_reply_limits.py::test_an_addon_may_set_a_reply_limit[reply-timeout], tests/addons/test_update_reply_limits.py::test_an_addon_may_set_a_reply_limit[reply-cap], tests/executor/test_replies.py::test_the_triage_cap_is_the_nodes_policy_key[the-nodes-key], tests/executor/test_replies.py::test_the_triage_cap_is_the_nodes_policy_key[no-snapshot-reads-the-code-default]
+origin: src/kraft/policy.py §InstancePolicy -- Omid, 2026-11-22: the reply limits are policy keys with code defaults.
+
+## REQ the-per-thread-cap-counts-across-retries
+WHEN a person retries an item whose Kraft triage replies in a thread have reached the
+cap, the system SHALL still count every reply of the item's life in that thread and
+refuse another.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_the_cap_survives_a_retry, tests/adapters/forge/replies/test_record.py::test_the_record_spans_every_fork
+origin: src/kraft/adapters/forge/replies/record.py §read
+
 ## REQ a-triage-reply-respects-the-cap-and-kraft-s-last-word
 IF a review-bot thread is resolved, locked, not started by a bot with replies on,
 or holds a note that is neither a configured bot's nor Kraft's unedited one, THEN
 the system SHALL post no reply in it; and it SHALL post no triage reply when
 Kraft's note is the thread's latest, or when Kraft's triage replies in the thread
 over the item's life, deleted, unclear and unrecorded marked ones included, have
-reached the cap.
-enforced-by: tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-person-wrote-in-it], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-kraft-note-edited], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[the-bot-from-a-user-account], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[started-by-a-bot-with-replies-off], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[locked], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[after-kraft], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[at-the-cap], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[an-unclear-send-counts], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[marked-notes-the-record-lost], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[a-fix-reply-does-not-count]
+reached the cap, which is the node's `reply_cap_per_thread` policy key.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-person-wrote-in-it], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-kraft-note-edited], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[the-bot-from-a-user-account], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[started-by-a-bot-with-replies-off], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[locked], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[after-kraft], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[at-the-cap], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[an-unclear-send-counts], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[marked-notes-the-record-lost], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[a-fix-reply-does-not-count], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[cap-three-allows-a-third]
 origin: src/kraft/adapters/forge/replies/gate.py §triage_refusal
 
 ## REQ replies-work-only-where-a-fix-loop-can-act
