@@ -81,8 +81,11 @@ the person at the gate can find it.
   a different one: say so in `rationale` and propose nothing for it.
 - **`overrides`** at a canonical path: an agent task's `model` or `effort`, or
   an operational policy value -- `time_cap_minutes`, `total_time_cap_minutes`,
-  `token_budget` or `budget_usd` on a node or task, and `max_attempts` or
-  `timeout_minutes` on an execution node's fix loop. An override above the
+  `token_budget` or `budget_usd` on a node or task, `max_attempts` or
+  `timeout_minutes` on an execution node's fix loop, `reply_cap_per_thread` or
+  `reply_rounds_per_head` on an execution node (Kraft's triage replies per
+  thread, and reply rounds per head), and `reply_timeout_minutes` on any scope
+  (how long a reply round waits for an answer). An override above the
   administrator maxima or its enclosing scope's cap is refused, and the whole
   change set with it: raise only as far as that cap allows, and say what is
   short in `rationale`. Tools, sandbox,
