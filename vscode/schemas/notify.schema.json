@@ -111,6 +111,7 @@
           "reply_intended",
           "reply_not_found",
           "reply_posted",
+          "reply_round_started",
           "reply_send_failed",
           "review_submitted",
           "reviewed_head_repinned",

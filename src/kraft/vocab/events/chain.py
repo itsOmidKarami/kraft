@@ -31,6 +31,8 @@ class ChainEvent(StrEnum):
     FIX_CYCLE_FINISHED = "fix_cycle_finished"
     FIX_CYCLE_REFUNDED = "fix_cycle_refunded"
     FINDINGS_MEASURED = "findings_measured"
+    #: A reply round: one more measurement of a node on the same head, to read the bots' answers.
+    REPLY_ROUND_STARTED = "reply_round_started"
     TEST_SCOPES_SELECTED = "test_scopes_selected"
     JUDGE_VERDICT = "judge_verdict"
     SWEEP_FAILED = "sweep_failed"
@@ -64,6 +66,7 @@ CHAIN_EVENT_TRAITS = total(
         ChainEvent.FIX_CYCLE_FINISHED: _PLAIN,
         ChainEvent.FIX_CYCLE_REFUNDED: _PLAIN,
         ChainEvent.FINDINGS_MEASURED: _PLAIN,
+        ChainEvent.REPLY_ROUND_STARTED: _PLAIN,
         ChainEvent.TEST_SCOPES_SELECTED: _PLAIN,
         ChainEvent.JUDGE_VERDICT: _PLAIN,
         ChainEvent.SWEEP_FAILED: _PLAIN,
