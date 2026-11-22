@@ -12,7 +12,7 @@ import stat
 import traceback
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from kraft import builtins as _builtins
@@ -29,12 +29,14 @@ from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge.replies import owed as _owed
 from kraft.addons import load as _addons_load
 from kraft.automated_review import Reviewers, as_reviewers
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
 from kraft.executor import fallback as _fallback
 from kraft.executor import read_only as _read_only
+from kraft.executor import reply_round as _reply_round
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -1896,6 +1898,21 @@ async def _dispatch_task_in(
         if t.target is ForgeAction.CI_PIPELINE:
             reads = resolve_reads(node.id, t.reads)
             declared = await asyncio.to_thread(declared_variables, work_item_row, reads)
+        # The review wait of a node in a reply round waits for the answers in the round's
+        # threads, each bounded by the review task's own `reply_timeout_minutes`. Only an open
+        # round asks (`current` reads the head only then), so a node with none pays a DB read.
+        reply = None
+        if t.target is ForgeAction.MR_AUTOMATED_REVIEW:
+            round_ = _reply_round.current(
+                db,
+                work_item_row["id"],
+                node.id,
+                lambda: _reply_round.item_head(work_item_row, worktree),
+            )
+            if round_ is not None:
+                reply = _owed.ReplyWait(
+                    round_.threads, timedelta(minutes=task_policy.reply_timeout_minutes)
+                )
         return await _forge.run_task(
             db,
             run_dirs,
@@ -1942,6 +1959,7 @@ async def _dispatch_task_in(
             ),
             grace=t.grace,
             watch_ci=t.watch_ci,
+            reply=reply,
             ci_task=(
                 ci.path
                 if t.watch_ci and (ci := node.ci_wait_after(task.path)) is not None

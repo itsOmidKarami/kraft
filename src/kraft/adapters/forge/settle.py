@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
-from kraft.adapters.forge.replies import facts
+from kraft.adapters.forge.replies import facts, owed
 from kraft.automated_review import BotReviewer, CheckReviewer, Reviewers
 from kraft.vocab import ForgeEvent
 
@@ -94,6 +94,40 @@ def decide(
         kept,
         [_collected(item, finished[reviewer_key(item.reviewer)], bots, kraft) for item in feedback],
     )
+
+
+def collect(
+    feedback: list[ReviewerFeedback], how: str | None, kraft: facts.Kraft | None = None
+) -> list[dict]:
+    """What each reviewer said, as the triage reads it, every reviewer finished `how`
+    (`decide` builds the same when it settles)."""
+    bots = [f.reviewer.bot for f in feedback if f.reviewer.bot is not None]
+    return [_collected(item, how, bots, kraft) for item in feedback]
+
+
+def reply_wait(
+    feedback: list[ReviewerFeedback], wait: owed.ReplyWait, *, now: datetime, kraft: facts.Kraft
+) -> tuple[bool, datetime | None]:
+    """Whether every thread the round waits for is done (answered, resolved, written in by a
+    person, or past its deadline), and the latest deadline among those that are not, clamped
+    to `now + timeout`: a forge clock ahead of Kraft's must not park the wait for the skew."""
+    bots = [f.reviewer.bot for f in feedback if f.reviewer.bot is not None]
+    on = [f.reviewer.bot for f in feedback if f.reviewer.bot is not None and f.reviewer.replies]
+    open_ = {t["id"]: t for f in feedback for t in f.threads}
+    pending: list[datetime] = []
+    for tid in wait.threads:
+        thread = open_.get(tid)  # a resolved thread is not in the collection: done
+        s = (
+            None
+            if thread is None
+            else owed.standing(
+                thread.get("notes", ()), on=on, bots=bots, kraft=kraft, timeout=wait.timeout
+            )
+        )
+        if s is not None and not owed.is_done(s, now=now):
+            pending.append(s.deadline)
+    latest = max(pending, default=None)
+    return not pending, None if latest is None else min(latest, now + wait.timeout)
 
 
 def _talks(thread: dict, kraft: facts.Kraft | None) -> bool:

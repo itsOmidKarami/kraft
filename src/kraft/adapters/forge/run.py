@@ -38,7 +38,7 @@ from kraft.adapters.forge.models import (
     QueueRead,
     failure_cause,
 )
-from kraft.adapters.forge.replies import facts, record
+from kraft.adapters.forge.replies import facts, owed, record
 from kraft.automated_review import Reviewers
 from kraft.config import ConfigError, load_repos
 from kraft.paths import config_dir
@@ -1100,6 +1100,7 @@ async def _collect_review(
     session_id: str,
     round: int,
     watch_ci: bool = False,
+    reply: owed.ReplyWait | None = None,
 ) -> tuple[str, str, WaitNote | None]:
     """One check of the review wait on its collect path: read every reviewer,
     decide whether each has finished with the head (`settle.decide`), and once
@@ -1139,7 +1140,7 @@ async def _collect_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
         work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
         reviewers=reviewers,
-        bounds=bounds, grace=grace, watch_ci=watch_ci, kraft=kraft,
+        bounds=bounds, grace=grace, watch_ci=watch_ci, kraft=kraft, reply=reply,
     )  # fmt: skip
     if collection is not None:
         _write_collection(destination, head, round, collection, note.now)
@@ -1164,13 +1165,15 @@ async def _settle_review(
     mount: str | None = None,
     watch_ci: bool = False,
     kraft: facts.Kraft | None = None,
+    reply: owed.ReplyWait | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
     each reviewer said. A multi-repo item's repositories each keep their own
     memory in the wait, under `scope`. `kraft`, given only on the collect path
     with a replies-on bot, leaves Kraft's conversation out and is kept in the
-    wait (its viewer)."""
+    wait (its viewer). `reply`, given by a reply round, makes this check the wait for the
+    answers in its threads (`settle.reply_wait`) instead of for the head's reviewers."""
     # One reading of the clock, so the deadline this tests and the one
     # `waits.observe` tests are the same instant.
     now = waits.now()
@@ -1202,6 +1205,27 @@ async def _settle_review(
     memory = ((wait.last if wait is not None else None) or {}).get("memory", {})
     if scope is not None:
         memory = memory.get(scope, {})
+    if reply is not None and kraft is not None:
+        # A round implies a replies-on bot; an override may have turned replies off since.
+        done, latest = settle.reply_wait(feedback, reply, now=now, kraft=kraft)
+        kept = {"memory": memory, **({"viewer": kraft.viewer} if kraft.viewer else {})}
+        # The deadline is a settle, never a `timed_out` (`settled_by_timeout` stays False), and the
+        # push-based deadline above (`watch_ci`) is not this wait's. It records no heard or silent
+        # bots and compares no thread ids: this is not the head's wait.
+        note = WaitNote(None, kept, False, now, deadline=latest)
+        if not done:
+            return (
+                f"reply wait: waiting for {len(reply.threads)} thread(s) to be answered\n",
+                "waiting",
+                note,
+                None,
+            )
+        return (
+            "reply wait: every thread answered, resolved or past its deadline\n",
+            "done",
+            note,
+            settle.collect(feedback, "reply", kraft),
+        )
     decided = settle.decide(
         feedback,
         since=since,
@@ -1372,6 +1396,10 @@ async def _run_one(
     #: The review wait watches CI (`ForgeTask.watch_ci`): its limit counts from
     #: the push of the head it is about, not from the wait's start.
     watch_ci: bool = False,
+    #: A reply round's wait for the answers in its threads (`owed.ReplyWait`), on the collect path
+    #: only: the check then waits for them, each bounded by its own deadline, in place of the
+    #: head's reviewers.
+    reply: owed.ReplyWait | None = None,
     #: `pipeline_wait`'s pipeline id (`ForgeTask.pipeline`), the writer paths of
     #: its `reads`, and the variables each declares now.
     pipeline: str | None = None,
@@ -1635,6 +1663,7 @@ async def _run_one(
                 session_id=session_id,
                 round=round,
                 watch_ci=watch_ci,
+                reply=reply,
             )
         case "automated_review" if any(r.bot is not None for r in reviewers):
             # Not collecting (nothing in the node reads it, or a multi-repo
@@ -2521,6 +2550,10 @@ async def run_task(
     #: `ForgeTask.watch_ci`: the review wait also pushes and reads CI, and ends
     #: on a red pipeline, as `ci_task`'s finding.
     watch_ci: bool = False,
+    #: A reply round's wait for the answers in its threads (`owed.ReplyWait`), handed over by
+    #: `dispatch` while the node is in a round: the review wait's collect path then waits for
+    #: them, each bounded by its own deadline, instead of for the head's reviewers.
+    reply: owed.ReplyWait | None = None,
     #: The node's own `mr.ci` task path, the owner of a CI finding the review
     #: wait reports (`ResolvedNode.ci_wait_after`).
     ci_task: str | None = None,
@@ -2858,6 +2891,7 @@ async def run_task(
                     session_id=session_id,
                     round=round,
                     watch_ci=watch_ci,
+                    reply=reply,
                     pipeline=pipeline,
                     reads=reads,
                     declared=declared,
