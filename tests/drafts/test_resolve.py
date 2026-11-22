@@ -169,7 +169,14 @@ AGENT_ONLY = {
         ("kind: forge, target: mr.sync", {"target", "wait"}),
         (
             "kind: forge, target: mr.automated_review",
-            {"target", "wait", "config.reviewers", "config.watch_ci", "config.grace_period"},
+            {
+                "target",
+                "wait",
+                "config.reviewers",
+                "config.watch_ci",
+                "config.grace_period",
+                "policy.reply_timeout_minutes",
+            },
         ),
         (
             'kind: forge, target: ci.pipeline, config: {pipeline: "1"}',

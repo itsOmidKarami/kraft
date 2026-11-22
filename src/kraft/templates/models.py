@@ -500,6 +500,11 @@ class TaskBase(BaseModel):
         a forge task narrows by its target."""
         return self.TAKES_READS
 
+    def takes_reply_timeout(self) -> bool:
+        """Whether this task reads `policy.reply_timeout_minutes`: only the review
+        wait does (a reply round's wait for the bots' answers)."""
+        return False
+
     #: What only an agent launch reads, as `sources` names it (a policy cap as
     #: `policy.<cap>`). Steering is text for an agent's prompt, and the
     #: harness allowlist, the spend caps, the tool lists and the grants bound
@@ -527,7 +532,12 @@ class TaskBase(BaseModel):
         agent_only = (
             self.AGENT_ONLY & {"steering"} if self.on_failure is not None else self.AGENT_ONLY
         )
-        return agent_only if self.takes_reads() else agent_only | {"reads"}
+        agent_only = agent_only if self.takes_reads() else agent_only | {"reads"}
+        return (
+            agent_only
+            if self.takes_reply_timeout()
+            else agent_only | {"policy.reply_timeout_minutes"}
+        )
 
     def for_recovery(self) -> frozenset[str]:
         """The caps this task does not read but its `on_failure` recovery runs
@@ -1003,6 +1013,9 @@ class ForgeTask(TaskBase):
 
     def takes_reads(self) -> bool:
         return self.target is ForgeAction.CI_PIPELINE
+
+    def takes_reply_timeout(self) -> bool:
+        return self.target is ForgeAction.MR_AUTOMATED_REVIEW
 
     @model_validator(mode="after")
     def _ci_pipeline_takes_its_id(self) -> Self:
