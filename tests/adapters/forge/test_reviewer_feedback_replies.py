@@ -71,13 +71,15 @@ _BOT_REPLIED = _node(3, "fine", T_10, "55")
 
 
 def _gh(*, r54_body="two notes", r55_state="COMMENTED", said=_KRAFT_SAID, more=()):
+    # `said=None`: the thread shows no Kraft note (a person deleted it).
+    nodes = [n for n in (_OPENED, said, _BOT_REPLIED) if n is not None]
     return {
         READ_BRANCH: GH_PR,
         GH_ISSUE_COMMENTS: "[]",
         GH_REVIEWS: json.dumps(
             [_review(54, T_0, body=r54_body), _review(55, T_10, state=r55_state)]
         ),
-        "api graphql": _gh_threads(_thread("T1", _OPENED, said, _BOT_REPLIED), *more),
+        "api graphql": _gh_threads(_thread("T1", *nodes), *more),
     }
 
 
@@ -89,11 +91,22 @@ _D1 = (
     # GitLab lists this reply among the merge request's notes with no position.
     _glab_note(13, "coderabbitai", "fine", T_10, resolvable=True, resolved=False, system=False),
 )
-_GLAB = {
-    **glab_mr(GLAB_MR),
-    GLAB_NOTES: json.dumps([_GLAB_SUMMARY, *_D1]),
-    GLAB_DISCUSSIONS: json.dumps([_glab_discussion("D1", *_D1)]),
-}
+
+
+def _glab(*notes):
+    return {
+        **glab_mr(GLAB_MR),
+        GLAB_NOTES: json.dumps([_GLAB_SUMMARY, *notes]),
+        GLAB_DISCUSSIONS: json.dumps([_glab_discussion("D1", *notes)]),
+    }
+
+
+_GLAB = _glab(*_D1)
+#: Resolving the discussion moved every note's `updated_at` (measured on GitLab, 2026-11-22).
+_MOVED = tuple({**n, "updated_at": "2026-01-01T10:20:00Z"} for n in _D1)
+#: The record holds Kraft's reply in D1; a person deleted the Kraft note.
+_DELETED = tuple(n for n in _D1 if n["id"] != 12)
+_RECORD = facts.Kraft("kraft-user", "wi1", {}, frozenset({"T1", "D1"}))
 
 
 @pytest.mark.parametrize(
@@ -114,6 +127,18 @@ _GLAB = {
         (GH, _gh(said=_node(2, MARKED, T_5, "56")), KRAFT, T_10, [T_0, T_10], ["T1"]),
         (GLAB, _GLAB, KRAFT, "2026-01-01T09:30:00Z", ["2026-01-01T09:30:00Z"], ["D1"]),
         (GLAB, _GLAB, None, T_10, ["2026-01-01T09:30:00Z", T_10], ["D1"]),
+        (GH, _gh(said=None), _RECORD, T_0, [T_0], ["T1"]),
+        (GH, _gh(said=None), KRAFT, T_10, [T_0, T_10], ["T1"]),
+        (GLAB, _glab(*_DELETED), _RECORD, "2026-01-01T09:30:00Z", ["2026-01-01T09:30:00Z"], ["D1"]),
+        (GLAB, _glab(*_MOVED), KRAFT, "2026-01-01T09:30:00Z", ["2026-01-01T09:30:00Z"], ["D1"]),
+        (
+            GLAB,
+            _glab(*_MOVED),
+            None,
+            "2026-01-01T10:20:00Z",
+            ["2026-01-01T09:30:00Z", "2026-01-01T10:20:00Z"],
+            ["D1"],
+        ),
     ],
     ids=[
         "gh-reply-in-a-kraft-thread",
@@ -124,6 +149,11 @@ _GLAB = {
         "gh-marker-on-a-bot-note",
         "glab-reply-in-a-kraft-discussion",
         "glab-the-same-off",
+        "gh-kraft-note-deleted-record-remembers",
+        "gh-kraft-note-deleted-record-forgot",
+        "glab-kraft-note-deleted-record-remembers",
+        "glab-a-resolve-moves-updated-at",
+        "glab-a-resolve-moves-updated-at-kraft-unknown",
     ],
 )
 async def test_the_head_wait_leaves_out_the_conversation(

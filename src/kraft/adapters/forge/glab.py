@@ -105,7 +105,8 @@ def _bot_feedback(
     talk = [
         d
         for d in discussions
-        if kraft is not None and kraft.talks_in(_glab_notes(d.get("notes") or []))
+        if kraft is not None
+        and (d["id"] in kraft.threads or kraft.talks_in(_glab_notes(d.get("notes") or [])))
     ]
     talk_notes = {str(n.get("id")) for d in talk for n in d.get("notes") or []}
     talk_ids = {d["id"] for d in talk}

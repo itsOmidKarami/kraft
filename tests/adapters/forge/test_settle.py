@@ -149,23 +149,41 @@ def test_what_a_check_remembers_for_the_next(feedback, now, memory, key, expecte
     assert decide(feedback, now=now, memory=memory).memory[key] == expected
 
 
+_PLAIN_NOTE = (note("N1", "x", "fix"),)
+
+
 @pytest.mark.parametrize(
-    "notes, activity",
+    "notes, first, second, activity",
     [
-        ((note("N1", "x", "fix"), kraft_note("N2", "w1")), None),
-        ((note("N1", "x", "fix"),), at(40)),
+        ((note("N1", "x", "fix"), kraft_note("N2", "w1")), (), (), None),
+        (_PLAIN_NOTE, (), (), at(40)),
+        # Kraft first posts in T1 between the two checks, and then the bot resolves it.
+        (_PLAIN_NOTE, (), ("T1",), None),
     ],
-    ids=["bot-resolved-a-kraft-thread", "bot-resolved-another-thread"],
+    ids=[
+        "bot-resolved-a-kraft-thread",
+        "bot-resolved-another-thread",
+        "posted-between-checks-then-resolved",
+    ],
 )
-def test_a_thread_kraft_posted_in_leaves_the_compared_set(notes, activity):
+def test_a_thread_kraft_posted_in_leaves_the_compared_set(notes, first, second, activity):
     """The first check stores only the threads Kraft has not posted in, so the
-    bot resolving one Kraft answered is not activity."""
-    kraft = facts.Kraft("kraft-user", "w1", {})
-    first = decide([bot(threads=["T1"], notes=notes)], now=10, kraft=kraft)
+    bot resolving one Kraft answered is not activity, whether the thread shows a Kraft
+    note or only the record knows Kraft posted in it."""
+    before = decide(
+        [bot(threads=["T1"], notes=notes)],
+        now=10,
+        kraft=facts.Kraft("kraft-user", "w1", {}, frozenset(first)),
+    )
 
-    second = decide([bot()], now=40, memory=first.memory, kraft=kraft)
+    after = decide(
+        [bot()],
+        now=40,
+        memory=before.memory,
+        kraft=facts.Kraft("kraft-user", "w1", {}, frozenset(second)),
+    )
 
-    assert second.memory["bot:x"]["activity_at"] == (activity and activity.isoformat())
+    assert after.memory["bot:x"]["activity_at"] == (activity and activity.isoformat())
 
 
 def test_only_the_latest_summary_of_a_kind_is_collected():

@@ -165,6 +165,18 @@ def read(c, work_item_id: str) -> dict[str, Intent]:
     )
 
 
+def thread_ids(intents: Mapping[str, Intent]) -> frozenset[str]:
+    """The threads the record holds a reply in (posted or unclear): Kraft's conversation, whether
+    or not a Kraft note still shows there (a person may have deleted it)."""
+    return frozenset(
+        i.payload["thread"]
+        for i in intents.values()
+        if i.payload.get("op") == "reply"
+        and i.payload.get("thread")
+        and i.state in ("posted", "unclear")
+    )
+
+
 def posted_hashes(intents: Mapping[str, Intent]) -> dict[str, str]:
     """Every id of every note the record holds as posted, to the hash of the body the
     forge returned (`facts.is_kraft_note`)."""

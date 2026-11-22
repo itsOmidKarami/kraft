@@ -343,7 +343,9 @@ class _Point:
         return self.db.read(lambda c: record.read(c, self.wid))
 
     def kraft(self, intents) -> facts.Kraft:
-        return facts.Kraft(self.viewer, self.wid, record.posted_hashes(intents))
+        return facts.Kraft(
+            self.viewer, self.wid, record.posted_hashes(intents), record.thread_ids(intents)
+        )
 
     def latest(self):
         if self._latest is None:

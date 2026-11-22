@@ -1131,8 +1131,10 @@ async def _collect_review(
                 viewer = await forge.viewer(repo=repo)
             except ForgeError:
                 viewer = None
-        posted = db.read(lambda c: record.posted_hashes(record.read(c, work_item_id)))
-        kraft = facts.Kraft(viewer, work_item_id, posted)
+        held = db.read(lambda c: record.read(c, work_item_id))
+        kraft = facts.Kraft(
+            viewer, work_item_id, record.posted_hashes(held), record.thread_ids(held)
+        )
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
         work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,

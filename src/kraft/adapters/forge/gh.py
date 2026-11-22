@@ -141,7 +141,11 @@ def _bot_feedback(
     # is a review made only of replies in such threads (each reply on GitHub comes
     # wrapped in one): the bot's own review that opened the thread still counts.
     noted = [(t, _gh_notes((t.get("comments") or {}).get("nodes") or [])) for t in threads]
-    talk = {t["id"] for t, ns in noted if kraft is not None and kraft.talks_in(ns)}
+    talk = {
+        t["id"]
+        for t, ns in noted
+        if kraft is not None and (t["id"] in kraft.threads or kraft.talks_in(ns))
+    }
     replies_ = {n.review_id for t, ns in noted if t["id"] in talk for n in ns if n.reply_to}
     elsewhere = {
         n.review_id for t, ns in noted for n in ns if t["id"] not in talk or not n.reply_to

@@ -99,13 +99,17 @@ def note_by(
 @dataclass(frozen=True)
 class Kraft:
     """What tells Kraft's notes from everyone else's on one work item: the login it
-    writes as (None when unknown) and the reply record's posted hashes. The
+    writes as (None when unknown), the reply record's posted hashes and its threads. The
     collection, the head wait and the posting gate all ask it, so they never
     disagree."""
 
     viewer: str | None
     work_item_id: str
     posted: Mapping[str, str]
+    #: The ids of the threads the record holds a reply in (`record.thread_ids`): Kraft's
+    #: conversation whether or not a Kraft note still shows there, so a note a person
+    #: deleted, or a thread Kraft first posted in between two checks, is still its own.
+    threads: frozenset[str] = frozenset()
 
     def wrote(self, note: ForgeNote) -> bool:
         return is_kraft_note(

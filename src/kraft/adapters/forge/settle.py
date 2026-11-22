@@ -109,12 +109,17 @@ def _activity(
 ) -> tuple[datetime | None, list[str]]:
     """The bot's latest activity at this check, and its thread ids to remember. A
     thread Kraft has posted in is left out of those ids, so the bot resolving it
-    is not activity."""
-    thread_ids = sorted(t["id"] for t in item.threads if not _talks(t, kraft))
+    is not activity, and neither is a thread the record holds a reply in that has since been
+    resolved or has left the collection: the ids remembered from the last check are compared
+    less the ones excluded now."""
+    excluded = {t["id"] for t in item.threads if _talks(t, kraft)} | (
+        kraft.threads if kraft else set()
+    )
+    thread_ids = sorted(t["id"] for t in item.threads if t["id"] not in excluded)
     seen = [datetime.fromisoformat(prior["activity_at"])] if prior and prior["activity_at"] else []
     if item.last_activity is not None and item.last_activity > since:
         seen.append(item.last_activity)
-    if prior is not None and set(prior["threads"]) != set(thread_ids):
+    if prior is not None and set(prior["threads"]) - excluded != set(thread_ids):
         seen.append(now)
     return max(seen, default=None), thread_ids
 

@@ -13,6 +13,8 @@ from support.bot_threads import VIEWER, bot_thread, kraft_note, note
 
 from kraft import item_paths, waits
 from kraft.adapters import forge
+from kraft.adapters.forge.models import Posted
+from kraft.adapters.forge.replies import record
 from kraft.automated_review import BotReviewer
 
 from .test_run_push import on_branch  # noqa: F401 -- the fixture
@@ -72,3 +74,55 @@ async def test_a_replies_off_wait_never_reads_the_viewer(
     )
 
     assert ("viewer" in kept, reads, by) == (False, 0, ["bot", "person"])
+
+
+async def test_a_bot_resolving_a_thread_kraft_replied_in_does_not_settle_the_wait(
+    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+):
+    """Kraft posts in T1 between two checks (the thread shows no Kraft note), then the bot
+    resolves it: the thread leaving the collection is not the bot reviewing the push, so
+    the wait is still waiting once the grace period has passed."""
+    reviewer = BotReviewer(bot="a", replies=True)
+    raw, _ = bot_thread("T1", note("N1", "a", "fix"))
+    open_ = [forge.ReviewerFeedback(reviewer, None, (), (raw,))]
+    gone = [forge.ReviewerFeedback(reviewer, None, (), ())]
+    fake = forge.FakeForge(feedback_script=[open_, gone, gone])
+
+    async def viewer(*, repo):
+        return VIEWER
+
+    monkeypatch.setattr(fake, "viewer", viewer)
+    ask = {
+        "repo": on_branch,
+        "orig_repo": on_branch,
+        "node_id": "feedback",
+        "hook_point": _WAIT,
+        "reviewers": (reviewer,),
+        "reads_feedback": True,
+        "grace": timedelta(seconds=15),
+        "wait": forge.WaitBounds.from_seconds(timeout=600, initial=30, maximum=120),
+    }
+    db = run_forge.database
+
+    assert (await run_forge(fake, "automated_review", "s1", **ask))[0] == "waiting"
+    intent = record.new_id("w1")
+    payload = {
+        "op": "reply",
+        "node_id": "feedback",
+        "repo": str(on_branch),
+        "thread": "T1",
+        "kind": "declined",
+        "body_sha256": "0" * 64,
+        "head": "abc123",
+        "round": 0,
+        "session": "s1",
+    }
+    await db.write(lambda c: record.intend(c, "w1", intent, payload))
+    await db.write(
+        lambda c: record.posted(c, "w1", intent, Posted(("1", "N1"), "t", "b"), via="send")
+    )
+    wait_clock.advance(30)
+    assert (await run_forge(fake, "automated_review", "s1", **ask))[0] == "waiting"
+    wait_clock.advance(30)
+
+    assert (await run_forge(fake, "automated_review", "s1", **ask))[0] == "waiting"
