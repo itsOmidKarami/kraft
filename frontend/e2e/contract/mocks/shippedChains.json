@@ -655,7 +655,8 @@
          "grants": null,
          "sandbox": null,
          "time_cap_minutes": 120,
-         "total_time_cap_minutes": null
+         "total_time_cap_minutes": null,
+         "reply_timeout_minutes": null
         },
         "skippable": true,
         "icon": null,
@@ -1015,7 +1016,8 @@
            "grants": null,
            "sandbox": null,
            "time_cap_minutes": null,
-           "total_time_cap_minutes": 10
+           "total_time_cap_minutes": 10,
+           "reply_timeout_minutes": null
           },
           "skippable": true,
           "icon": null,
@@ -1095,7 +1097,8 @@
            "grants": null,
            "sandbox": null,
            "time_cap_minutes": null,
-           "total_time_cap_minutes": 90
+           "total_time_cap_minutes": 90,
+           "reply_timeout_minutes": null
           },
           "skippable": true,
           "icon": null,
@@ -1409,7 +1412,8 @@
          "grants": null,
          "sandbox": null,
          "time_cap_minutes": null,
-         "total_time_cap_minutes": 10080
+         "total_time_cap_minutes": 10080,
+         "reply_timeout_minutes": null
         },
         "skippable": true,
         "icon": null,
@@ -1517,7 +1521,8 @@
          "grants": null,
          "sandbox": null,
          "time_cap_minutes": null,
-         "total_time_cap_minutes": 90
+         "total_time_cap_minutes": 90,
+         "reply_timeout_minutes": null
         },
         "skippable": true,
         "icon": null,
@@ -1622,7 +1627,8 @@
          "grants": null,
          "sandbox": null,
          "time_cap_minutes": 120,
-         "total_time_cap_minutes": null
+         "total_time_cap_minutes": null,
+         "reply_timeout_minutes": null
         },
         "skippable": true,
         "icon": null,
