@@ -738,7 +738,9 @@ async def set_work_item_policy(
     policy: dict | None = None, *, clear: bool = False, work_item_id: str | None = None
 ) -> dict:
     """Set or clear a work item's own policy override (Kraft-ab1bh): item-wide
-    fields (`max_attempts`, `timeout_minutes`, `allowed_harnesses`; the time
+    fields (`max_attempts`, `timeout_minutes`, `allowed_harnesses`, the reply
+    limits `reply_cap_per_thread`, `reply_rounds_per_head` and
+    `reply_timeout_minutes`; the time
     caps `time_cap_minutes` and `total_time_cap_minutes`, and the safety
     fields, which only tighten) plus
     `paths: {canonical path: {field: value}}` for one node, step or task. It

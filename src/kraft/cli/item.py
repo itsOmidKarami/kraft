@@ -17,7 +17,9 @@ from kraft.vocab import DiffSide, ReplyClaim, ReviewOutcome, ThreadLabel, WorkIt
 _POLICY_HELP = (
     "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
     "node, step or task by canonical path (repeatable), e.g. "
-    "merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 or max_attempts=4"
+    "merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 or max_attempts=4 "
+    "(`reply_cap_per_thread`, `reply_rounds_per_head` and `reply_timeout_minutes` bound "
+    "the replies to review bots)"
 )
 
 

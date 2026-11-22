@@ -42,7 +42,13 @@ HOUSEKEEPING = (
     "attribution.mr",
 )
 FINDINGS = ("findings.loop_severities",)
-SECTION_FIELDS = ("max_attempts", "timeout_minutes")
+SECTION_FIELDS = (
+    "max_attempts",
+    "timeout_minutes",
+    "reply_cap_per_thread",
+    "reply_rounds_per_head",
+    "reply_timeout_minutes",
+)
 HARNESS_FIELDS = ("allowed_harnesses", "allowed_tools", "escalation_harness", "escalation_grants")
 
 

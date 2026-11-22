@@ -177,6 +177,38 @@ def test_set_value_refuses_a_key_outside_its_scope(client):
     assert ops(client, set_value("harnesses", "maxima.allowed_harnesses", [])).status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("section", "key"),
+    [
+        (section, key)
+        for section in ("defaults", "maxima")
+        for key in ("reply_cap_per_thread", "reply_rounds_per_head", "reply_timeout_minutes")
+    ],
+    ids=[
+        f"{section}-{key.replace('_', '-')}"
+        for section in ("defaults", "maxima")
+        for key in ("reply_cap_per_thread", "reply_rounds_per_head", "reply_timeout_minutes")
+    ],
+)
+def test_a_reply_limit_is_edited_under_defaults_and_maxima(client, section, key):
+    body = resolved(client, set_value("limits", f"{section}.{key}", 3))
+
+    assert written(client)[section] == {key: 3}
+    leaf = body["resolved"]["limits"][key]["default" if section == "defaults" else "maximum"]
+    assert leaf["value"] == 3
+
+    body = resolved(client, set_value("limits", f"{section}.{key}", None))
+    assert section not in written(client)
+    assert body["resolved"]["limits"][key]["default"]["value"] is None
+
+
+def test_a_reply_limit_under_a_level_is_refused(client):
+    r = ops(client, set_value("limits", "defaults.tasks.reply_timeout_minutes", 3))
+
+    assert r.status_code == 422
+    assert "not a limits setting this draft edits" in r.text
+
+
 def test_set_loop_and_remove_loop_write_the_entry(client):
     ops(client, {"op": "set_loop", "key": "plainn.fix_loop", "max_attempts": 4})
     assert written(client)["loops"] == {"plainn.fix_loop": {"attempts": 4, "wall_clock_s": 3600}}

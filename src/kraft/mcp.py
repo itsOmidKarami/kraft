@@ -634,8 +634,9 @@ def build() -> MCPServer:
     ) -> dict:
         """Set or clear a Kraft work item's own policy override, for that item
         only -- never its chain or any other item. `policy` holds
-        item-wide fields (`max_attempts`, `timeout_minutes`,
-        `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
+        item-wide fields (`max_attempts`, `timeout_minutes`, the review-bot
+        reply limits `reply_cap_per_thread`, `reply_rounds_per_head`,
+        `reply_timeout_minutes`, `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
         profile an escalation turn runs on, or "item" for the one the item's
         own work ran on -- the caps `time_cap_minutes`,
         `total_time_cap_minutes` (a wait's total cap is its timeout),
