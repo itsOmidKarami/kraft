@@ -1494,6 +1494,14 @@ def _item_paused(db, work_item_id: str) -> bool:
     return row is not None and row["status"] == WorkItemStatus.PAUSED
 
 
+async def _reply_round_of(db, row, node, worktree):
+    """The reply round `node` is in, or None. The head is asked for only once an open round is
+    found: a repository that never starts one pays a DB read and no `git rev-parse`."""
+    return await _reply_round.current(
+        db, row["id"], node.id, lambda: _reply_round.item_head(row, worktree)
+    )
+
+
 async def dispatch_node(
     db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
 ) -> str:
@@ -1701,7 +1709,15 @@ async def _dispatch_task_in(
     if (
         isinstance(t, AgentTask)
         and AgentInput.BOT_FEEDBACK in t.inputs
-        and prompts.bot_feedback_source(db, run_dirs, work_item_row["id"], node, round) is None
+        and prompts.bot_feedback_source(
+            db,
+            run_dirs,
+            work_item_row["id"],
+            node,
+            round,
+            await _reply_round_of(db, work_item_row, node, worktree),
+        )
+        is None
     ):
         return await skipped_session(
             db,
@@ -2546,7 +2562,13 @@ async def _launch_agent(
     feedback = None
     if AgentInput.BOT_FEEDBACK in t.inputs:
         feedback = prompts.bot_feedback(
-            db, run_dirs, work_item_row["id"], node, common["round"], common["session_id"]
+            db,
+            run_dirs,
+            work_item_row["id"],
+            node,
+            common["round"],
+            common["session_id"],
+            reply=await _reply_round_of(db, work_item_row, node, worktree),
         )
     # Step outputs: this candidate's own session gets its own output folder, and
     # is told about it after whatever instruction it runs (`AGENT_RESUMED_NOTE`
@@ -3299,6 +3321,15 @@ def _current_rows(
     return current
 
 
+def _skipped_triage(task: ResolvedTask, rows) -> bool:
+    """A triage that started no agent: `skipped_session`'s `done` row with no head."""
+    return (
+        isinstance(task.task, AgentTask)
+        and AgentInput.BOT_FEEDBACK in task.task.inputs
+        and all(r["head_sha"] is None and r["status"] == "done" for r in rows)
+    )
+
+
 def collect_findings(
     db,
     work_item_id: str,
@@ -3309,6 +3340,7 @@ def collect_findings(
     dropped: dict[str, int] | None = None,
     has_session: dict[str, bool] | None = None,
     run_dirs=None,
+    reply_round: bool = False,
 ):
     """(findings, task paths that reported at least one) for one cycle.
 
@@ -3325,7 +3357,10 @@ def collect_findings(
     session at this round}` for every measuring task, so a caller can record
     which tasks this measurement read. A step that fails stops the steps after
     it, and without this a round the later task never ran in reads the same as
-    one where it ran and found nothing.
+    one where it ran and found nothing. In a reply round (`reply_round`) a triage
+    that started no agent because nothing new was said (`skipped_session`'s `done` row
+    with no head) has no session either: it did not measure, and must not read as
+    "triage found nothing".
 
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
@@ -3386,7 +3421,13 @@ def collect_findings(
         _reached(db, work_item_id, node) if steps is None else None,
     )
     if has_session is not None:
-        has_session.update({path: path in by_hook for path in tasks})
+        has_session.update(
+            {
+                path: path in by_hook
+                and not (reply_round and _skipped_triage(tasks[path], by_hook[path]))
+                for path in tasks
+            }
+        )
     found: list[_findings.Finding] = []
     reported: set[str] = set()
     for hook, rows_to_read in by_hook.items():

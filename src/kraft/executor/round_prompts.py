@@ -14,6 +14,8 @@ from kraft import findings as _findings
 from kraft import item_paths, store
 from kraft import review as _review
 from kraft.config import git_read
+from kraft.executor import reply_round
+from kraft.executor.reply_round import ReplyRound
 from kraft.templates.models import AgentInput, AgentTask, ForgeAction, ForgeTask, ResolvedTask
 from kraft.vocab import ADVANCING, RESTARTS_RUN
 from kraft.vocab.sql import marks
@@ -317,7 +319,9 @@ def review_package(
     return str(path) if path else None
 
 
-def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Path | None:
+def bot_feedback_source(
+    db, run_dirs, work_item_id: str, node, round: int, reply: ReplyRound | None = None
+) -> Path | None:
     """The collection this pass of `node` has to read, or None when it holds
     nothing to read: the newest session of this node and round, begun since the
     run last restarted, of one of its `mr.automated_review` tasks (the review
@@ -330,7 +334,12 @@ def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Pa
     from a pass before the last repair describes a head that is gone, and
     handing it on would have the triage judge feedback the repair already
     answered. Not "since the node last started": a wait that parked is
-    re-entered through `node_started` again, after its own session began."""
+    re-entered through `node_started` again, after its own session began.
+
+    In a reply round (`reply`) the question is a different one: whether a configured bot's
+    note, created after the node's latest triage read the bots, stands in a thread the round
+    was started for (`reply_round.has_new_bot_note`). Edits, summaries, other threads, people
+    and Kraft's own notes do not start it; with no triage in the node's run it runs."""
     hooks = [
         t.path
         for t in node.tasks()
@@ -360,6 +369,13 @@ def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Pa
         collected = json.loads(source.read_text())["reviewers"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if reply is not None:
+        _, run_at = db.read(lambda c: reply_round.run_start(c, work_item_id, node.id))
+        last = db.read(lambda c: reply_round.latest_triage(c, work_item_id, node, run_at))
+        if last is None:
+            return source  # no triage in this run has read the bots: it runs
+        read_at = reply_round.when(collection(run_dirs, work_item_id, last["id"]).get("read_at"))
+        return source if reply_round.has_new_bot_note(collected, read_at, reply.threads) else None
     said = any(
         isinstance(r, dict)
         and (
@@ -375,12 +391,21 @@ def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Pa
     return source if said else None
 
 
-def bot_feedback(db, run_dirs, work_item_id: str, node, round: int, session_id: str) -> str | None:
+def bot_feedback(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node,
+    round: int,
+    session_id: str,
+    *,
+    reply: ReplyRound | None = None,
+) -> str | None:
     """What the review bots said, copied to where the session `session_id` is
     handed it (`SessionFiles.bot_feedback`), and that path; None when there is
     nothing to read (`bot_feedback_source`). `dispatch` calls it for an agent
     task that declares `inputs: [bot_feedback]` and for no other."""
-    source = bot_feedback_source(db, run_dirs, work_item_id, node, round)
+    source = bot_feedback_source(db, run_dirs, work_item_id, node, round, reply)
     if source is None:
         return None
     own = item_paths.session_files(run_dirs, work_item_id, session_id).bot_feedback

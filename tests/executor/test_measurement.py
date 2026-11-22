@@ -422,6 +422,47 @@ async def test_a_measurement_reads_only_the_steps_it_reached(item_on, early, rea
     assert "b finding" in [f.message for f in found]
 
 
+@pytest.mark.parametrize(
+    "in_round, inputs, head, has",
+    [
+        (True, ["bot_feedback"], None, False),
+        (False, ["bot_feedback"], None, True),
+        (True, ["bot_feedback"], "abc", True),
+        (True, [], None, True),
+    ],
+    ids=[
+        "reply-round-skip",
+        "ordinary-skip",
+        "reply-round-real-session",
+        "reply-round-non-triage-task-with-no-head",
+    ],
+)
+async def test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task(
+    item_on, in_round, inputs, head, has
+):
+    """`a-reply-round-s-triage-reads-only-what-is-new`: a triage that started no agent
+    because nothing new was said (a `done` row with no head) has no session in a reply
+    round, so the record lists it as unmeasured instead of "found nothing". Only the
+    triage's skip row is special, and an ordinary measurement is unchanged."""
+    node_def = {
+        "id": "verify",
+        "kind": "exec",
+        "steps": [{"id": "s0", "tasks": [_agent("triage", inputs=inputs)]}],
+        "fix_loop": {"tasks": [_agent("fix")]},
+    }
+    it = await item_on([node_def], repo="/r")
+    node = it.chain.chain.nodes[0]
+    path = node.steps[0].tasks[0].path
+    await it.session("t0", path, "done", head_sha=head)
+
+    has_session: dict[str, bool] = {}
+    dispatch.collect_findings(
+        it.database, it.id, node, 0, has_session=has_session, reply_round=in_round
+    )
+
+    assert has_session[path] is has
+
+
 async def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(item_on):
     """A gate rejection or ci_wait poll re-entering a fix_loop node must not
     inherit the last pass's fix-task needs_context (review finding 5).

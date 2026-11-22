@@ -33,6 +33,20 @@ def when(value) -> datetime | None:
         return None
 
 
+def has_new_bot_note(collected: list, read_at: datetime | None, threads: tuple[str, ...]) -> bool:
+    """Whether a configured bot's note, created after the latest triage read the bots, stands in
+    a thread the round was started for. `read_at` None: no triage has read them."""
+    for r in collected:
+        for t in (r.get("threads") or ()) if isinstance(r, dict) else ():
+            if t.get("id") not in threads:
+                continue
+            for n in t.get("notes") or ():
+                at = when(n.get("created_at"))
+                if n.get("by") == "bot" and at is not None and (read_at is None or at > read_at):
+                    return True
+    return False
+
+
 def item_head(row, worktree) -> str | None:
     """The item's head, as every reader of it reads it: the checkout's HEAD, or an in-place
     item's branch tip (`inplace.head_ref`)."""

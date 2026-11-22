@@ -13,6 +13,7 @@ from support.harness import commit_all, entry_of, v1_named_chain, v1_node, v1_ta
 
 from kraft import events, executor
 from kraft.executor import dispatch, prompts
+from kraft.executor.reply_round import ReplyRound
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import AgentInput
 
@@ -468,3 +469,62 @@ def test_the_seeded_merge_request_tasks_declare_pr_rules(task):
     pull-request rules."""
     library = Path(__file__).resolve().parents[2] / "config" / "library.yaml"
     assert "pr_rules" in yaml.safe_load(library.read_text())["tasks"][task]["inputs"]
+
+
+def _threaded(*notes: dict, tid: str = "t1") -> dict:
+    """A collection with one open bot thread holding `notes`."""
+    thread = {"id": tid, "file": "calc.py", "line": 3, "body": "unused x", "notes": list(notes)}
+    return _collection(True, threads=[thread])
+
+
+def _note(by: str, at: str, **extra) -> dict:
+    return {"by": by, "created_at": at, "body": "text", **extra}
+
+
+_LAST_READ = "2026-01-01T00:02:00Z"
+_BEFORE, _AFTER = "2026-01-01T00:01:00Z", "2026-01-01T00:03:00Z"
+
+
+@pytest.mark.parametrize(
+    "notes, round_threads, triaged, reply, runs",
+    [
+        ([_note("bot", _AFTER)], ("t1",), True, True, True),
+        ([_note("bot", _BEFORE)], ("t1",), True, True, False),
+        ([_note("bot", _BEFORE, updated_at=_AFTER)], ("t1",), True, True, False),
+        ([_note("bot", _AFTER)], ("t2",), True, True, False),
+        ([_note("bot", _BEFORE)], ("t1",), False, True, True),
+        ([_note("person", _AFTER)], ("t1",), True, True, False),
+        ([_note("kraft", _AFTER)], ("t1",), True, True, False),
+        ([_note("bot", _BEFORE)], ("t1",), True, False, True),
+        ([_note("bot", _BEFORE)], (), True, True, False),
+    ],
+    ids=[
+        "new-bot-note-runs",
+        "answer-before-the-last-read-skips",
+        "edit-only-skips",
+        "other-thread-skips",
+        "no-latest-triage-runs",
+        "a-person-note-skips",
+        "kraft-note-only-skips",
+        "outside-a-round-part-1-still-runs-on-a-thread",
+        "a-round-naming-no-thread-skips",
+    ],
+)
+async def test_bot_feedback_in_a_reply_round(item_on, notes, round_threads, triaged, reply, runs):
+    """`a-reply-round-s-triage-reads-only-what-is-new`: in a reply round the triage runs
+    only if a configured bot's note, created after the latest triage read the bots,
+    stands in a thread the round was started for. Outside one, Part 1's rule: any open
+    thread runs it."""
+    it = await item_on(_bot_node(inputs=["bot_feedback"]), "review")
+    await _waited(it, _threaded(*notes))
+    if triaged:
+        await it.session("t0", "review.decide.judge", "done", head_sha="abc123")
+        written = it.files("t0").bot_feedback
+        written.parent.mkdir(parents=True, exist_ok=True)
+        written.write_text(json.dumps({"read_at": _LAST_READ, "reviewers": []}))
+    node = it.chain.chain.nodes[0]
+    in_round = ReplyRound(1, "abc123", 0, round_threads) if reply else None
+
+    got = prompts.bot_feedback_source(it.database, it.run_dirs, it.id, node, 0, in_round)
+
+    assert (got is not None) is runs
