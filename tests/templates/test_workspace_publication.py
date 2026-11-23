@@ -16,6 +16,7 @@ from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspa
 
 from kraft import events, store
 from kraft.adapters import forge
+from kraft.adapters.forge.git import CliUnavailable
 from kraft.executor.context import LaunchContext
 from kraft.templates.models import DEFAULT_WAIT
 
@@ -250,23 +251,41 @@ def _base_ref(database, row) -> str | None:
     )["base_ref"]
 
 
-@pytest.mark.parametrize("handler", ["ci_poll", "merge"])
 @pytest.mark.parametrize(
-    ("bounce", "expected"),
-    [(True, "base_moved"), (False, "waiting")],
-    ids=["a-declared-restart-re-verifies-it", "undeclared-it-waits-for-the-rebased-heads-ci"],
+    ("handler", "bounce", "root_source", "root_fails", "expected"),
+    [
+        ("ci_poll", True, False, False, "base_moved"),
+        ("merge", True, False, False, "base_moved"),
+        ("ci_poll", False, False, False, "waiting"),
+        ("merge", False, False, False, "waiting"),
+        # `merge` stops at the rebased member, so only a CI wait reads a root after it.
+        ("ci_poll", True, True, False, "base_moved"),
+        ("ci_poll", True, True, True, "config_error"),
+    ],
+    ids=[
+        "a-declared-restart-re-verifies-it-ci_poll",
+        "a-declared-restart-re-verifies-it-merge",
+        "undeclared-it-waits-for-the-rebased-heads-ci-ci_poll",
+        "undeclared-it-waits-for-the-rebased-heads-ci-merge",
+        "a-declared-restart-re-verifies-it-past-a-root-still-waiting-ci_poll",
+        "a-stop-for-a-person-on-the-root-is-not-hidden-ci_poll",
+    ],
 )
 async def test_a_members_conflict_is_rebased_onto_its_own_origin(
-    database, run_dirs, tmp_path, monkeypatch, handler, bounce, expected
+    database, run_dirs, tmp_path, monkeypatch, handler, bounce, root_source, root_fails, expected
 ):
     """Kraft-puqxq: a member's conflict rebase reads the member's own origin
     and default branch, never the root's, though dispatch hands the forge
     node the root's source repository as `orig_repo`. The item's `base_ref`
     is the root's, so the member's move is reported as one instead of being
-    written there. Kraft-tx0dz: a node with no base-change restart to
-    re-verify the rebased head waits for that head's own CI instead -- the
-    pipeline here still answers for the head before the rebase."""
-    row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
+    written there -- past a root still waiting, too: a root with changes
+    of its own is read after its members, and its pipeline here is for another
+    head, so it is still waiting. Kraft-tx0dz: a node with no base-change
+    restart to re-verify the rebased head waits for that head's own CI
+    instead -- the pipeline here still answers for the head before the rebase."""
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=root_source
+    )
     (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
     git(tmp_path / "pkg", "add", "moved.txt")
     git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
@@ -282,6 +301,15 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     base_ref = _base_ref(database, row)
     # J3: the rebase commits as the root, whose identity is the only one.
     only_the_root_has_an_identity(monkeypatch, tmp_path, row)
+    if root_fails:
+        read = fake.ci_status
+
+        async def unavailable_on_the_root(*, repo, **kw):
+            if Path(repo) == worktree:
+                raise CliUnavailable("gh is gone")
+            return await read(repo=repo, **kw)
+
+        monkeypatch.setattr(fake, "ci_status", unavailable_on_the_root)
 
     result = await _run(
         *(database, run_dirs, row, worktree, fake, monkeypatch, handler),
@@ -295,27 +323,38 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     assert _base_ref(database, row) == base_ref
 
 
+@pytest.mark.parametrize("bounce", [False, True], ids=["undeclared", "declares-a-base-restart"])
 async def test_a_member_dropped_from_its_merge_train_stays_open(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, bounce
 ):
     """The forge took a member's merge request off its merge train after
     Kraft asked: `merge_rejected`, and the member's row stays `open` for the
-    node's merge-rejection recovery rather than recorded `failed`."""
+    node's merge-rejection recovery rather than recorded `failed`. The drop's
+    rebase moved the member, and that never turns it into a plain base move,
+    which would skip the recovery and keep the approved gates."""
     row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
     drop = forge.QueueRead(kind="train", state="dropped", cause="conflict", reason="conflict")
     fake = forge.FakeForge(queue_kind="train", queue_drops=[drop], ci_states=["success"])
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
     only_the_root_has_an_identity(monkeypatch, tmp_path, row)
+    (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
+    git(tmp_path / "pkg", "add", "moved.txt")
+    git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
+    moved = git(tmp_path / "pkg", "rev-parse", "main")
+    base_ref = _base_ref(database, row)
 
     results = [
         await _run(
             *(database, run_dirs, row, worktree, fake, monkeypatch, "merge"),
             orig_repo=Path(row["repo"]),
+            has_rebase_bounce=bounce,
         )
         for _ in range(2)
     ]
 
     assert results == ["waiting", "merge_rejected"]
+    assert git(worktree / "repos" / "pkg", "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert _base_ref(database, row) == base_ref, "the member's head is not the root's base"
     assert _repos(database, row)["submodule"] == "open"
 
 

@@ -23,6 +23,7 @@ class ChainEvent(StrEnum):
     NODE_RECOVERY_STARTED = "node_recovery_started"
     RUN_FORKED = "run_forked"
     BASE_CHANGE_RESTART = "base_change_restart"
+    BASE_MOVE_HELD = "base_move_held"
     MERGE_REJECTION_RESTART = "merge_rejection_restart"
     WORKTREE_REBASE_VERIFIED = "worktree_rebase_verified"
     WORKTREE_REFRESH_SKIPPED = "worktree_refresh_skipped"
@@ -58,6 +59,7 @@ CHAIN_EVENT_TRAITS = total(
         ChainEvent.NODE_RECOVERY_STARTED: _PLAIN,
         ChainEvent.RUN_FORKED: EventTraits(restarts_run=True),
         ChainEvent.BASE_CHANGE_RESTART: EventTraits(restarts_run=True),
+        ChainEvent.BASE_MOVE_HELD: _PLAIN,
         ChainEvent.MERGE_REJECTION_RESTART: EventTraits(restarts_run=True),
         ChainEvent.WORKTREE_REBASE_VERIFIED: _PLAIN,
         ChainEvent.WORKTREE_REFRESH_SKIPPED: _PLAIN,

@@ -3124,6 +3124,8 @@ async def _restart_span(
         ]
         await _reopen_gates(db, work_item_id, nodes, finals, "base_changed")
     await _clear_span_counters(db, work_item_id, span)
+    # No walk observes a wait of this run again, and a later one must not reuse its row.
+    await db.write(lambda c: store.close_parked_sessions(c, work_item_id, node.id))
     # The cursor moves last, after the gates reopened: a crash before it
     # leaves the item on node `index`, where a resume finds its unanswered
     # drop (`hold_interrupted_repair`); one after it resumes at the restart.
@@ -3542,6 +3544,15 @@ async def run_once(
             continue
         base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
         pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
+        # A move this node made before a person's stop still counts on this walk.
+        held = None
+        if base_change is not None:
+            start = next(j for j, n in enumerate(nodes) if n.id == base_change.restart_from)
+            rerun = frozenset(n.id for n in nodes[start + 1 : i + 1])
+            held = db.read(
+                lambda c, n=node.id, r=rerun: store.held_base_move(c, work_item_id, n, r)
+            )
+            pre_base = pre_base if held is None else held
         if isinstance(node.node, GroupNode):
             from kraft.executor import slices
 
@@ -3579,17 +3590,52 @@ async def run_once(
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue
             # the loop -- a chance to consume `carried` beyond what it just
-            # got. Report it here, once, rather than duplicating this check
-            # at each of the four returns below (Kraft-s7c04.50).
+            # got. Report it here, once, for all four statuses (Kraft-s7c04.50).
             await _report_if_undelivered(db, work_item_id, carried)
-        if result == "paused":
-            return "paused"
-        if result == "needs_human":
-            return "needs_human"
-        if result == RATE_LIMITED:
-            return RATE_LIMITED
-        if result == WAITING:
-            return WAITING
+            # A base the node moved before it stopped (its CI wait's conflict
+            # rebase, then a wait still pending or a failed push) is the entry
+            # base of the next call, which then sees no move. At Kraft's own
+            # park, stand the item at the restart now. A person's stop stays on
+            # the node they are looking at, where their steer or answer lands:
+            # the move is recorded, and the next walk of this node restarts.
+            # Neither for an item another door has since taken.
+            if (
+                base_change is not None
+                and dispatch._current_base_ref(db, work_item_id) != pre_base
+                and db.read(
+                    lambda c: c.execute(
+                        "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+                    ).fetchone()["status"]
+                )
+                == result
+            ):
+                if result in (RATE_LIMITED, WAITING):
+                    key = f"{node.id}.on_base_changed"
+                    restarted = await _restart_span(
+                        db,
+                        work_item_id,
+                        nodes,
+                        i,
+                        base_change.restart_from,
+                        policy,
+                        key=key,
+                        cap=_base_change_cap(key),
+                        restart_event=ChainEvent.BASE_CHANGE_RESTART,
+                        reopen_gates=False,
+                        reopen_reason="conflict_resolved",
+                    )
+                    if restarted is None:
+                        return "needs_human"
+                elif held is None:
+                    await db.write(
+                        lambda c, n=node.id, b=pre_base: events.append(
+                            c,
+                            work_item_id,
+                            ChainEvent.BASE_MOVE_HELD,
+                            {"node_id": n, "before": b or ""},
+                        )
+                    )
+            return result
         if result in (MERGE_REWIND, MERGE_REPAIRED, ESCALATION_COMMITTED):
             # Ahead of the base-change branch: Kraft's own forced rebase on the
             # drop moved `base_ref` too, and on a node declaring both policies

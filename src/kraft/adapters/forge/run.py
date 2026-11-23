@@ -1630,6 +1630,7 @@ async def _run_one(
                     # `merge` does below (Kraft-tx0dz).
                     log += "waiting for the rebased head's pipeline\n"
                     status = "waiting"
+                    reply = None  # a round's deadline is for the head it measured green
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
             if (
@@ -1917,14 +1918,14 @@ async def _run_one(
                     f"no open merge request for {branch!r}"
                     + (f": !{existing.number} is {existing.state}" if existing else "")
                 )
-            elif requested and (moved := _moved_head(db, work_item_id, repo, existing)):
+            elif requested and (foreign := _moved_head(db, work_item_id, repo, existing)):
                 # Asked, and since then the forge's head is not the approved one: a
                 # commit reached the merge request, which the forge would merge
                 # when its checks pass. Cancelled while it still can be (a failed
                 # cancel fails the node: the forge may still merge), then held.
                 await forge.cancel_merge(repo=repo, branch=branch, mr=existing)
-                log = f"cancelled the merge of !{existing.number}, now at {moved[1][:12]}\n"
-                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, moved[1])
+                log = f"cancelled the merge of !{existing.number}, now at {foreign[1][:12]}\n"
+                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, foreign[1])
                 status = "unreviewed"
             elif requested:
                 # This wait already asked for the merge; it is only reading
@@ -3059,7 +3060,10 @@ async def run_task(
         forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
-    # `builtins.mr_rebase` does, so the node's declared span re-verifies it.
+    # `builtins.mr_rebase` does, so the node's declared span re-verifies it --
+    # whatever the targets after it reported, or the move is never seen again.
+    # Not over a drop from the merge queue, whose own restart reopens the gates,
+    # or a stop a person must look at first.
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
@@ -3073,7 +3077,9 @@ async def run_task(
         return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
-    return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
+    if moved and has_rebase_bounce and recorded not in ("merge_rejected", "config_error"):
+        return BASE_MOVED
+    return recorded
 
 
 async def _observed(

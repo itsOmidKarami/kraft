@@ -11,6 +11,7 @@ from datetime import timedelta
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge import run as forge_run
 from kraft.adapters.forge.replies import owed
 
 from .test_run_push import on_branch  # noqa: F401 -- the fixture
@@ -82,3 +83,25 @@ async def test_a_later_head_s_ci_look_keeps_the_ci_waits_own_timeout(
     assert _ended(run_forge) == ["superseded"]
     starts = run_forge.events("external_wait_started")
     assert starts[1]["deadline"] == wait_clock.at(301 + 90 * 60)
+
+
+async def test_a_rebase_in_a_reply_rounds_ci_look_waits_for_the_rebased_heads_ci(
+    run_forge, on_branch, wait_clock, monkeypatch
+):
+    """A node with no base-change restart rebases a conflict away past the round's deadline: the
+    rebased head has no green to complete on, so it waits on the CI wait's own timeout."""
+
+    async def rebased(*_a, **_k):
+        return "rebased\n", "done"
+
+    monkeypatch.setattr(forge_run, "_rebase_conflict_away", rebased)
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    await fake.open_mr(repo=on_branch, branch="kraft/w1", base="main", title="t", body="b")
+    wait_clock.advance(301)
+    reply = owed.ReplyWait(("T1",), _FIVE, wait_clock.start + timedelta(seconds=300))
+
+    got = await run_forge(fake, "ci_poll", "s1", reply=reply, repo=on_branch, orig_repo=on_branch)
+
+    assert got == ("waiting", "waiting")
+    [wait] = run_forge.events("external_wait_started")
+    assert wait["deadline"] == wait_clock.at(301 + 90 * 60)
