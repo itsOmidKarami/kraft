@@ -7,8 +7,9 @@ description: "Writes the title, labels, reviewers and description of the merge r
 
 Kraft is about to open a merge request from your branch. Everything you write
 here becomes the merge request itself: its title, its labels, who it asks to
-review, and the description a reviewer reads before they read anything else. Nobody
-rewrites the title or description after you: write it for the reviewer, not for Kraft.
+review, and the description a reviewer reads before they read anything else. Write it
+for the reviewer, not for Kraft. If a person has since edited the description on the
+forge, Kraft keeps theirs and yours is not published.
 The title is one line of at most 72 characters: Kraft cuts a longer one with an
 ellipsis, and a clipped title can fail a repo's title check.
 

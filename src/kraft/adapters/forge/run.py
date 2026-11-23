@@ -474,6 +474,67 @@ async def _record_push(
     await db.write(_write)
 
 
+def _record_description(c, work_item_id: str, node_id: str | None, repo: Path, sha: str) -> None:
+    events.append(
+        c,
+        work_item_id,
+        ForgeEvent.MR_DESCRIPTION_WRITTEN,
+        {"node_id": node_id, "repo": str(repo), "sha256": sha},
+    )
+
+
+async def _describe_mr(
+    forge: Forge,
+    db,
+    *,
+    work_item_id: str,
+    node_id: str | None,
+    orig_repo: Path,
+    repo: Path,
+    branch: str,
+    body: str,
+) -> tuple[str | None, str]:
+    """Rewrite an open merge request's description, unless that would destroy
+    what a person wrote there: the live text must be one Kraft recorded writing.
+    Anything else, an emptied body or a merge request with no record included,
+    stays as it is, whole, so nothing can come out half-merged.
+
+    Returns the description this replaced (None when it wrote nothing) and a log
+    line. Hashes go in before the write and every one counts, so a write that
+    landed with its answer lost, or never landed, is not mistaken for an edit."""
+    try:
+        live = await forge.mr_body(repo=repo, branch=branch)
+    except ForgeError:
+        return None, "could not read the description to check for edits: left it as it is\n"
+    new = mr_ops.body_hash(body)
+
+    def _decide(c) -> bool:
+        ours = {
+            row["sha"]
+            for row in c.execute(
+                "SELECT json_extract(payload, '$.sha256') AS sha FROM events "
+                "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ?",
+                (work_item_id, ForgeEvent.MR_DESCRIPTION_WRITTEN, str(orig_repo)),
+            )
+        }
+        if mr_ops.body_hash(live) not in ours | {new}:
+            events.append(
+                c,
+                work_item_id,
+                ForgeEvent.MR_DESCRIPTION_KEPT,
+                {"node_id": node_id, "repo": str(orig_repo)},
+            )
+            return False
+        if new not in ours:
+            _record_description(c, work_item_id, node_id, orig_repo, new)
+        return True
+
+    if not await db.write(_decide):
+        return None, "the description is not the one Kraft last wrote: left it as it is\n"
+    await forge.update_mr(repo=repo, branch=branch, body=body)
+    return live, ""
+
+
 async def _rebase_conflict_away(
     db,
     forge: Forge,
@@ -1469,15 +1530,28 @@ async def _run_one(
                     repo=repo,
                     branch=branch,
                 )
-                await forge.update_mr(repo=repo, branch=branch, body=body)
+                _, described = await _describe_mr(
+                    forge,
+                    db,
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    orig_repo=orig_repo,
+                    repo=repo,
+                    branch=branch,
+                    body=body,
+                )
                 number, url = existing.number, existing.url
-                log, status = f"reusing !{number}: {url}\n", "done"
+                log, status = f"reusing !{number}: {url}\n{described}", "done"
             else:
                 # ponytail: the description predates any commit `mr_checks`'
                 # fix loop adds -- `sync_mr` rebuilds the body from this same
                 # artifact, not from the newer head. Re-run on.mr.describe
                 # from the fix loop if CI-fix commits start changing the
                 # story.
+                sha = mr_ops.body_hash(body)
+                await db.write(
+                    lambda c: _record_description(c, work_item_id, node_id, orig_repo, sha)
+                )
                 mr = await forge.open_mr(
                     repo=repo,
                     branch=branch,
@@ -1820,21 +1894,26 @@ async def _run_one(
             )
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
-            # before a human is asked to read it (Kraft-c09h).
-            try:
-                live_body: str | None = await forge.mr_body(repo=repo, branch=branch)
-            except ForgeError:
-                live_body = None  # shortcut: best-effort read, the sync itself goes on
-            await forge.update_mr(repo=repo, branch=branch, body=body)
-            log, status = "pushed and synced the merge request description\n", "done"
+            # before a human is asked to read it (Kraft-c09h), unless a person
+            # edited it.
+            replaced, described = await _describe_mr(
+                forge,
+                db,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
+                repo=repo,
+                branch=branch,
+                body=body,
+            )
+            log = f"pushed and synced the merge request description\n{described}"
+            status = "done"
             # Editing a description triggers no workflow, so a check that read
             # the old one (a required section, say) stays red until its jobs
-            # run again. Only when the body changed AND the current head's
-            # checks are red: a sync after new commits sees a pending pipeline.
-            # shortcut: re-runs whenever the live description differs, including
-            # edits by a bot or a person, not only a repair; key it on the body
-            # Kraft last wrote if that costs CI.
-            if live_body is not None and live_body.strip() != body.strip():
+            # run again. Only when Kraft changed the body AND the current
+            # head's checks are red: a sync after new commits sees a pending
+            # pipeline.
+            if replaced is not None and replaced.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
                         repo=repo, mr=MR(number=0, url=""), branch=branch

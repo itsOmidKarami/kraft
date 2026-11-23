@@ -20,6 +20,7 @@ from kraft.executor.round_prompts import fix_attempt_note as fix_attempt_note
 from kraft.executor.round_prompts import format_findings as format_findings
 from kraft.executor.round_prompts import format_judge_history as format_judge_history
 from kraft.executor.round_prompts import last_review_session as last_review_session
+from kraft.executor.round_prompts import mr_description_note as mr_description_note
 from kraft.executor.round_prompts import named_with_kind as named_with_kind
 from kraft.executor.round_prompts import previous_attempt_note as previous_attempt_note
 from kraft.executor.round_prompts import previous_review_note as previous_review_note

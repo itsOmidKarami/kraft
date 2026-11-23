@@ -79,6 +79,8 @@
           "merge_refused_unreviewed",
           "merge_rejection_restart",
           "mr_closed",
+          "mr_description_kept",
+          "mr_description_written",
           "mr_labels_set",
           "mr_opened",
           "mr_reopened",

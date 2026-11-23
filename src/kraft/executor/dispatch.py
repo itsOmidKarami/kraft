@@ -2059,6 +2059,8 @@ async def _dispatch_task_in(
     if t.produces == "review_brief":
         instruction += prompts.deferred_findings_note(
             deferred_findings(db, work_item_row["id"], loop_severities)
+        ) + prompts.mr_description_note(
+            db, work_item_row["id"], run_dirs=run_dirs, worktree=worktree
         )
     if t.produces == revision.CHAIN_REVISION:
         instruction += revision.context_note(store.materialized_chain_of(work_item_row), node.id)

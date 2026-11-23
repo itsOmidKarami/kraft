@@ -213,7 +213,6 @@ async def test_open_mr_reuses_an_open_mr_for_the_branch(run_forge):
 
     assert list(fake.opened) == [7], "it opened a second merge request for one branch"
     assert fake.pushed == ["kraft/w1"]
-    assert fake.bodies["kraft/w1"], "the description was not rewritten from the branch head"
     assert "reusing !7" in run_forge.log("x5")
     assert run_forge.events("mr_opened") == [{"number": 7, "url": "http://fake.forge/7"}]
 
@@ -239,9 +238,92 @@ async def test_open_mr_uses_the_authored_title_labels_and_description(run_forge,
     assert fake.opened_titles[number] == "Authored title"
     assert fake.opened_meta[number].labels == ("release::minor",)
     assert fake.opened_bodies[number].startswith("## What this introduces")
-    fake.bodies["kraft/w1"] = "edited"
     await run_forge(fake, "sync_mr", "x9")
     assert fake.bodies["kraft/w1"].startswith("## What this introduces"), "sync_mr republishes it"
+
+
+def _rewrite_meta(worktree) -> str:
+    """What a second `describe_merge_request` leaves: a new authored body."""
+    new = "## What this introduces\n\nA window."
+    (worktree / ".engineering" / "mr_metas" / "w1.md").write_text(
+        f"---\nwork_item_ids: [w1]\nlabels: [release::minor]\n---\n{new}\n"
+    )
+    return new
+
+
+@pytest.mark.parametrize("handler", ["open_mr", "sync_mr"])
+@pytest.mark.parametrize(
+    "edit, kept",
+    [
+        (lambda body: body, False),
+        (lambda body: body.replace("\n", "\r\n") + "\n", False),
+        (lambda body: body + "\n\n## Changelog\n- A person's line.", True),
+        (lambda body: body.replace("A door", "A person's door"), True),
+        (lambda body: "", True),
+    ],
+    ids=["untouched", "forge-round-trip", "changelog-edit", "other-section-edit", "emptied"],
+)
+async def test_a_re_describe_replaces_only_a_description_kraft_wrote(
+    run_forge, tmp_path, handler, edit, kept
+):
+    """Whole or not at all, so nothing can come out half-merged, and a label a
+    person changed survives either way: no path here writes one."""
+    _write_meta(tmp_path, "labels: [release::none]\n")
+    fake = forge.FakeForge()
+    await run_forge(fake, "open_mr", "x1")
+    live = edit(fake.opened_bodies[1])
+    fake.bodies["kraft/w1"] = live
+    fake.labeled.append("release::patch")
+    new = _rewrite_meta(tmp_path)
+
+    await run_forge(fake, handler, "x2")
+
+    assert fake.labeled == ["release::patch"]
+    if kept:
+        assert fake.bodies["kraft/w1"] == live
+        assert [e["repo"] for e in run_forge.events("mr_description_kept")] == [str(tmp_path)]
+        assert "not the one Kraft last wrote" in run_forge.log("x2")
+    else:
+        assert fake.bodies["kraft/w1"].startswith(new)
+        assert run_forge.events("mr_description_kept") == []
+
+
+@pytest.mark.parametrize("handler", ["open_mr", "sync_mr"])
+@pytest.mark.parametrize("live", ["Written before Kraft kept a record.", ""], ids=["text", "empty"])
+async def test_a_merge_request_with_no_record_keeps_its_description(
+    run_forge, tmp_path, handler, live
+):
+    fake = forge.FakeForge()
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body=live)
+
+    await run_forge(fake, handler, "x2")
+
+    assert await fake.mr_body(repo=tmp_path, branch="kraft/w1") == live
+    assert len(run_forge.events("mr_description_kept")) == 1
+
+
+async def test_a_description_write_whose_answer_was_lost_is_not_read_as_an_edit(
+    run_forge, tmp_path
+):
+    class _LostAnswer(forge.FakeForge):
+        async def update_mr(self, *, repo, branch, body):
+            await super().update_mr(repo=repo, branch=branch, body=body)
+            if len(run_forge.events("mr_description_written")) == 2:
+                raise forge.ForgeError("connection reset after the write")
+
+    _write_meta(tmp_path, "")
+    fake = _LostAnswer()
+    await run_forge(fake, "open_mr", "x1")
+    _rewrite_meta(tmp_path)
+    await run_forge(fake, "sync_mr", "x2")
+    (tmp_path / ".engineering" / "mr_metas" / "w1.md").write_text(
+        "---\nwork_item_ids: [w1]\n---\nA third body.\n"
+    )
+
+    await run_forge(fake, "sync_mr", "x3")
+
+    assert fake.bodies["kraft/w1"].startswith("A third body.")
+    assert run_forge.events("mr_description_kept") == []
 
 
 async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge, item_on, tmp_path):
@@ -382,7 +464,11 @@ class _Recording(forge.FakeForge):
     ids=["ci_poll-pushes-then-polls", "sync_mr-pushes-describes", "merge-pushes-first"],
 )
 async def test_a_node_pushes_before_it_acts_on_the_head(run_forge, tmp_path, handler, expected):
-    fake = await _opened(_Recording(ci_states=["success"]), tmp_path)
+    fake = _Recording(ci_states=["success"])
+    await run_forge(fake, "open_mr", "b0")  # a description Kraft wrote, so sync may replace it
+    _write_meta(tmp_path, "")
+    fake.order.clear()
+    fake.pushed.clear()
 
     assert await run_forge(fake, handler, "b1") == ("done", "done")
 

@@ -46,8 +46,10 @@ pipeline starts; on GitHub the label edit re-runs workflows that trigger on
 A job that reads the merge request's description (for example `missing
 section: ## Testing`) is fixed in the item's `mr_meta` document, whose
 path is in the documents list above. Edit that file, not the live description:
-Kraft rebuilds the description from it on every sync, so an edit anywhere else
-is reverted. Keep its front matter, change only the body, and take the
+Kraft rebuilds the description from it on every sync. The exception is a
+description a person edited, which Kraft leaves alone: if `kraft view events
+--type mr_description_kept` lists one, your edit won't reach the forge, so change
+nothing, finish `done_with_concerns` and name the section they need to add. Keep its front matter, change only the body, and take the
 section's format from CONTRIBUTING, the PR template or the job's own checker
 (run it on the new body if the repo ships one). Fill it from the diff, never
 from guesswork; if you cannot tell what it should say, leave it. The `sync`

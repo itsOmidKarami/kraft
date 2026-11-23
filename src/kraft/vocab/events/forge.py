@@ -15,6 +15,11 @@ class ForgeEvent(StrEnum):
     MR_CLOSED = "mr_closed"
     MR_REOPENED = "mr_reopened"
     MR_LABELS_SET = "mr_labels_set"
+    #: The hash of a description Kraft is about to send: recorded before the write,
+    #: so a write whose answer was lost still reads as Kraft's own text.
+    MR_DESCRIPTION_WRITTEN = "mr_description_written"
+    #: The forge's description is not one Kraft wrote, so Kraft left it alone.
+    MR_DESCRIPTION_KEPT = "mr_description_kept"
     #: Kraft pushed the item's branch and the head it reached is new: the
     #: moment a review bot's activity starts counting for that head
     #: (`waits.pushed_at`).
@@ -78,6 +83,8 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.MR_CLOSED: _PLAIN,
         ForgeEvent.MR_REOPENED: _PLAIN,
         ForgeEvent.MR_LABELS_SET: _PLAIN,
+        ForgeEvent.MR_DESCRIPTION_WRITTEN: _PLAIN,
+        ForgeEvent.MR_DESCRIPTION_KEPT: _PLAIN,
         ForgeEvent.BRANCH_PUSHED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_STARTED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_OBSERVED: _PLAIN,
