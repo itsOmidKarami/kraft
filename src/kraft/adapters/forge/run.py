@@ -3028,7 +3028,7 @@ async def run_task(
                     {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
                 )
             )
-        elif exc.no_answer and status == "failed":
+        elif exc.no_answer and exc.reason in (None, "unreachable") and status == "failed":
             # Nothing about the work failed: no repair, no fix cycle. The session
             # ends unfinished, as a rate limit's does, and the walk parks.
             cut_off = True
