@@ -7,6 +7,7 @@ deadline. Through `forge.run_task` against a `FakeForge`."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import timedelta
 
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
@@ -14,7 +15,7 @@ from support.review_rig import bot_on
 
 from kraft import item_paths, waits
 from kraft.adapters import forge
-from kraft.adapters.forge.replies import owed
+from kraft.adapters.forge.replies import owed, record
 
 from .test_run_push import on_branch  # noqa: F401 -- the fixture
 
@@ -156,3 +157,51 @@ async def test_an_ordinary_wait_never_waits_for_a_reply_deadline(
     folder = item_paths.session_files(run_forge.run_dirs, "w1", "s1").folder
     [entry] = json.loads((folder / "bot_feedback.json").read_text())["reviewers"]
     assert entry["finished"] == "timeout"
+
+
+async def test_a_bot_resolving_a_thread_after_fixed_in_does_not_extend_the_next_heads_wait(
+    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+):
+    """Kraft posts in T1 between two checks of a head wait (the record knows, the first read
+    shows no Kraft note) and the bot then resolves it: the thread leaving the read is not bot
+    activity, so the wait settles on the bot's quiet. Dropping the record's threads from the
+    exclusion would read it as activity and keep waiting."""
+    raw, _ = bot_thread("T1", note("N1", "a", "fix", at=_clock(10)))
+    seen = forge.ReviewerFeedback(bot_on(), wait_clock.start + timedelta(seconds=10))
+    fake = forge.FakeForge(
+        feedback_script=[
+            [replace(seen, threads=(raw,))],
+            [seen],
+        ]
+    )
+
+    async def viewer(*, repo):
+        return VIEWER
+
+    monkeypatch.setattr(fake, "viewer", viewer)
+    ask = _ask(on_branch, reply=False)
+    wait_clock.advance(20)
+    assert (await run_forge(fake, "automated_review", "s1", **ask))[0] == "waiting"
+
+    iid = record.new_id("w1")
+    posted = forge.Posted(("1",), _clock(25), "Fixed in abc1234:\n\nRenamed it.")
+
+    def kraft_posted(c):
+        record.intend(
+            c,
+            "w1",
+            iid,
+            {
+                "op": "reply",
+                "node_id": "feedback",
+                "thread": "T1",
+                "kind": "fixed",
+                "body_sha256": "x" * 64,
+            },
+        )
+        record.posted(c, "w1", iid, posted, via="send")
+
+    await run_forge.database.write(kraft_posted)
+    wait_clock.advance(40)
+
+    assert (await run_forge(fake, "automated_review", "s1", **ask))[0] == "done"

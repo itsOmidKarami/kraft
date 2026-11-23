@@ -62,3 +62,23 @@ async def test_the_ci_look_in_a_reply_round(
     if with_reply and state == "pending" and at == 0:
         [wait] = [e for e in run_forge.events("external_wait_started")]
         assert wait["deadline"] == wait_clock.at(300), "the round's time, not the wait's 90 minutes"
+
+
+async def test_a_later_head_s_ci_look_keeps_the_ci_waits_own_timeout(
+    run_forge, on_branch, wait_clock
+):
+    """The head moves while a round's CI look is parked: the next look has no round, and its
+    pending pipeline must not time out at the round's deadline (a stop for a person) but start the
+    CI wait's own."""
+    fake = forge.FakeForge(ci_states=["pending"])
+    await fake.open_mr(repo=on_branch, branch="kraft/w1", base="main", title="t", body="b")
+    reply = owed.ReplyWait(("T1",), _FIVE, wait_clock.start + timedelta(seconds=300))
+    ask = {"repo": on_branch, "orig_repo": on_branch}
+    assert await run_forge(fake, "ci_poll", "s1", reply=reply, **ask) == ("waiting", "waiting")
+    wait_clock.advance(301)
+
+    assert (await run_forge(fake, "ci_poll", "s2", **ask))[0] == "waiting"
+
+    assert _ended(run_forge) == ["superseded"]
+    starts = run_forge.events("external_wait_started")
+    assert starts[1]["deadline"] == wait_clock.at(301 + 90 * 60)

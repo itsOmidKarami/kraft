@@ -1642,13 +1642,29 @@ async def _run_one(
                 # own timeout. Red is not touched here: it fails as ever. A new head has no `reply`.
                 at = waits.now()
                 over = at >= reply.deadline
-                note = WaitNote(None, {}, over, at, deadline=reply.deadline)
+                # Kept in the wait's start: a look of another head finds it and starts its own
+                # wait (below), never one that times out at this round's deadline.
+                note = WaitNote(
+                    None,
+                    {},
+                    over,
+                    at,
+                    started_extra={"reply_round": reply.deadline.isoformat()},
+                    deadline=reply.deadline,
+                )
                 if over:
                     log += (
                         "reply round: CI is still pending and the round's time is up; "
                         "completing on this head's earlier green measurement\n"
                     )
                     status = "done"
+            elif reply is None and status in ("waiting", "ci_pending"):
+                # No round now (the head moved, or it was repaired), but the open wait may have been
+                # started by one, with its short deadline: it is superseded by a wait of the CI
+                # task's own timeout, so a round never stops the item on a later head's pending CI.
+                open_wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+                if open_wait is not None and open_wait.started.get("reply_round"):
+                    note = WaitNote(None, {}, False, waits.now(), {"reply_round": None})
         case "pipeline_wait":
             log, status, findings, note = await _pipeline_wait(
                 forge,
