@@ -92,7 +92,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `automated_review` | `{bot: LOGIN}` or `{check: NAME}`, or a list of them | unset | The automated reviewers a chain's `mr.automated_review` task waits for. A list names several; `[]` names none. Unset: the task expects none. See [Automated review](#automated-review). _Added in 2.4_ |
+| `automated_review` | `{bot: LOGIN, replies, resolve_fixed}` or `{check: NAME}`, or a list of them | unset | The automated reviewers a chain's `mr.automated_review` task waits for. A list names several; `[]` names none. Unset: the task expects none. See [Automated review](#automated-review). `replies` and `resolve_fixed` are _Added in next_ |
 | `ci_checks` | boolean | `true` | Set `false` on a repo with no CI, so both CI waits pass at once instead of waiting on checks that never come. See [`ci_checks`](#ci_checks). |
 | `post_merge_publish_jobs` | list of globs | `[]` | Failed-job names that count as publish jobs, such as a deploy to Pages. A red post-merge pipeline whose every failed job matches still files the follow-up bead but pauses no item. See [`post_merge_publish_jobs`](#post_merge_publish_jobs). _Added in 2.6_ |
 | `library_auto_update` | boolean | `false` | Take text-only changes to this repo's accepted [repo library](/reference/configuration/repo-libraries#automatic-updates) without a person. |
@@ -242,11 +242,13 @@ _Added in 2.1_
 
 Reviewers can be named in three places. The nearest wins, and its list is the whole list:
 
-1. The item's own `reviewers` override on the review node: `kraft item set-node-override --node N --reviewer bot:LOGIN`.
+1. The item's own `reviewers` override on the review node: `kraft item set-node-override --node N --reviewer bot:LOGIN[:replies[:resolve_fixed]]`.
 2. This repo's `automated_review`.
 3. The review task's `config.reviewers` in the chain or library.
 
 `[]` counts as naming reviewers, meaning none: `automated_review: []` turns the review off even when the chain's task lists bots. A reviewer with both `bot` and `check`, or neither, is refused when the file loads. Unset here and everywhere else, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`.
+
+A bot entry also takes two switches, both off by default and left out of a dump when off. `replies: true` has Kraft answer that bot's threads. `resolve_fixed: true` also has it resolve the threads whose fix it confirmed, and needs `replies: true` on the same entry. A check entry takes neither, and the old `resolve: kraft` isn't a key. See [Let Kraft answer the review bots](/guides/customize/add-review-agents#let-kraft-answer-the-review-bots).
 
 How the wait treats what a reviewer said, and when it ends, is in [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).
 

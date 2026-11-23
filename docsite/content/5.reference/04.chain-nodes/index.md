@@ -284,7 +284,7 @@ A forge task's `config` holds the keys of its `target`. `mr.automated_review` an
 
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
-| `reviewers` | list of `{bot: LOGIN}` or `{check: NAME}` | no | unset | The reviewers it waits for. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. |
+| `reviewers` | list of `{bot: LOGIN, replies, resolve_fixed}` or `{check: NAME}` | no | unset | The reviewers it waits for. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. A bot's `replies` and `resolve_fixed` switches are _Added in next_ |
 | `watch_ci` | boolean | no | `false` | The wait also watches the merge request's CI. See [`watch_ci`](#watch_ci). _Added in next_ |
 | `grace_period` | duration | no | `60s` | How long a review bot must stay quiet after its last activity on the head to count as finished. |
 
@@ -322,7 +322,7 @@ A review wait that names its bots and waits for them to settle:
   kind: forge
   target: mr.automated_review
   config:
-    reviewers: [{bot: coderabbitai}, {check: security-scan}]
+    reviewers: [{bot: coderabbitai, replies: true}, {check: security-scan}]
     grace_period: 90s
 ```
 
