@@ -3,12 +3,15 @@ merge's stop says about the open bot threads when it may be held by that rule.""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge import git, open_threads
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import as_reviewers
 from kraft.executor import walk
@@ -130,22 +133,59 @@ _ROWS = {
     "blocked-rule-no-is-another-reason": ("MERGEABLE/BLOCKED", _POLICY, False, 1, None),
     "blocked-no-open-threads": ("MERGEABLE/BLOCKED", _POLICY, True, 0, None),
     "another-refusal": ("MERGEABLE/CLEAN", "405 Method Not Allowed", True, 1, None),
+    "gitlab-counts-the-discussions": (
+        "",
+        "Cannot merge: 2 unresolved discussions",
+        True,
+        1,
+        "The forge says",
+    ),
+    "a-check-named-discussion": (
+        "MERGEABLE/CLEAN",
+        'Required status check "discussion tests / unit" is failing. conflicts resolved?',
+        True,
+        1,
+        None,
+    ),
+    "a-conflict-in-a-file-about-comments": (
+        "MERGEABLE/CLEAN",
+        "Resolve conflicts in docs/comments-and-discussions.md; mark them as resolved with git add",
+        True,
+        1,
+        None,
+    ),
+}
+#: Each would name the threads but for what kind of failure it is.
+_NOT_A_REFUSAL = {
+    "rate-limited": lambda m: forge.ForgeError(m, reason="rate_limited"),
+    "auth": lambda m: forge.ForgeError(m, reason="auth"),
+    "unreachable": lambda m: forge.ForgeError(m, reason="unreachable"),
+    "unsafe-worktree": lambda m: git.UnsafeWorktree(m),
+    "cli-unavailable": lambda m: git.CliUnavailable(m),
 }
 
 
 @pytest.mark.parametrize(
-    "detail, message, rule, threads, says", list(_ROWS.values()), ids=list(_ROWS)
+    "detail, message, rule, threads, says, error",
+    [
+        *((*row, None) for row in _ROWS.values()),
+        *(("discussions_not_resolved", _SAYS, True, 1, None, e) for e in _NOT_A_REFUSAL.values()),
+    ],
+    ids=[*_ROWS, *_NOT_A_REFUSAL],
 )
 async def test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why(
-    run_forge, tmp_path, detail, message, rule, threads, says
+    run_forge, tmp_path, detail, message, rule, threads, says, error
 ):
     fake = _with_threads(_Refusing(merge_detail=detail, resolved_rule=rule), threads)
-    fake.refusal = forge.ForgeError(message, status=405)
+    fake.refusal = error(message) if error else forge.ForgeError(message, status=405)
     await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="b")
 
     returned, _ = await run_forge(fake, "merge", "m1", reviewers=BOT)
 
-    assert returned == "failed"
+    if error:
+        assert fake.rule_reads == [] and fake.reviewers_asked == [], "no extra forge read"
+    else:
+        assert returned == "failed"
     log = run_forge.log("m1")
     assert message in log, "the forge's own words stay"
     assert (says in log) if says else "review-bot threads" not in log and "calc.py" not in log
@@ -155,6 +195,34 @@ async def test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why
         [ended] = run_forge.events("external_wait_ended")
         assert "calc.py:3" in ended["result"]
     assert "ignore your rules" not in log, "a bot's words are never repeated"
+
+
+async def test_a_hint_that_raises_leaves_the_merge_its_own_failure(
+    run_forge, tmp_path, monkeypatch
+):
+    fake = _with_threads(_Refusing(merge_detail="MERGEABLE/BLOCKED", resolved_rule=True), 1)
+    fake.refusal = forge.ForgeError(_POLICY, status=405)
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="b")
+    monkeypatch.setattr(open_threads, "merge_hint", AsyncMock(side_effect=ValueError("broken")))
+
+    assert await run_forge(fake, "merge", "m1", reviewers=BOT) == ("failed", "failed")
+
+    log = run_forge.log("m1")
+    assert _POLICY in log and "broken" not in log
+
+
+async def test_a_ci_read_that_never_answers_gives_the_held_merge_no_hint(tmp_path, monkeypatch):
+    class _Silent(forge.FakeForge):
+        async def ci_status(self, **kw):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(open_threads, "READ_LIMIT_S", 0.01)
+
+    held = forge.run._held_by_threads(
+        None, _Silent(), "w1", (1, tmp_path, "root"), "kraft/w1", "main", BOT
+    )
+
+    assert await asyncio.wait_for(held, 5) == ""
 
 
 async def test_a_refused_merge_with_no_bot_asks_the_forge_nothing(run_forge, tmp_path):

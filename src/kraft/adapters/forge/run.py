@@ -929,12 +929,13 @@ async def _held_by_threads(
         return ""
     _, repo, role = target
     try:
-        base = (
-            await _builtins.base_branch(db, work_item_id, repo, member=True)
-            if role == "submodule"
-            else item_base
-        )
-        ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        async with asyncio.timeout(open_threads.READ_LIMIT_S):
+            base = (
+                await _builtins.base_branch(db, work_item_id, repo, member=True)
+                if role == "submodule"
+                else item_base
+            )
+            ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
         return await open_threads.merge_hint(
             forge,
             repo=repo,
@@ -2122,15 +2123,19 @@ async def _run_one(
                         if not isinstance(
                             exc, (git.UnsafeWorktree, git.CliUnavailable)
                         ) and exc.reason not in ("rate_limited", "auth", "unreachable"):
-                            hint = await open_threads.merge_hint(
-                                forge,
-                                repo=repo,
-                                branch=branch,
-                                base=base,
-                                reviewers=reviewers,
-                                detail=ci_status.merge_detail,
-                                message=str(exc),
-                            )
+                            try:
+                                hint = await open_threads.merge_hint(
+                                    forge,
+                                    repo=repo,
+                                    branch=branch,
+                                    base=base,
+                                    reviewers=reviewers,
+                                    detail=ci_status.merge_detail,
+                                    message=str(exc),
+                                )
+                            except Exception:  # noqa: BLE001 -- never replaces the failure
+                                logger.warning("no open-threads hint", exc_info=True)
+                                hint = ""
                             # In the error itself: it is what the stop and the wait record.
                             exc.args = (f"{exc}\n{hint}".rstrip(),) if hint else exc.args
                         raise

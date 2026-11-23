@@ -1485,8 +1485,11 @@ def _reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None)
 
 def _chain_bots(row, launch: LaunchContext | None) -> Reviewers:
     """The bots any review wait of the item's chain names, once each."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:  # a legacy row has no chain to name a bot
+        return ()
     found: dict = {}
-    for node in store.materialized_chain_of(row).chain.nodes:
+    for node in snapshot.chain.nodes:
         for t in node.tasks():
             if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_AUTOMATED_REVIEW:
                 for r in _reviewers(t.task, node.id, row, launch):
@@ -1515,8 +1518,9 @@ async def _open_threads_note(db, row, launch: LaunchContext | None, worktree, ru
         try:
             forges, error = launch.forges() if launch and launch.forges else (None, None)
             repo_entry = launch.repo_entry if launch else None
-            forge = await _forge.item_forge(db, row, repo_entry, forges, error)
-            base = await _builtins.base_branch(db, row["id"], Path(row["repo"]))
+            async with asyncio.timeout(open_threads.READ_LIMIT_S):
+                forge = await _forge.item_forge(db, row, repo_entry, forges, error)
+                base = await _builtins.base_branch(db, row["id"], Path(row["repo"]))
         except Exception:  # noqa: BLE001 -- no forge to ask is an unknown answer
             logger.warning("no forge to read open bot threads for %s", row["id"], exc_info=True)
             found = open_threads.OpenThreads(None, "unknown")

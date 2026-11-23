@@ -4,6 +4,7 @@ consumer is the seeded fix-loop judge and the in-loop code review the second,
 and a reviewer's continuity: its last round's findings and its own last
 session."""
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -14,6 +15,7 @@ from support.harness import commit_all, entry_of, v1_named_chain, v1_node, v1_ta
 
 from kraft import events, executor, item_paths, store
 from kraft.adapters import forge as _forge
+from kraft.adapters.forge import open_threads
 from kraft.automated_review import as_reviewers
 from kraft.executor import dispatch, prompts
 from kraft.executor.reply_round import ReplyRound
@@ -491,20 +493,47 @@ async def test_the_brief_is_told_the_open_bot_threads_and_the_rule(
 
 
 @pytest.mark.parametrize(
-    "reviewers, expected",
-    [([{"bot": "coderabbitai"}, {"check": "scan"}], ["coderabbitai"]), ([], [])],
-    ids=["the-review-waits-bots", "no-bots"],
+    "reviewers, legacy, expected",
+    [
+        ([{"bot": "coderabbitai"}, {"check": "scan"}], False, ["coderabbitai"]),
+        ([], False, []),
+        ([{"bot": "coderabbitai"}], True, []),
+    ],
+    ids=["the-review-waits-bots", "no-bots", "a-legacy-row-with-no-chain"],
 )
-async def test_the_merge_is_handed_the_bots_of_the_chains_review_wait(item_on, reviewers, expected):
+async def test_the_merge_is_handed_the_bots_of_the_chains_review_wait(
+    item_on, reviewers, legacy, expected
+):
     wait = {"id": "wait", "kind": "forge", "target": "mr.automated_review", "reviewers": reviewers}
     merge = {"id": "merge", "kind": "forge", "target": "mr.merge"}
     it = await item_on([v1_node("review", tasks=[wait]), v1_node("land", tasks=[merge])], "land")
     node = next(n for n in store.materialized_chain_of(it.row()).chain.nodes if n.id == "land")
     [task] = [t.task for t in node.tasks()]
 
-    got = dispatch._forge_reviewers(task, "land", it.row(), None)
+    row = {**dict(it.row()), "materialized_chain": None} if legacy else it.row()
+
+    got = dispatch._forge_reviewers(task, "land", row, None)
 
     assert [r.bot for r in got] == expected
+
+
+async def test_a_forge_lookup_that_never_answers_reads_unknown(item_on, monkeypatch):
+    async def silent(*args, **kw):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(_forge, "item_forge", silent)
+    monkeypatch.setattr(open_threads, "READ_LIMIT_S", 0.01)
+    it = await item_on(_briefed(reviewers=[{"bot": "coderabbitai"}]), "brief")
+
+    note = dispatch._open_threads_note(it.database, it.row(), None, it.worktree, it.run_dirs)
+
+    assert await asyncio.wait_for(note, 5)
+    report = item_paths.item_dir(it.run_dirs, it.id) / item_paths.OPEN_THREADS_REPORT
+    written = json.loads(report.read_text())
+    assert (written["open_bot_threads"], written["requires_resolved_conversations"]) == (
+        None,
+        "unknown",
+    )
 
 
 async def test_the_brief_reads_through_the_items_real_forge(item_on, fake_agent, monkeypatch):

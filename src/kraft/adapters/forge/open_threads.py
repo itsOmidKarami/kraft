@@ -17,14 +17,14 @@ from kraft.automated_review import Reviewers
 
 logger = logging.getLogger(__name__)
 
-#: Each of the two reads gets this long, so neither can hold up the item.
+#: Each read, or group of reads before them, gets this long: none can hold up the item.
 READ_LIMIT_S = 20
 #: The most threads a stop names; the rest are counted.
 _NAMED = 10
 #: A refusal in the forge's own words about unresolved conversations.
 _SAYS_UNRESOLVED = re.compile(
-    r"(conversation|discussion|comment|review thread)s?\b.*\bresolved"
-    r"|\bresolved?\b.*\b(conversation|discussion)",
+    r"\bunresolved\s+(?:review\s+)?(?:conversation|discussion|thread)s?\b"
+    r"|\b(?:conversation|discussion|comment|thread)s?\s+must\s+be\s+resolved\b",
     re.IGNORECASE,
 )
 
