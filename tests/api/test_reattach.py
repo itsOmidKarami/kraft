@@ -50,13 +50,15 @@ def test_reattach_adopts_running_agent(tmp_path):
                     {
                         "path": str(repo),
                         "setup_command": "",
-                        "env_passthrough": ["KRAFT_FAKE_CLAUDE", "KRAFT_FAKE_CLAUDE_DELAY"],
+                        "env_passthrough": ["KRAFT_FAKE_CLAUDE", "KRAFT_FAKE_CLAUDE_HOLD_UNTIL"],
                     }
                 ]
             }
         )
     )
-    slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "8"}
+    # Held on a file, not a sleep: a restart slower than the sleep finds the agent done.
+    release = tmp_path / "release-agent"
+    slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_HOLD_UNTIL": str(release)}
 
     with running_server(run_dir=run_dir, templates_dir=templates, env=slow_env) as srv:
         wid = srv.client.post(
@@ -97,6 +99,7 @@ def test_reattach_adopts_running_agent(tmp_path):
         evs = _poll(srv.client, wid, "session_reattached", timeout=40)
         reattached_pid = next(e["payload"]["pid"] for e in evs if e["type"] == "session_reattached")
         assert reattached_pid == pid  # not re-spawned
+        release.touch()
         _poll(srv.client, wid, "work_item_completed", timeout=60)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
 

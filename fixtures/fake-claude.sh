@@ -7,7 +7,7 @@
 # nothing and a `just dev` fix loop stops after its first round: that is the
 # product's behaviour (a round that changed nothing stops), not a fake bug.
 # Slow sleeps KRAFT_FAKE_CLAUDE_DELAY first in every task, or only in the tasks of the node named
-# by KRAFT_FAKE_CLAUDE_SLOW_NODE.
+# by KRAFT_FAKE_CLAUDE_SLOW_NODE. KRAFT_FAKE_CLAUDE_HOLD_UNTIL=<path> waits for that file instead.
 # The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
 # and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
 # goes with done_with_concerns / needs_context.
@@ -170,7 +170,13 @@ if [ "$mode" = "slow" ] && [ -n "${KRAFT_FAKE_CLAUDE_SLOW_NODE:-}" ]; then
 fi
 
 if [ "$mode" = "slow" ]; then
-  sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
+  if [ -n "${KRAFT_FAKE_CLAUDE_HOLD_UNTIL:-}" ]; then
+    # Held until a test creates this file, so it outlives any restart. Bounded: a failed test
+    # never creates it, and this process is detached.
+    for _ in $(seq 1200); do [ -e "$KRAFT_FAKE_CLAUDE_HOLD_UNTIL" ] && break; sleep 0.1; done
+  else
+    sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
+  fi
   mode="fix"
 fi
 
