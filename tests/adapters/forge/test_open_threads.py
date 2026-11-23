@@ -160,6 +160,7 @@ _NOT_A_REFUSAL = {
     "rate-limited": lambda m: forge.ForgeError(m, reason="rate_limited"),
     "auth": lambda m: forge.ForgeError(m, reason="auth"),
     "unreachable": lambda m: forge.ForgeError(m, reason="unreachable"),
+    "the-network-cut-it-off": lambda m: forge.ForgeError(m, no_answer=True),
     "unsafe-worktree": lambda m: git.UnsafeWorktree(m),
     "cli-unavailable": lambda m: git.CliUnavailable(m),
 }
@@ -184,6 +185,8 @@ async def test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why
 
     if error:
         assert fake.rule_reads == [] and fake.reviewers_asked == [], "no extra forge read"
+        # A call the network cut off still parks and retries.
+        assert bool(run_forge.events("forge_no_answer")) is fake.refusal.no_answer
     else:
         assert returned == "failed"
     log = run_forge.log("m1")

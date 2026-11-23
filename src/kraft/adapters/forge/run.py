@@ -2120,9 +2120,11 @@ async def _run_one(
                         )
                         status = "unreviewed"
                     except ForgeError as exc:
-                        if not isinstance(
-                            exc, (git.UnsafeWorktree, git.CliUnavailable)
-                        ) and exc.reason not in ("rate_limited", "auth", "unreachable"):
+                        if (
+                            not isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable))
+                            and exc.reason not in ("rate_limited", "auth", "unreachable")
+                            and not exc.no_answer
+                        ):
                             try:
                                 hint = await open_threads.merge_hint(
                                     forge,
