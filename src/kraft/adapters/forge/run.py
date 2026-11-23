@@ -483,6 +483,55 @@ def _record_description(c, work_item_id: str, node_id: str | None, repo: Path, s
     )
 
 
+def _our_descriptions(c, work_item_id: str, repo: Path) -> set[str]:
+    """The hash of every description Kraft recorded writing to `repo`."""
+    rows = c.execute(
+        "SELECT json_extract(payload, '$.sha256') AS sha FROM events "
+        "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ?",
+        (work_item_id, ForgeEvent.MR_DESCRIPTION_WRITTEN, str(repo)),
+    ).fetchall()
+    return {row["sha"] for row in rows}
+
+
+def _keep_description(c, work_item_id: str, node_id: str | None, repo: Path) -> None:
+    events.append(
+        c,
+        work_item_id,
+        ForgeEvent.MR_DESCRIPTION_KEPT,
+        {"node_id": node_id, "repo": str(repo)},
+    )
+
+
+def _wrote_before_records(
+    c, work_item_id: str, repo: Path, repo_row_id: int | None, number: int
+) -> bool:
+    """Whether a Kraft from before these records wrote this merge request's
+    description: it wrote one on every `mr_opened`, reused merge requests included.
+    This item's own record of this number, per repository where it has several. A
+    `kept` event means this Kraft already judged it not to be its own."""
+    kept = c.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.repo') = ? LIMIT 1",
+        (work_item_id, ForgeEvent.MR_DESCRIPTION_KEPT, str(repo)),
+    ).fetchone()
+    if kept is not None or number <= 0:
+        return False
+    if repo_row_id is not None:
+        row = c.execute(
+            "SELECT json_extract(mr_ref, '$.number') AS number FROM work_item_repos WHERE id = ?",
+            (repo_row_id,),
+        ).fetchone()
+        return row is not None and row["number"] == number
+    return (
+        c.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+            "AND json_extract(payload, '$.number') = ? LIMIT 1",
+            (work_item_id, ForgeEvent.MR_OPENED, number),
+        ).fetchone()
+        is not None
+    )
+
+
 async def _describe_mr(
     forge: Forge,
     db,
@@ -493,48 +542,66 @@ async def _describe_mr(
     repo: Path,
     branch: str,
     body: str,
+    number: int,
+    repo_row_id: int | None,
 ) -> tuple[str | None, str]:
     """Rewrite an open merge request's description, unless that would destroy
     what a person wrote there: the live text must be one Kraft recorded writing,
-    or reach one through saves made only by bot accounts (`mr_ops.only_bots_since`).
-    Anything else, an emptied body or a merge request with no record included,
-    stays as it is, whole, so nothing can come out half-merged.
+    reach one through saves made only by bot accounts (`mr_ops.only_bots_since`),
+    or, with no record at all, be on a merge request an earlier Kraft described
+    (`_wrote_before_records`). Anything else, an emptied body included, stays as
+    it is, whole, so nothing can come out half-merged.
 
     Returns the description this replaced (None when it wrote nothing) and a log
     line. Hashes go in before the write and every one counts, so a write that
     landed with its answer lost, or never landed, is not mistaken for an edit."""
+
+    def _earlier(c) -> bool:
+        return _wrote_before_records(c, work_item_id, orig_repo, repo_row_id, number)
+
     try:
         live = await forge.mr_body(repo=repo, branch=branch)
     except ForgeError:
+        # The `mr_opened` a reuse records next must not vouch for text never read.
+        def _hold(c) -> None:
+            if not _our_descriptions(c, work_item_id, orig_repo) and not _earlier(c):
+                _keep_description(c, work_item_id, node_id, orig_repo)
+
+        await db.write(_hold)
         return None, "could not read the description to check for edits: left it as it is\n"
     new = mr_ops.body_hash(body)
-    ours = {
-        row["sha"]
-        for row in db.read(
-            lambda c: c.execute(
-                "SELECT json_extract(payload, '$.sha256') AS sha FROM events "
-                "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ?",
-                (work_item_id, ForgeEvent.MR_DESCRIPTION_WRITTEN, str(orig_repo)),
-            ).fetchall()
-        )
-    }
-    if mr_ops.body_hash(live) not in ours | {new}:
-        try:
-            revisions = await forge.mr_description_history(repo=repo, branch=branch)
-        except ForgeError:
-            revisions = ()
-        if not mr_ops.only_bots_since(live, revisions, ours):
+    current = mr_ops.body_hash(live)
+    ours = db.read(lambda c: _our_descriptions(c, work_item_id, orig_repo))
+    if current not in ours | {new}:
+        if not ours and db.read(_earlier):
             await db.write(
-                lambda c: events.append(
-                    c,
-                    work_item_id,
-                    ForgeEvent.MR_DESCRIPTION_KEPT,
-                    {"node_id": node_id, "repo": str(orig_repo)},
-                )
+                lambda c: _record_description(c, work_item_id, node_id, orig_repo, current)
             )
-            return None, "the description is not the one Kraft last wrote: left it as it is\n"
-    if new not in ours:
-        await db.write(lambda c: _record_description(c, work_item_id, node_id, orig_repo, new))
+            ours = {current}
+        else:
+            try:
+                revisions = await forge.mr_description_history(repo=repo, branch=branch)
+            except ForgeError:
+                revisions = ()
+            if not mr_ops.only_bots_since(live, revisions, ours):
+                await db.write(lambda c: _keep_description(c, work_item_id, node_id, orig_repo))
+                return None, "the description is not the one Kraft last wrote: left it as it is\n"
+
+    def _before_write(c) -> None:
+        newest = c.execute(
+            "SELECT type FROM events WHERE work_item_id = ? AND type IN (?, ?) "
+            "AND json_extract(payload, '$.repo') = ? ORDER BY seq DESC LIMIT 1",
+            (
+                work_item_id,
+                ForgeEvent.MR_DESCRIPTION_WRITTEN,
+                ForgeEvent.MR_DESCRIPTION_KEPT,
+                str(orig_repo),
+            ),
+        ).fetchone()
+        if new not in ours or (newest and newest["type"] == ForgeEvent.MR_DESCRIPTION_KEPT):
+            _record_description(c, work_item_id, node_id, orig_repo, new)
+
+    await db.write(_before_write)
     await forge.update_mr(repo=repo, branch=branch, body=body)
     return live, ""
 
@@ -1543,6 +1610,8 @@ async def _run_one(
                     repo=repo,
                     branch=branch,
                     body=body,
+                    number=existing.number,
+                    repo_row_id=repo_row_id,
                 )
                 number, url = existing.number, existing.url
                 log, status = f"reusing !{number}: {url}\n{described}", "done"
@@ -1909,6 +1978,8 @@ async def _run_one(
                 repo=repo,
                 branch=branch,
                 body=body,
+                number=existing.number if existing is not None else 0,
+                repo_row_id=repo_row_id,
             )
             log = f"pushed and synced the merge request description\n{described}"
             status = "done"
@@ -2959,6 +3030,7 @@ async def run_task(
                     db,
                     rows,
                     root_repo=target_repo,
+                    orig_repo=orig_repo or target_repo,
                     branch=branch,
                     base=item_base,
                     title=title,
@@ -3332,6 +3404,7 @@ async def _ready_root(
     rows,
     *,
     root_repo: Path,
+    orig_repo: Path,
     branch: str,
     base: str,
     title: str,
@@ -3365,7 +3438,15 @@ async def _ready_root(
     try:
         if root["merge_state"] == "pending" and not has_source:
             log, opened = await _bump_pointer_only_root(
-                forge, db, rows, branch=branch, base=base, title=title, work_item_id=work_item_id
+                forge,
+                db,
+                rows,
+                branch=branch,
+                base=base,
+                title=title,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
             )
             if not opened:
                 return log, "done"
@@ -3385,7 +3466,16 @@ async def _ready_root(
 
 
 async def _bump_pointer_only_root(
-    forge: Forge, db, rows, *, branch: str, base: str, title: str, work_item_id: str
+    forge: Forge,
+    db,
+    rows,
+    *,
+    branch: str,
+    base: str,
+    title: str,
+    work_item_id: str,
+    node_id: str,
+    orig_repo: Path,
 ) -> tuple[str, bool]:
     """A requested bump of a root with no source changes: straight onto the
     item's base branch in the root (`base`) when it takes the push
@@ -3422,18 +3512,21 @@ async def _bump_pointer_only_root(
             raise auth.stamp(exc) from None  # a refused token is not sent a second time
         refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
     await forge.push(repo=root_repo, branch=branch)
+    body = mr_ops.mr_body(
+        work_item_id,
+        mr_ops.MRMeta(
+            description=f"Moves {', '.join(bumped)} to the revisions merged for "
+            f"work item {work_item_id}."
+        ),
+    )
+    sha = mr_ops.body_hash(body)
+    await db.write(lambda c: _record_description(c, work_item_id, node_id, orig_repo, sha))
     mr = await forge.open_mr(
         repo=root_repo,
         branch=branch,
         base=base,
         title=f"chore: bump submodule pointers for {title}",
-        body=mr_ops.mr_body(
-            work_item_id,
-            mr_ops.MRMeta(
-                description=f"Moves {', '.join(bumped)} to the revisions merged for "
-                f"work item {work_item_id}."
-            ),
-        ),
+        body=body,
     )
     await db.write(
         lambda c: store.update_repo_state(

@@ -105,7 +105,15 @@ async def _bump(forge_obj, root, monkeypatch, ran, *, push=None, fail=None):
     monkeypatch.setattr(forge.run, "_point_at_merged_members", moved)
     rows = [{"role": "root", "repo_path": str(root)}]
     return await forge.run._bump_pointer_only_root(
-        forge_obj, None, rows, branch="kraft/w1", base="main", title="t", work_item_id="w1"
+        forge_obj,
+        None,
+        rows,
+        branch="kraft/w1",
+        base="main",
+        title="t",
+        work_item_id="w1",
+        node_id="merge",
+        orig_repo=root,
     )
 
 

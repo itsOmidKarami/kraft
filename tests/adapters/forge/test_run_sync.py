@@ -18,22 +18,31 @@ async def _opened_then_repaired(run_forge, fake, worktree) -> None:
 
 
 @pytest.mark.parametrize(
-    "state, retried",
+    "state, person_edited, retried",
     [
         # A repair edited the description under a red check: the jobs that read
         # the old one run again (editing a body triggers no workflow).
-        ("failed", 1),
+        ("failed", False, 1),
         # A sync after new commits sees a pending pipeline, never a red one.
-        ("pending", 0),
-        ("success", 0),
+        ("pending", False, 0),
+        ("success", False, 0),
+        # Kraft kept a person's description, so it changed nothing to re-check.
+        ("failed", True, 0),
     ],
-    ids=["red-check-body-changed", "pending-body-changed", "green-body-changed"],
+    ids=[
+        "red-check-body-changed",
+        "pending-body-changed",
+        "green-body-changed",
+        "red-check-body-kept",
+    ],
 )
 async def test_sync_mr_reruns_failed_jobs_only_when_the_description_changed(
-    run_forge, tmp_path, state, retried
+    run_forge, tmp_path, state, person_edited, retried
 ):
     fake = forge.FakeForge(ci_states=[state], ci_failed_jobs=[RED])
     await _opened_then_repaired(run_forge, fake, tmp_path)
+    if person_edited:
+        fake.bodies["kraft/w1"] = "A person's description."
 
     await run_forge(fake, "sync_mr", "x9")
     assert len(fake.retried) == retried, "first sync: the live body differs from the built one"

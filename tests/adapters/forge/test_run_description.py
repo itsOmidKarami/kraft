@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import pytest
 
+from kraft import events, store
 from kraft.adapters import forge
 from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
+from kraft.executor import prompts
 
 
 def _authored(worktree, text: str, front: str = "") -> str:
@@ -17,6 +19,12 @@ def _authored(worktree, text: str, front: str = "") -> str:
     body = f"## What this introduces\n\n{text}"
     meta.write_text(f"---\nwork_item_ids: [w1]\n{front}---\n{body}\n")
     return body
+
+
+def _brief_note(run_forge, worktree) -> str:
+    return prompts.mr_description_note(
+        run_forge.database, "w1", run_dirs=run_forge.run_dirs, worktree=worktree
+    )
 
 
 @pytest.mark.parametrize("handler", ["open_mr", "sync_mr"])
@@ -57,17 +65,173 @@ async def test_a_re_describe_replaces_only_a_description_kraft_wrote(
 
 
 @pytest.mark.parametrize("handler", ["open_mr", "sync_mr"])
-@pytest.mark.parametrize("live", ["Written before Kraft kept a record.", ""], ids=["text", "empty"])
-async def test_a_merge_request_with_no_record_keeps_its_description(
-    run_forge, tmp_path, handler, live
+@pytest.mark.parametrize(
+    "live, opened_number, regenerated",
+    [
+        ("Written before Kraft kept a record.", None, False),
+        ("", None, False),
+        ("Another merge request's text.", 99, False),
+        ("The body an earlier Kraft wrote.", 1, True),
+    ],
+    ids=["not-kraft-text", "not-kraft-empty", "kraft-opened-another", "kraft-opened-this"],
+)
+async def test_a_merge_request_with_no_record_is_kept_unless_kraft_opened_it(
+    run_forge, tmp_path, handler, live, opened_number, regenerated
 ):
     fake = forge.FakeForge()
     await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body=live)
+    await run_forge(fake, "mark_ready", "x1")  # files the item the event below belongs to
+    if opened_number is not None:
+        payload = {"number": opened_number, "url": "u"}
+        await run_forge.database.write(
+            lambda c: events.append(c, "w1", forge.ForgeEvent.MR_OPENED, payload)
+        )
 
     await run_forge(fake, handler, "x2")
+    # A reuse records `mr_opened` itself, which must not vouch for it next time.
+    await run_forge(fake, handler, "x3")
+
+    body = await fake.mr_body(repo=tmp_path, branch="kraft/w1")
+    assert (body != live) is regenerated
+    assert bool(run_forge.events("mr_description_kept")) is not regenerated
+
+
+async def test_a_failed_first_read_does_not_turn_a_reused_merge_request_into_kraft_s(
+    run_forge, tmp_path
+):
+    class _FailsOnce(forge.FakeForge):
+        failed = False
+
+        async def mr_body(self, *, repo, branch):
+            if not self.failed:
+                self.failed = True
+                raise forge.ForgeError("cannot read the description")
+            return await super().mr_body(repo=repo, branch=branch)
+
+    live = "Opened by hand."
+    fake = _FailsOnce()
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body=live)
+
+    await run_forge(fake, "open_mr", "x1")
+    await run_forge(fake, "sync_mr", "x2")
 
     assert await fake.mr_body(repo=tmp_path, branch="kraft/w1") == live
-    assert len(run_forge.events("mr_description_kept")) == 1
+
+
+@pytest.mark.parametrize(
+    "row_number, event_number, wrote",
+    [(1, None, True), (2, None, False), (None, 1, False)],
+    ids=["its-row-names-it", "its-row-names-another", "only-a-sibling-event-names-it"],
+)
+async def test_a_workspace_member_asks_its_own_row_who_opened_it(
+    run_forge, tmp_path, row_number, event_number, wrote
+):
+    fake = forge.FakeForge()
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="b")
+    await run_forge(fake, "mark_ready", "x1")
+
+    def _seed(c) -> int:
+        row = store.add_repo(
+            c, work_item_id="w1", repo_path=str(tmp_path), role="submodule", merge_rank=0
+        )
+        if row_number is not None:
+            ref = {"number": row_number, "url": "u"}
+            store.update_repo_state(c, row, merge_state="open", mr_ref=ref)
+        if event_number is not None:
+            payload = {"number": event_number, "url": "u"}
+            events.append(c, "w1", forge.ForgeEvent.MR_OPENED, payload)
+        return row
+
+    row = await run_forge.database.write(_seed)
+
+    assert (
+        run_forge.database.read(
+            lambda c: forge.run._wrote_before_records(c, "w1", tmp_path, row, 1)
+        )
+        is wrote
+    )
+
+
+async def test_a_failed_first_write_on_an_older_item_does_not_freeze_it(run_forge, tmp_path):
+    """The text an earlier Kraft wrote stays Kraft's after a write that never landed."""
+
+    class _FailsOnce(forge.FakeForge):
+        failed = False
+
+        async def update_mr(self, *, repo, branch, body):
+            if not self.failed:
+                self.failed = True
+                raise forge.ForgeError("the write did not land")
+            await super().update_mr(repo=repo, branch=branch, body=body)
+
+    fake = _FailsOnce()
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="old")
+    await run_forge(fake, "mark_ready", "x1")
+    payload = {"number": 1, "url": "u"}
+    await run_forge.database.write(
+        lambda c: events.append(c, "w1", forge.ForgeEvent.MR_OPENED, payload)
+    )
+    new = _authored(tmp_path, "A window.")
+
+    await run_forge(fake, "sync_mr", "x2")
+    await run_forge(fake, "sync_mr", "x3")
+
+    assert fake.bodies["kraft/w1"].startswith(new)
+    assert run_forge.events("mr_description_kept") == []
+
+
+async def test_a_root_pointer_bump_records_the_description_it_opens_with(
+    run_forge, tmp_path, monkeypatch
+):
+    async def refused(*_, **__):
+        raise forge.ForgeError("protected branch")
+
+    async def moved(*_):
+        return ["member"]
+
+    fake = forge.FakeForge()
+    await fake.open_mr(repo=tmp_path, branch="other", base="main", title="t", body="b")
+    await run_forge(fake, "mark_ready", "x1")
+    row = await run_forge.database.write(
+        lambda c: store.add_repo(
+            c, work_item_id="w1", repo_path=str(tmp_path), role="root", merge_rank=0
+        )
+    )
+    monkeypatch.setattr(forge.git, "run_git", refused)
+    monkeypatch.setattr(forge.run, "_point_at_merged_members", moved)
+
+    await forge.run._bump_pointer_only_root(
+        fake,
+        run_forge.database,
+        [{"id": row, "role": "root", "repo_path": str(tmp_path)}],
+        branch="kraft/w1",
+        base="main",
+        title="t",
+        work_item_id="w1",
+        node_id="merge",
+        orig_repo=tmp_path,
+    )
+
+    assert [e["sha256"] for e in run_forge.events("mr_description_written")] == [
+        forge.mr.body_hash(fake.opened_bodies[2])
+    ]
+
+
+async def test_a_write_after_a_kept_description_clears_the_brief_note(run_forge, tmp_path):
+    """Someone reverts to Kraft's own text: the next sync writes, so the brief must
+    no longer say the description was kept."""
+    _authored(tmp_path, "A door.")
+    fake = forge.FakeForge()
+    await run_forge(fake, "open_mr", "x1")
+    ours = fake.opened_bodies[1]
+    fake.bodies["kraft/w1"] = "A person's description."
+    await run_forge(fake, "sync_mr", "x2")
+    assert _brief_note(run_forge, tmp_path)
+
+    fake.bodies["kraft/w1"] = ours
+    await run_forge(fake, "sync_mr", "x3")
+
+    assert _brief_note(run_forge, tmp_path) == ""
 
 
 async def test_a_description_write_whose_answer_was_lost_is_not_read_as_an_edit(
