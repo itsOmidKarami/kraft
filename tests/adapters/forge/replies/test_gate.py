@@ -219,9 +219,9 @@ def _sent(state, n, *, kind="fixed", id=None, why=None, **payload) -> Intent:
     return Intent(id or new_id(ITEM), {**base, **payload}, state, why=why, posted=posted)
 
 
-def _resolved_before(state, run=0) -> Intent:
+def _resolved_before(state, run=0, why=None) -> Intent:
     payload = {"op": "resolve", "thread": "T1", "node_id": "n", "run": run, "kind": "resolve"}
-    return Intent(new_id(ITEM), payload, state)
+    return Intent(new_id(ITEM), payload, state, why=why)
 
 
 FIX = _sent("posted", K, id=K_ID)
@@ -301,6 +301,13 @@ RESOLVE_ROWS = [
     ),
     pytest.param(
         _thread(B, K), [FIX, _resolved_before("unclear")], {}, "reopened", id="reopened-unclear"
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _resolved_before("refused", why="resolved")],
+        {},
+        "reopened",
+        id="reopened-after-an-unclear-send-that-landed",
     ),
     pytest.param(_thread(B, K), [FIX], {"latest": None}, "no_latest_triage", id="no-latest-triage"),
     pytest.param(_thread(B, K, LATE), [FIX], {}, "answer_unread", id="bot-answered-after-the-read"),

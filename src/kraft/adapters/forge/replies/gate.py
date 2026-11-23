@@ -208,7 +208,8 @@ def resolve_refusal(
         i.payload.get("op") == "resolve"
         and i.payload.get("thread") == thread.id
         and i.payload.get("node_id") == node_id
-        and i.state in _HELD
+        # A resolve that was unclear and then found the thread resolved landed too.
+        and (i.state in _HELD or (i.state == "refused" and i.why == "resolved"))
         for i in intents.values()
     ):
         return "reopened"  # Kraft resolved it once, in some run; someone reopened it

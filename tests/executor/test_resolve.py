@@ -170,6 +170,21 @@ async def test_a_fix_the_triage_later_declines_stays_open(rig, monkeypatch):
     assert _outcome(rig, "T1") == ("left_open", "not_fixed")
 
 
+async def test_a_thread_with_a_below_severity_finding_is_left_open(rig, monkeypatch):
+    """T1 is fixed and "Fixed in" posts; the last triage (T2's fix makes another head) raises a
+    `minor` finding on T1, below the loop's severities, so no cycle takes it: it is still named."""
+    minor = {**FLAG, "severity": "minor", "message": "rename x again"}
+    fake = await _two_threads(
+        rig,
+        monkeypatch,
+        [{"findings": [FLAG]}, {"findings": [FLAG_T2]}, {"findings": [minor]}],
+        [FIXED, FIXED_T2],
+    )
+
+    assert not fake.threads["T1"].resolved and fake.threads["T2"].resolved
+    assert _outcome(rig, "T1") == ("left_open", "finding_outstanding")
+
+
 async def test_a_fix_the_bot_pushes_back_on_stays_open(rig, monkeypatch):
     """ "Fixed in" posts and the bot answers after every triage's read: nobody judged the answer."""
 
