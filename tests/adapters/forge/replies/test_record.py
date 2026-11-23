@@ -102,7 +102,7 @@ async def test_the_record_spans_every_fork(item_on, database):
 
 @pytest.mark.parametrize(
     "payload",
-    [{**_PAYLOAD, "op": "resolve"}, {k: v for k, v in _PAYLOAD.items() if k != "body_sha256"}],
+    [{**_PAYLOAD, "op": "delete"}, {k: v for k, v in _PAYLOAD.items() if k != "body_sha256"}],
     ids=["unknown-op", "no-body-hash"],
 )
 async def test_intend_refuses_an_unknown_op_or_a_missing_hash(item_on, database, payload):
@@ -110,6 +110,17 @@ async def test_intend_refuses_an_unknown_op_or_a_missing_hash(item_on, database,
 
     with pytest.raises(ValueError):
         await database.write(lambda c: record.intend(c, it.id, "w-0123456789ab", payload))
+
+
+async def test_intend_accepts_a_resolve_op(item_on, database):
+    it = await item_on(_NODE)
+    intent = record.new_id(it.id)
+
+    await database.write(
+        lambda c: record.intend(c, it.id, intent, {**_PAYLOAD, "op": "resolve", "kind": "resolve"})
+    )
+
+    assert database.read(lambda c: record.read(c, it.id))[intent].payload["op"] == "resolve"
 
 
 async def test_posted_hashes_map_every_id_to_the_returned_hash(item_on, database):

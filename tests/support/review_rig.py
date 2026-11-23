@@ -114,8 +114,9 @@ DECLINE = {
 }
 
 
-def bot_on():
-    return BotReviewer(bot="a", replies=True)  # the test takes `replies_on`
+def bot_on(resolve_fixed=False):
+    """Bot `a` with replies on (the test takes `replies_on`), and `resolve_fixed` as given."""
+    return BotReviewer(bot="a", replies=True, resolve_fixed=resolve_fixed)
 
 
 async def filed(
@@ -201,13 +202,14 @@ async def fix_walk(
     head=None,
     ci_states=("success",),
     tweak=None,
+    policy=None,
 ) -> forge.FakeForge:
     """One fix cycle on a node whose bot `a` takes replies: the first triage raises
     `flags` (on T1 by default, in `threads`), the repair commits `repaired.txt` and
     writes `repair`, the review wait pushes the new head (`watch_ci`), and the second
     triage writes `second` (findings, or a dict with `replies`). The merge request is
     `state` at the checkout's head, or at `head()` when given; `tweak(fake)` runs
-    before the first walk."""
+    before the first walk; `policy` is the item's own policy override."""
     reviewers = reviewers or (bot_on(),)
     threads = threads or [bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")]
     fake = forge.FakeForge(
@@ -221,7 +223,8 @@ async def fix_walk(
         threads={t.id: t for _, t in threads},
         ci_states=list(ci_states),
     )
-    await rig(review_node(30, reviewers=reviewers, loop=True, watch_ci=True), fake)
+    node = review_node(30, reviewers=reviewers, loop=True, watch_ci=True)
+    await rig(node, fake, **({"policy_override": policy} if policy else {}))
 
     async def details(*, repo, branch):
         sha = head() if head else git(rig.item.worktree, "rev-parse", "HEAD")

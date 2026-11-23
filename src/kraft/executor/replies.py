@@ -20,14 +20,14 @@ import json
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kraft import events, inplace, item_paths, store, waits
 from kraft import findings as _findings
 from kraft import forges as forges_mod
 from kraft.adapters.forge import run as forge_run
-from kraft.adapters.forge.models import ForgeError
+from kraft.adapters.forge.models import ForgeError, Posted
 from kraft.adapters.forge.mr import same_login
 from kraft.adapters.forge.replies import body, facts, gate, owed, record, send
 from kraft.config import git_read
@@ -296,6 +296,9 @@ async def _post(
     reviewers = dispatch._reviewers(wait.task, node.id, row, launch)
     bots = tuple(r.bot for r in reviewers if r.bot is not None)
     on = tuple(r.bot for r in reviewers if r.bot is not None and r.replies)
+    resolves = tuple(
+        r.bot for r in reviewers if r.bot is not None and r.replies and r.resolve_fixed
+    )
     report = report_path(run_dirs, wid)
     if not on:
         if completing:
@@ -308,7 +311,19 @@ async def _post(
             _drop_report(report, node.id)
         return None
     point = _Point(
-        db, run_dirs, wid, node, row, worktree, launch, bots, on, run_seq, run_at, loop_key=loop_key
+        db,
+        run_dirs,
+        wid,
+        node,
+        row,
+        worktree,
+        launch,
+        bots,
+        on,
+        run_seq,
+        run_at,
+        loop_key=loop_key,
+        resolves=resolves,
     )
     started = None
     try:
@@ -344,6 +359,8 @@ class _Point:
     run_at: str
     #: The loop counter's key, for the round the posting point may start.
     loop_key: str | None = None
+    #: The bots whose fixed threads Kraft resolves at a completion (`resolve_fixed`).
+    resolves: tuple[str, ...] = ()
     forge: object = None
     viewer: str | None = None
     pp: send.PostingPoint | None = None
@@ -472,15 +489,20 @@ class _Point:
             i.state == "pending"
             and i.payload.get("run") == self.run_seq
             and i.payload.get("node_id") == self.node.id
+            and (completing or i.payload.get("op") != "resolve")  # a resolve goes only at the end
             for i in held.values()
         ):
             return True
-        if any(i.ever_unclear and i.state == "posted" for i in self.window(held)):
+        if any(
+            i.ever_unclear and i.state == "posted" and i.payload.get("op") != "resolve"
+            for i in self.window(held)
+        ):
             return True  # a copy of an unclear write may still land: look for it
         return bool(
             self.triage_candidates()
             or await self.fix_ready(completing)
             or (completing and self.summary_wanted())
+            or (completing and bool(self.resolves) and bool(self.talked()))
         )
 
     async def fix_ready(self, completing: bool) -> bool:
@@ -523,6 +545,7 @@ class _Point:
                     "why": i.why if ended else (i.failure or {}).get("failure"),
                 }
             )
+        entries += self._resolve_entries()
         for _, tid, _, text, verdict in await self.fix_candidates(True):
             if text is None and verdict == "send":
                 entries.append(
@@ -635,6 +658,10 @@ class _Point:
                 await self.summary()
             except ForgeError as exc:  # the comment waits; the report says nothing posted
                 logger.info("summary comment waits: %s", exc)
+            try:
+                await self.resolve()
+            except ForgeError as exc:  # a read failed: what was not resolved is listed open
+                logger.info("resolving waits: %s", exc)
 
     async def account(self) -> str:
         """Writes are spaced per forge account: an API account's name, else the
@@ -681,7 +708,12 @@ class _Point:
                 )
 
             await self.pp.sweep_duplicates(
-                [i for i in window if (i.payload["op"] == "reply") == in_thread],
+                [
+                    i
+                    for i in window
+                    if i.payload["op"] in ("reply", "summary")
+                    and (i.payload["op"] == "reply") == in_thread
+                ],
                 viewer=self.viewer,
                 notes=self.notes_of,
                 delete=delete,
@@ -812,6 +844,187 @@ class _Point:
             )
 
         await self.pp.send(intent, gate=check, write=write)
+
+    def seen(self) -> gate.Latest | None:
+        """What the latest triage read and wrote: when it read the bots and the threads it
+        wrote a reply for; None when there is no triage, or its collection has no read time."""
+        latest = self.latest()
+        if latest is None:
+            return None
+        coll = prompts.collection(self.run_dirs, self.wid, latest["id"])
+        read_at = reply_round.when(coll.get("read_at"))
+        if read_at is None:
+            return None
+        threads = prompts.collected_threads(self.run_dirs, self.wid, latest["id"])
+        replied = frozenset(r["thread"] for r in triage_replies(latest["result_path"], threads))
+        return gate.Latest(latest["id"], read_at, replied)
+
+    def outstanding(self) -> tuple[set[str], bool]:
+        """The threads a finding of this run still names, and whether a record carries
+        `dropped`: the last measurement's findings and unmeasured findings (what is below
+        the loop's severities), what the judge declined, and what the latest triage's own
+        result file raises (the `on_failure` re-measure's `ok` exit writes no record)."""
+        rows = self.db.read(
+            lambda c: [
+                (e["type"], e["payload"])
+                for e in events.read_after(c, self.run_seq, self.wid)
+                if e["payload"].get("node_id") == self.node.id
+                and e["type"] in (ChainEvent.FINDINGS_MEASURED, ChainEvent.JUDGE_VERDICT)
+            ]
+        )
+        records = [p for t, p in rows if t == ChainEvent.FINDINGS_MEASURED]
+        last = records[-1] if records else {}
+        raw = [*(last.get("findings") or ()), *(last.get("unmeasured") or ())]
+        raw += [
+            f
+            for t, p in rows
+            if t == ChainEvent.JUDGE_VERDICT and p.get("verdict") == "stop_downgrade"
+            for f in p.get("findings") or ()
+        ]
+        out = {tid for f in raw for tid in _findings.from_payload(f).threads}
+        latest = self.latest()
+        if latest is not None:
+            out |= {tid for f in _findings.parse(latest["result_path"]) for tid in f.threads}
+        return out, any(p.get("dropped") for p in records)
+
+    def _left_open(self, tid: str, why: str) -> None:
+        self.notes.append(
+            {**self.where(tid), "kind": "resolve", "outcome": "left_open", "why": why}
+        )
+
+    async def resolve(self) -> None:
+        """At a completion with no round: resolve each thread whose fix Kraft confirmed, for a
+        bot with `resolve_fixed`. Read fresh; a pending resolve of the run goes first; every
+        refusal is listed in the report with its reason."""
+        if not self.resolves or not await self.ready():
+            return
+        self._mr = None  # the merge request is read afresh, as each thread is
+        latest = self.latest()
+        seen = self.seen() if latest is not None else None
+        outstanding, dropped = self.outstanding()
+        for intent in self._pending("resolve", ("resolve",)):
+            await self._send_resolve(
+                intent, intent.payload["thread"], seen, outstanding, dropped, latest
+            )
+        for tid in self.talked():
+            held = self.intents()
+            if self._held(held, {"op": "resolve", "run": self.run_seq, "thread": tid}) is not None:
+                continue  # already an intent for this run (sent above, or ended)
+            if not self.pp.in_budget():
+                self._left_open(tid, "not_read")
+                continue
+            try:
+                thread = await self.thread(tid)
+            except ForgeError as exc:
+                self._left_open(tid, "not_read")
+                logger.info("resolve %s waits: %s", tid, exc)
+                continue
+            if thread is not None and thread.resolved:
+                continue  # the bot resolved it: left alone
+            first = thread.notes[0] if thread is not None and thread.notes else None
+            if thread is None or first is None:
+                self._left_open(tid, "not_found")
+                continue
+            if not any(same_login(first.author, b) for b in self.resolves):
+                continue  # a thread of a bot whose resolving is not asked for
+            try:
+                stale = await self.stale(latest) if latest is not None else None
+            except ForgeError:
+                self._left_open(tid, "not_read")
+                continue
+            if latest is None:
+                why = "no_latest_triage"
+            elif stale is not None:
+                why = "mr_not_open" if stale[1] == "mr_not_open" else "no_latest_triage"
+            else:
+                why = gate.resolve_refusal(
+                    thread,
+                    bots=self.bots,
+                    on=self.on,
+                    kraft=self.kraft(held),
+                    intents=held,
+                    run=self.run_seq,
+                    node_id=self.node.id,
+                    latest=seen,
+                    outstanding=outstanding,
+                    dropped=dropped,
+                )
+            if why is not None:
+                self._left_open(tid, why)
+                continue
+            intent = await self.intend(
+                {"op": "resolve", "run": self.run_seq, "thread": tid},
+                {
+                    "op": "resolve",
+                    "thread": tid,
+                    "kind": "resolve",
+                    "head": latest["head_sha"],
+                    "round": latest["round"],
+                    "session": latest["id"],
+                },
+                lambda _iid: "",
+            )
+            await self._send_resolve(intent, tid, seen, outstanding, dropped, latest)
+
+    async def _send_resolve(self, intent, tid, seen, outstanding, dropped, latest) -> None:
+        async def check(_intent):
+            self._mr = None  # a push since the candidate read must be seen
+            if latest is None:
+                return ("refused", "no_latest_triage")
+            if (why := await self.stale(latest)) is not None:
+                return why
+            thread = await self.thread(tid)
+            held = self.intents()
+            why = gate.resolve_refusal(
+                thread,
+                bots=self.bots,
+                on=self.on,
+                kraft=self.kraft(held),
+                intents=held,
+                run=self.run_seq,
+                node_id=self.node.id,
+                latest=seen,
+                outstanding=outstanding,
+                dropped=dropped,
+            )
+            return ("refused", why) if why is not None else None
+
+        async def write():
+            await self.forge.resolve_thread(repo=self.worktree, thread=self._threads[tid])
+            return Posted((), datetime.now(UTC).isoformat(), "")
+
+        try:
+            await self.pp.send(intent, gate=check, write=write)
+        except ForgeError as exc:
+            # A read in the gate failed: nothing was sent; the next posting point tries again.
+            logger.info("resolve %s waits: %s", intent.id, exc)
+
+    def _resolve_entries(self) -> list[dict]:
+        """This run's resolve intents as report entries: resolved, or left open and why."""
+        out = []
+        for i in self.intents().values():
+            p = i.payload
+            if p.get("op") != "resolve" or p.get("node_id") != self.node.id:
+                continue
+            if p.get("run") != self.run_seq:
+                continue
+            found = (
+                i.state == "refused" and i.why == "resolved"
+            )  # it was resolved by the time of the gate
+            done = i.state == "posted" or found
+            out.append(
+                {
+                    **self.where(p["thread"]),
+                    "kind": "resolve",
+                    "outcome": "resolved" if done else "left_open",
+                    "why": None
+                    if i.state == "posted"
+                    else "found resolved"
+                    if found
+                    else i.why or (i.failure or {}).get("failure") or "unsent",
+                }
+            )
+        return out
 
     def talked(self) -> list[str]:
         """The threads the record holds a posted reply of this node in, any run: the candidates."""

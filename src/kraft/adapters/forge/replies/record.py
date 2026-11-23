@@ -16,11 +16,11 @@ from kraft.adapters.forge.models import Posted
 from kraft.adapters.forge.replies.facts import body_hash
 from kraft.vocab import ForgeEvent
 
-Op = Literal["reply", "summary"]
+Op = Literal["reply", "summary", "resolve"]
 State = Literal["pending", "unclear", "posted", "refused", "superseded", "given_up"]
 Failure = Literal["unclear", "rate_limited", "deferred"]
 
-_OPS = ("reply", "summary")
+_OPS = ("reply", "summary", "resolve")
 #: A failure that counts toward the three sends: it may have landed, or it was refused
 #: for the rate and will be tried again.
 _COUNTED = ("unclear", "rate_limited")

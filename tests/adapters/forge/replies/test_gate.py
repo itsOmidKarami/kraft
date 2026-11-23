@@ -4,6 +4,7 @@ triage reply, Kraft's last word and its argument count against the cap."""
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
@@ -12,7 +13,13 @@ from support.harness import v1_node, v1_task
 from kraft import store
 from kraft.adapters.forge.models import Posted
 from kraft.adapters.forge.replies import facts, record
-from kraft.adapters.forge.replies.gate import fix_refusal, thread_refusal, triage_refusal
+from kraft.adapters.forge.replies.gate import (
+    Latest,
+    fix_refusal,
+    resolve_refusal,
+    thread_refusal,
+    triage_refusal,
+)
 from kraft.adapters.forge.replies.record import Intent, new_id
 
 ITEM = "wi1"
@@ -28,9 +35,9 @@ K2 = note("K2", VIEWER, f"Answer:\n\nyes\n\n{facts.reply_marker(K2_ID)}", type_=
 VIEWER_UNMARKED = note("V", VIEWER, "a word from the viewer", type_="User")
 
 
-def _thread(*notes, resolved=False, can_reply=True, tid="T1"):
+def _thread(*notes, resolved=False, can_reply=True, can_resolve=True, tid="T1"):
     _, thread = bot_thread(tid, *notes, file="a.py")
-    return replace(thread, mr=7, resolved=resolved, can_reply=can_reply)
+    return replace(thread, mr=7, resolved=resolved, can_reply=can_reply, can_resolve=can_resolve)
 
 
 def _kraft(posted=None):
@@ -195,3 +202,185 @@ async def test_the_cap_survives_a_retry(item_on, database):
     kraft = facts.Kraft(VIEWER, it.id, {})
     got = triage_refusal(_thread(B), bots=(BOT,), on=(BOT,), kraft=kraft, intents=held, cap=2)
     assert got == "cap"
+
+
+READ_AT = datetime(2026, 1, 1, 0, 1, 0, tzinfo=UTC)
+LATEST = Latest("s1", READ_AT, frozenset())
+#: Bot notes before and after the triage's read of the thread (`READ_AT`), and 3 s before it.
+LATE = note("B2", BOT, "no, still wrong", at="2026-01-01T00:02:00Z")
+WITHIN_SKEW = note("B3", BOT, "no, still wrong", at="2026-01-01T00:00:57Z")
+K_LATE = kraft_note("K", ITEM, at="2026-01-01T00:02:00Z")
+
+
+def _sent(state, n, *, kind="fixed", id=None, why=None, **payload) -> Intent:
+    """A reply intent of run 1 of node `n` in T1; `posted` ones hold the ids of note `n`'s."""
+    posted = {"ids": [n.id, n.rest_id], "body_sha256": "h"} if state == "posted" else None
+    base = {"op": "reply", "thread": "T1", "node_id": "n", "run": 1, "kind": kind, "cycle": 1}
+    return Intent(id or new_id(ITEM), {**base, **payload}, state, why=why, posted=posted)
+
+
+def _resolved_before(state, run=0) -> Intent:
+    payload = {"op": "resolve", "thread": "T1", "node_id": "n", "run": run, "kind": "resolve"}
+    return Intent(new_id(ITEM), payload, state)
+
+
+FIX = _sent("posted", K, id=K_ID)
+#: Kraft's note is a posted "Fixed in", unless a row says otherwise.
+RESOLVE_ROWS = [
+    pytest.param(_thread(B, K), [FIX], {}, None, id="confirmed-fix"),
+    pytest.param(
+        _thread(B, K, B, K2),
+        [_sent("posted", K, kind="declined"), _sent("posted", K2, cycle=2)],
+        {},
+        None,
+        id="fix-after-a-decline",
+    ),
+    pytest.param(_thread(B, K, can_reply=False), [FIX], {}, None, id="locked-but-resolvable"),
+    pytest.param(
+        _thread(B, K_LATE), [_sent("posted", K_LATE)], {}, None, id="kraft-note-after-the-read"
+    ),
+    pytest.param(
+        _thread(B, K),
+        [
+            _sent("superseded", K, why="later_cycle", cycle=2),
+            _sent("posted", K, cycle=3),
+        ],
+        {},
+        None,
+        id="later-cycle-superseded-with-a-later-fix-posted",
+    ),
+    pytest.param(
+        _thread(B, K), [_sent("posted", K, kind="declined")], {}, "not_fixed", id="decline-only"
+    ),
+    pytest.param(
+        _thread(B, K), [_sent("posted", K, kind="answered")], {}, "not_fixed", id="answer-only"
+    ),
+    pytest.param(
+        _thread(B, K, K2),
+        [FIX, _sent("posted", K2, kind="declined")],
+        {},
+        "not_fixed",
+        id="fix-then-a-decline",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX],
+        {"latest": Latest("s1", READ_AT, frozenset({"T1"}))},
+        "not_fixed",
+        id="triage-replied-after-the-fix",
+    ),
+    pytest.param(_thread(B, K), [], {}, "not_fixed", id="note-the-record-lacks"),
+    pytest.param(_thread(B, K, resolved=True), [FIX], {}, "resolved", id="already-resolved"),
+    pytest.param(
+        _thread(B, K, resolved=True, can_resolve=False),
+        [FIX],
+        {},
+        "resolved",
+        id="already-resolved-and-not-resolvable",
+    ),
+    pytest.param(
+        _thread(B, K, can_resolve=False), [FIX], {}, "cannot_resolve", id="cannot-resolve"
+    ),
+    pytest.param(_thread(B, K, P), [FIX], {}, "person_written", id="person-written"),
+    pytest.param(
+        _thread(B, K),
+        [FIX],
+        {"kraft": _kraft({"K": "another hash"})},
+        "person_written",
+        id="an-edited-kraft-note",
+    ),
+    pytest.param(_thread(B, K), [FIX], {"on": ()}, "not_bot_started", id="not-bot-started"),
+    pytest.param(_thread(U, K), [FIX], {}, "bot posts as a user", id="bot-posts-as-a-user"),
+    pytest.param(_thread(B), [FIX], {}, "kraft_note_gone", id="kraft-note-deleted"),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _resolved_before("posted")],
+        {},
+        "reopened",
+        id="reopened-after-kraft-resolved",
+    ),
+    pytest.param(
+        _thread(B, K), [FIX, _resolved_before("unclear")], {}, "reopened", id="reopened-unclear"
+    ),
+    pytest.param(_thread(B, K), [FIX], {"latest": None}, "no_latest_triage", id="no-latest-triage"),
+    pytest.param(_thread(B, K, LATE), [FIX], {}, "answer_unread", id="bot-answered-after-the-read"),
+    pytest.param(_thread(B, K, WITHIN_SKEW), [FIX], {}, "answer_unread", id="skew-margin"),
+    pytest.param(
+        _thread(B, K), [FIX], {"dropped": True}, "findings_dropped", id="findings-dropped"
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("refused", K, kind="declined", why="cap")],
+        {},
+        "reply_held_back",
+        id="cap-refused",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("pending", K, kind="declined")],
+        {},
+        "reply_held_back",
+        id="deferred",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("unclear", K, kind="declined")],
+        {},
+        "reply_held_back",
+        id="unclear",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("given_up", K, kind="declined")],
+        {},
+        "reply_held_back",
+        id="given-up",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("superseded", K, why="raised_again", cycle=2)],
+        {},
+        "reply_held_back",
+        id="superseded-fix",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("superseded", K, why="later_cycle", cycle=2)],
+        {},
+        "reply_held_back",
+        id="later-cycle-superseded-alone",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX, _sent("refused", K, kind="declined", why="cap", run=0)],
+        {},
+        None,
+        id="another-run",
+    ),
+    pytest.param(
+        _thread(B, K),
+        [FIX],
+        {"outstanding": {"T1"}},
+        "finding_outstanding",
+        id="finding-outstanding",
+    ),
+]
+
+
+@pytest.mark.parametrize("thread, intents, given, expected", RESOLVE_ROWS)
+def test_resolve_refusal(thread, intents, given, expected):
+    """Only a confirmed fix is resolved: Kraft's latest note in the thread is a posted "Fixed in",
+    the latest triage saw every note, and nothing is held back or outstanding."""
+    args = {
+        "bots": (BOT,),
+        "on": (BOT,),
+        "kraft": _kraft(),
+        "intents": _by_id(*intents),
+        "run": 1,
+        "node_id": "n",
+        "latest": LATEST,
+        "outstanding": (),
+        "dropped": False,
+        **given,
+    }
+    assert resolve_refusal(thread, **args) == expected

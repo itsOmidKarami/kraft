@@ -101,3 +101,17 @@ def test_the_review_brief_is_told_to_report_what_the_triage_declined():
         assert entry in brief
     task = yaml.safe_load(LIBRARY.read_text())["tasks"]["write_summary"]
     assert task["inputs"] == ["triage_verdict"]
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "A `resolved` entry is a thread Kraft resolved because it confirmed the fix",
+        "`not_fixed` above all, is an open thread a person must decide",
+        "(any thread the reply report does not mark `resolved`)",
+    ],
+    ids=["resolved-entry", "not-fixed-is-open", "unresolved-only-when-not-marked"],
+)
+def test_the_review_brief_says_what_kraft_resolved(phrase):
+    brief = " ".join((SKILL.parent.parent / "review-brief" / "SKILL.md").read_text().split())
+    assert phrase in brief
