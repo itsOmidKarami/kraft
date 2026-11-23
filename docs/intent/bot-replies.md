@@ -201,8 +201,9 @@ WHERE no reviewer of a node's review wait has replies on, the system SHALL make
 no forge call for replies. A collecting wait with such a reviewer SHALL read the
 login Kraft writes as once and keep it for the wait, and mark each collected note
 Kraft wrote as Kraft's. An unreadable viewer SHALL post nothing at that posting
-point.
-enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads
+point. A completing posting point SHALL read the forge to decide a reply round only
+when the record holds a posted reply of the node.
+enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer, tests/executor/test_replies.py::test_an_unreadable_viewer_posts_nothing_until_it_reads, tests/executor/test_reply_round_walks.py::test_the_owed_check_makes_no_forge_call_without_a_posted_reply, tests/executor/test_reply_round_walks.py::test_replies_off_starts_no_round_and_reads_nothing
 origin: src/kraft/adapters/forge/run.py §_collect_review
 
 ## REQ the-reply-limits-are-policy-keys-with-code-defaults
@@ -283,10 +284,11 @@ the cycle and the forge's head of an open merge request, the thread is still
 collected, no later fix cycle started, and no "Fixed in" went to that thread for
 that finding before; it SHALL wait while the commit is unpushed or no triage ran
 on it, SHALL supersede the reply otherwise, including when the node completes
-with it unconfirmed or unpushed, and SHALL post the triage's reply instead when
+with it unconfirmed or unpushed and no reply round starts there (a reply still
+waiting SHALL stay waiting through a round's start), and SHALL post the triage's reply instead when
 that triage wrote one in the thread. With replies off, a finding SHALL carry no
 thread and the fix loop SHALL be as before.
-enforced-by: tests/executor/test_replies_fix.py::test_the_fix_verdict[confirmed], tests/executor/test_replies_fix.py::test_the_fix_verdict[another-head-pushed-since], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-later-cycle], tests/executor/test_replies_fix.py::test_the_fix_verdict[no-triage-on-the-commit-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[unconfirmed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[left-the-collection], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-bogus-same-as], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-merge-request-closed], tests/executor/test_replies_fix.py::test_threads_from_a_replies_off_bot_change_nothing, tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[confirmed], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[raised-again], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-same-finding-without-its-thread], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-triage-replied-instead], tests/executor/test_replies_fix.py::test_a_fix_reply_needs_its_commit_on_the_forge, tests/executor/test_replies_fix.py::test_a_fix_reply_needs_the_thread_s_file_changed, tests/executor/test_replies_fix.py::test_a_fix_reply_goes_once, tests/adapters/forge/replies/test_gate.py::test_a_fix_reply_goes_once_per_finding[posted-before-for-the-finding]
+enforced-by: tests/executor/test_replies_fix.py::test_the_fix_verdict[confirmed], tests/executor/test_replies_fix.py::test_the_fix_verdict[another-head-pushed-since], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-later-cycle], tests/executor/test_replies_fix.py::test_the_fix_verdict[no-triage-on-the-commit-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[unconfirmed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[left-the-collection], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-bogus-same-as], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-merge-request-closed], tests/executor/test_replies_fix.py::test_threads_from_a_replies_off_bot_change_nothing, tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[confirmed], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[raised-again], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-same-finding-without-its-thread], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-triage-replied-instead], tests/executor/test_replies_fix.py::test_a_fix_reply_needs_its_commit_on_the_forge, tests/executor/test_replies_fix.py::test_a_fix_reply_needs_the_thread_s_file_changed, tests/executor/test_replies_fix.py::test_a_fix_reply_goes_once, tests/adapters/forge/replies/test_gate.py::test_a_fix_reply_goes_once_per_finding[posted-before-for-the-finding], tests/executor/test_reply_round_walks.py::test_a_waiting_fix_reply_survives_a_round
 origin: src/kraft/executor/replies.py §_Point._fix_verdict
 
 ## REQ both-agents-get-the-reply-rules
@@ -319,9 +321,93 @@ origin: src/kraft/executor/replies.py §posting_point -- Omid, 2026-11-20: a rep
 
 ## REQ the-brief-reads-the-reply-report
 WHEN a node with replies on completes, the system SHALL write what it posted and
-did not, and every finding from a bot thread that never reached a fix, to a
+did not, every finding from a bot thread that never reached a fix, each thread still owed an
+answer at the reply-round limit or unread, and a CI look still pending when a reply
+round ended, to a
 report the review brief is pointed at, built into its section whenever the
 report lists anything, and SHALL remove its own node's report when the node
 completes with replies off.
-enforced-by: tests/executor/test_replies_fix.py::test_the_reply_report_lists_what_was_and_was_not_posted, tests/executor/test_replies_fix.py::test_a_fix_with_no_reply_is_reported, tests/executor/test_replies_fix.py::test_a_finding_still_raised_after_its_cycle_is_not_fixed, tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[this-node-s], tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[another-node-s], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-beside-the-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-alone], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
+enforced-by: tests/executor/test_replies_fix.py::test_the_reply_report_lists_what_was_and_was_not_posted, tests/executor/test_replies_fix.py::test_a_fix_with_no_reply_is_reported, tests/executor/test_replies_fix.py::test_a_finding_still_raised_after_its_cycle_is_not_fixed, tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[this-node-s], tests/executor/test_replies_fix.py::test_a_completion_with_replies_off_removes_the_report[another-node-s], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-beside-the-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-alone], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined, tests/executor/test_reply_round_walks.py::test_an_owed_at_limit_entry_carries_the_unread_answer
+origin: src/kraft/executor/replies.py §_Point.write_report
+
+## REQ a-thread-is-owed-a-look-after-kraft-s-reply
+WHEN a node with a fix loop and replies on is about to complete, the system SHALL
+treat a thread Kraft ever posted a reply of this node in, on whatever head, as owed a
+look when a configured bot answered it after the latest triage read the bots, or has
+not answered and is not past the review task's `reply_timeout_minutes`, and SHALL
+NOT treat a resolved thread or one a person wrote in as owed. A thread answered
+after Kraft's last reply SHALL be owed even at the per-thread cap, since the
+triage is to judge the answer. The decision SHALL read each candidate once with the
+forge inside the posting point's time budget and SHALL make no forge call when the
+record holds no posted reply of the node. WHERE the viewer, the merge request or a
+thread cannot be read, the merge request is not open or the budget is spent, the
+thread SHALL NOT be owed, the node SHALL complete without parking, and the report SHALL
+list a thread it could not read as `not_read`.
+enforced-by: tests/executor/test_reply_round_walks.py::test_an_answer_at_the_cap_is_read_and_judged_not_answered, tests/executor/test_reply_round_walks.py::test_a_reply_posted_on_one_head_is_read_on_the_next, tests/executor/test_reply_round_walks.py::test_the_owed_check_makes_no_forge_call_without_a_posted_reply, tests/executor/test_reply_round_walks.py::test_replies_off_starts_no_round_and_reads_nothing, tests/executor/test_reply_round_walks.py::test_the_owed_check_reads_the_review_tasks_timeout, tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[viewer-unreadable], tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[merge-request-closed], tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[read-thread-raises]
+origin: src/kraft/executor/replies.py §_Point.round -- Omid, 2026-11-20: we need the timeout and we can't just move on, but also we don't want to be stuck here either.
+
+## REQ a-reply-round-runs-instead-of-completing-up-to-the-limit
+WHEN a thread is owed a look at a completion exit of a node with a fix loop, and
+fewer than `reply_rounds_per_head` rounds have started on the head in the node's
+current run, the system SHALL record `reply_round_started` (the head, the round, the
+threads and a deadline of the reply timeout from now) together with the cursor at the
+node's first step, in one transaction, and SHALL measure the node again on that head
+at the loop counter's count instead of completing. The decision SHALL come after the
+posting point has posted and before a waiting fix reply is ended, the summary is
+posted or the report is written, and an error in it SHALL complete the node. A new
+head SHALL never be in a reply round, and a round SHALL start neither at the loopless
+exit nor on a node with no fix loop. A round SHALL NOT reuse the earlier
+measurement's sessions, and a crash inside it SHALL resume it without a second event.
+A round whose measurement fails SHALL take the node's recovery while that is unspent,
+and one that follows a fix cycle SHALL enter the fix loop. Reaching the limit SHALL
+complete the node.
+enforced-by: tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[open], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[record-written], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[other-head], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[earlier-run], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[another-node], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[second-round], tests/executor/test_reply_round.py::test_in_a_reply_round_reads_the_event_the_record_and_the_head[no-event-never-asks-for-the-head], tests/executor/test_reply_round.py::test_started_count_is_per_node_head_and_run[two-on-one-head], tests/executor/test_reply_round.py::test_started_count_is_per_node_head_and_run[another-head], tests/executor/test_reply_round.py::test_started_count_is_per_node_head_and_run[earlier-run], tests/executor/test_reply_round.py::test_started_count_is_per_node_head_and_run[another-node], tests/executor/test_reply_round.py::test_begin_writes_the_event_and_the_cursor_together, tests/executor/test_reply_round_walks.py::test_a_silent_bot_gets_one_reply_round_then_the_node_completes, tests/executor/test_reply_round_walks.py::test_a_reply_round_runs_on_every_shape_that_takes_replies[shipped], tests/executor/test_reply_round_walks.py::test_a_reply_round_runs_on_every_shape_that_takes_replies[no-early], tests/executor/test_reply_round_walks.py::test_a_reply_round_runs_on_every_shape_that_takes_replies[ci-first], tests/executor/test_reply_round_walks.py::test_a_round_starts_from_the_exit_after_a_passing_on_failure, tests/executor/test_reply_round_walks.py::test_a_round_starts_from_the_judge_s_stop_downgrade_exit, tests/executor/test_reply_round_walks.py::test_a_bot_answer_is_judged_in_the_same_run[answer-then-another-decline], tests/executor/test_reply_round_walks.py::test_a_bot_answer_is_judged_in_the_same_run[answer-the-triage-accepts], tests/executor/test_reply_round_walks.py::test_the_per_head_limit_ends_the_conversation, tests/executor/test_reply_round_walks.py::test_a_waiting_fix_reply_survives_a_round, tests/executor/test_reply_round_walks.py::test_a_node_with_no_fix_loop_never_starts_a_round, tests/executor/test_reply_round_walks.py::test_an_error_in_the_round_decision_still_completes_the_node, tests/executor/test_reply_round_rules.py::test_a_round_started_after_a_doubted_repair_does_not_re_serve_the_doubts, tests/executor/test_reply_round_sequences.py::test_a_crash_inside_a_reply_round_resumes_it, tests/executor/test_reply_round_sequences.py::test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery, tests/executor/test_reply_round_sequences.py::test_after_a_fix_cycle_a_red_round_goes_straight_to_the_fix_loop, tests/executor/test_reply_round_sequences.py::test_a_new_head_is_never_in_a_reply_round, tests/executor/test_reply_round_sequences.py::test_a_cap_of_three_allows_a_third, tests/store/test_sessions_reuse.py::test_a_reply_round_barrier_excludes_earlier_sessions[before-the-event-excluded], tests/store/test_sessions_reuse.py::test_a_reply_round_barrier_excludes_earlier_sessions[after-the-event-reusable], tests/store/test_sessions_reuse.py::test_a_reply_round_barrier_excludes_earlier_sessions[another-node-s-event-leaves-it]
+origin: src/kraft/executor/reply_round.py -- Omid, 2026-11-20: the exchange always ends, and posting never parks or stops an item.
+
+## REQ a-reply-round-s-triage-reads-only-what-is-new
+WHILE a node is in a reply round, a task that declares `bot_feedback` SHALL start
+an agent only when a configured bot's note created after the latest triage's `read_at`
+stands in a thread the round was started for, or when no triage has read the bots in
+the node's run, and SHALL NOT start it for an edit, a summary, another thread, a
+person's note or Kraft's own. A triage skipped in a round SHALL be an unmeasured
+task of the round's record, never a triage that found nothing, and SHALL keep the
+findings an earlier measurement had from it. Outside a round the triage's own skip
+rule SHALL be unchanged.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[new-bot-note-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[answer-before-the-last-read-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[edit-only-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[other-thread-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[no-latest-triage-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[a-person-note-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[kraft-note-only-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[outside-a-round-part-1-still-runs-on-a-thread], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[a-round-naming-no-thread-skips], tests/executor/test_measurement.py::test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task[reply-round-skip], tests/executor/test_measurement.py::test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task[ordinary-skip], tests/executor/test_measurement.py::test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task[reply-round-real-session], tests/executor/test_measurement.py::test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task[reply-round-non-triage-task-with-no-head], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_keeps_the_earlier_triage_findings_as_unmeasured
+origin: src/kraft/executor/round_prompts.py §bot_feedback_source
+
+## REQ a-reply-round-s-record-pairs-no-fix
+WHEN a measurement is made in a reply round, the system SHALL mark its
+`findings_measured` event `reply_round: true`, SHALL keep the mark when the record
+is amended, and SHALL give a marked record no fix when the judge's history is read, so
+no stall or regression is read across it.
+enforced-by: tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[marked-pairs-none], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[unmarked-pairs-the-fix], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[unmarked-with-fix-is-stuck], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[stuck-fingerprint-ignores-the-marked-record], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[unmarked-regresses], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[regressed-ignores-the-marked-record], tests/executor/test_reply_round_rules.py::test_an_amend_keeps_the_reply_round_mark
+origin: src/kraft/executor/dispatch.py §judge_history
+
+## REQ a-reply-round-honours-every-decline-on-its-head
+WHILE a node is in a reply round, every `stop_downgrade` verdict of the node's run
+on the head SHALL count as declined, whether or not its measurement ended early and
+on every node shape, so the round SHALL NOT collect, fix or judge again what the judge
+declined.
+enforced-by: tests/executor/test_reply_round_rules.py::test_declined_fingerprints_every[ended-early-counts-as-before], tests/executor/test_reply_round_rules.py::test_declined_fingerprints_every[not-ended-early-ignored-by-default], tests/executor/test_reply_round_rules.py::test_declined_fingerprints_every[not-ended-early-counts-with-every], tests/executor/test_reply_round_rules.py::test_declined_fingerprints_every[another-head-never], tests/executor/test_reply_round_rules.py::test_declined_fingerprints_every[another-node-never], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[loop-early], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[no-early]
+origin: src/kraft/executor/dispatch.py §declined_fingerprints
+
+## REQ a-reply-round-never-stops-the-item-on-pending-ci
+WHILE a node is in a reply round, the `mr.ci` task SHALL be handed the round, and a
+look that finds the pipeline still pending SHALL wait until the round's deadline and
+then complete the node on the head's earlier green measurement, recording its wait as
+`timed_out` and its session as `done`, and SHALL NOT stop the item. A pipeline that
+goes red in the round SHALL still fail it, and a task with no round SHALL keep its own
+timeout.
+enforced-by: tests/adapters/forge/test_run_ci_reply.py::test_the_ci_look_in_a_reply_round[pending-before-the-deadline-waits], tests/adapters/forge/test_run_ci_reply.py::test_the_ci_look_in_a_reply_round[pending-at-the-deadline-is-done], tests/adapters/forge/test_run_ci_reply.py::test_the_ci_look_in_a_reply_round[red-still-fails], tests/adapters/forge/test_run_ci_reply.py::test_the_ci_look_in_a_reply_round[green-is-done], tests/adapters/forge/test_run_ci_reply.py::test_the_ci_look_in_a_reply_round[no-reply-keeps-the-ci-waits-own-timeout], tests/executor/test_dispatch_reply.py::test_the_review_wait_is_handed_the_open_round[ci-task-with-an-open-round], tests/executor/test_dispatch_reply.py::test_the_review_wait_is_handed_the_open_round[ci-task-with-another-heads-round], tests/executor/test_reply_round_walks.py::test_a_pending_pipeline_in_a_reply_round_completes_at_the_reply_deadline, tests/executor/test_reply_round_walks.py::test_a_pipeline_that_goes_red_in_a_reply_round_still_fails
+origin: src/kraft/adapters/forge/run.py §_run_one -- Omid, 2026-11-22: a reply's workflow may add a check, and posting never parks or stops an item.
+
+## REQ the-reply-report-lists-what-a-round-left
+WHEN a node with replies on completes, the reply report SHALL list each thread
+still owed a look at the per-head limit as `owed_at_limit`, with the bot's unread word,
+each thread the owed check could not read as `not_read`, a CI look still pending when a
+round's time ran out as `ci_pending`, and every finding the last measurement raised or
+did not re-read that never reached a fix, including after a round whose triage was
+skipped.
+enforced-by: tests/executor/test_reply_round_walks.py::test_an_owed_at_limit_entry_carries_the_unread_answer, tests/executor/test_reply_round_walks.py::test_a_reply_round_report_keeps_what_an_earlier_measurement_found, tests/executor/test_reply_round_walks.py::test_the_per_head_limit_ends_the_conversation, tests/executor/test_reply_round_walks.py::test_a_pending_pipeline_in_a_reply_round_completes_at_the_reply_deadline, tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[viewer-unreadable], tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[read-thread-raises]
 origin: src/kraft/executor/replies.py §_Point.write_report

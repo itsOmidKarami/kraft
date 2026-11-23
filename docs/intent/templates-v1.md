@@ -422,8 +422,9 @@ origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inp
 
 An agent task that declares the `bot_feedback` input SHALL be handed what the
 review bots said, as the review wait collected it for this pass of the node,
-and a task that does not declare it SHALL NOT be.
-enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
+and a task that does not declare it SHALL NOT be. In a reply round it SHALL be handed
+the collection the round's review wait made, not the earlier measurement's.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart], tests/store/test_sessions_reuse.py::test_a_reply_round_barrier_excludes_earlier_sessions[before-the-event-excluded]
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [bot_feedback]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.bot_feedback` and `adapters/agent.py`'s `$KRAFT_BOT_FEEDBACK`; the collection is written by the node's `mr.automated_review` wait (`adapters/forge/run.py` §_collect_review).
 
 ## REQ bot-feedback-with-nothing-to-judge-starts-no-agent
@@ -432,8 +433,10 @@ WHEN the review wait's collection for this pass of the node holds no unresolved
 bot thread, no review check that did not pass (an unfinished one included) and
 no bot summary or review with a non-blank body (an approval's included), the
 system SHALL record a task that declares `bot_feedback` as done with no findings
-and SHALL NOT start an agent for it.
-enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[bodyless-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[blank-body-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[approval-with-a-body-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[failed-check-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[unfinished-check-runs], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round
+and SHALL NOT start an agent for it. In a reply round the agent SHALL start only for a
+note a configured bot added after the latest triage read the bots, in a thread the
+round was started for.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[bodyless-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[blank-body-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[approval-with-a-body-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[failed-check-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[unfinished-check-runs], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[new-bot-note-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[answer-before-the-last-read-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[a-person-note-skips]
 origin: src/kraft/executor/round_prompts.py §bot_feedback_source -- triage only when the bots said something that could need a change; GitHub keeps an approval's body (adapters/forge/gh.py §_bot_feedback), GitLab's approval writes no summary.
 
 ## REQ triage-verdict-is-delivered-to-the-review-brief
@@ -1279,14 +1282,15 @@ progress. A fix-loop repair round that changes none of the checkout, a review
 thread or the merge request description SHALL stop the loop for a human without
 measuring the node again. A finding the measurement did not re-read SHALL
 neither extend nor reset its stall count, and the whole-set check SHALL NOT
-compare a measurement with a previous one that read other tasks.
+compare a measurement with a previous one that read other tasks. A reply round's
+record SHALL follow no fix: it extends no stall count and no regression is read across it.
 enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry, tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[done], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[failed], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[with-concerns], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[after-an-earlier-thread-update], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[uncommitted-edit], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[thread-reply], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[snapshot-refused], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[mr-meta-edit], tests/executor/test_measurement.py::test_an_unmeasured_finding_holds_its_stuck_streak[held-not-reset], tests/executor/test_walk_early.py::test_the_whole_set_stuck_check_needs_the_same_tasks_read[previous-read-other-tasks]
 
 ## REQ findings-measured-lists-the-tasks-with-a-session
 
 WHEN the system records `findings_measured`, the event SHALL list the node's
 measuring tasks that have a session at that round and those that have none.
-enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without
+enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without, tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[marked-pairs-none], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[stuck-fingerprint-ignores-the-marked-record], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[regressed-ignores-the-marked-record]
 origin: src/kraft/executor/walk.py
 
 ## REQ a-step-that-did-not-run-contributes-nothing
@@ -1360,8 +1364,10 @@ WHEN the fix loop doesn't start on a measurement that ended early, the system
 SHALL record that outcome for the commit in the judge's verdict event. Every
 later measurement of that commit in the node's run, the re-measure after
 `on_failure` included, SHALL NOT end early on those findings, collect them,
-hand them to the fix loop or ask the judge about them again.
-enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-passes], tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-fails], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit]
+hand them to the fix loop or ask the judge about them again. A reply round SHALL
+honour every `stop_downgrade` verdict on its commit, ended early or not, on every
+node shape.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-passes], tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-fails], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[loop-early], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[no-early]
 origin: src/kraft/executor/walk.py
 
 ## REQ a-declined-early-start-continues-the-measurement
@@ -2345,7 +2351,8 @@ CI failures in the post-draft flow SHALL enter that execution node's recovery
 or fix-loop controls. Review-bot feedback SHALL enter the fix loop only as the
 findings of the triage step, and not the node's `on_failure`. After a
 successful repair, the system SHALL resynchronize the draft merge request and
-remeasure the node.
+remeasure the node. A reply round whose measurement fails SHALL take the node's
+`on_failure` while its recovery is unspent.
 enforced-by: tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[flagged], tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[declined], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop]
 
 ## REQ missing-external-approval-is-normal-pending-state
@@ -2393,7 +2400,7 @@ enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_
 
 An operator editing a work item MAY raise a normal policy ceiling for that work
 item, but SHALL NOT exceed an explicitly configured administrator maximum.
-enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum, tests/api/test_item_policy.py::test_intake_and_a_patch_set_the_items_own_override, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[attempts-over-maximum], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_override_past_its_bounds_is_refused_naming_the_field[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_items_safety_value_only_tightens_whatever_it_lands_on[allowlist-wider-than-the-ceiling-intersects], tests/executor/test_policy_enforcement.py::test_an_items_own_node_cap_binds_that_nodes_fix_loop, tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[intake-attempts], tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[patch-wall-clock]
+enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum, tests/api/test_item_policy.py::test_intake_and_a_patch_set_the_items_own_override, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[attempts-over-maximum], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_override_past_its_bounds_is_refused_naming_the_field[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_items_safety_value_only_tightens_whatever_it_lands_on[allowlist-wider-than-the-ceiling-intersects], tests/executor/test_policy_enforcement.py::test_an_items_own_node_cap_binds_that_nodes_fix_loop, tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[intake-attempts], tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[patch-wall-clock], tests/executor/test_reply_round_sequences.py::test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery
 origin: src/kraft/templates/models.py §MaterializedChain.with_item_policy -- the check every door that sets a work item's own override makes (`POST /work-items`, `PATCH /work-items/{id}`, a chain switch), by `ResolvedChain.check_scopes`, the engine every layer resolves through. A PATCH on a running or waiting item binds from the next node entered (`walk.walk_node` re-reads the row) and the next observation of a wait (`waits.observe` rebounds an open wait).
 
 ## REQ policy-override-rules-are-field-specific
