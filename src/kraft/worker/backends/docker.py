@@ -750,6 +750,21 @@ def _vm_evidence(host: Runtime) -> str:
     return f"OperatingSystem: {system}" if "Docker Desktop" in system else ""
 
 
+def _relay_mirror_hint(relay_image: str) -> str:
+    """Where to get the default relay image when Docker Hub's pull limit refuses
+    it: the same digest, so the same image. Nothing for an image the operator
+    chose, which the mirror may not hold."""
+    from kraft import config
+
+    if relay_image != config.SandboxHost.model_fields["relay_image"].default:
+        return ""
+    mirror = relay_image.replace("docker.io/", "mirror.gcr.io/", 1)
+    return (
+        ". If Docker Hub refuses the pull (toomanyrequests), set `relay_image` in "
+        f"sandbox.yaml to {mirror} and pull that"
+    )
+
+
 def channel_refusal(
     host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
 ) -> str | None:
@@ -773,6 +788,7 @@ def channel_refusal(
         f"unix socket, which decides how a sandbox with `network:` reaches Kraft's "
         f"egress proxy: the probe did not run. Pull the relay image "
         f"({host.cli} pull {relay_image}) and check `kraft admin doctor`"
+        f"{_relay_mirror_hint(relay_image)}"
     )
 
 
@@ -1829,7 +1845,7 @@ class DockerBackend:
             if pulled is None or pulled[0] != 0:
                 return False, (
                     f"the egress relay image {relay!r} is not pulled -- "
-                    f"run: {host.cli} pull {relay}"
+                    f"run: {host.cli} pull {relay}{_relay_mirror_hint(relay)}"
                 )
             reachable = await asyncio.to_thread(socket_channel, relay)
             said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""

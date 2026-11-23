@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kraft import config
 from kraft.worker import ca, shim
 from kraft.worker.backends import docker
 from kraft.worker.sandbox import SandboxNotReady
@@ -355,6 +356,20 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay
     healthy_but_relay.pulled["relay"] = False
     ok, detail = await backend.health(POLICED)
     assert not ok and f"docker pull {healthy_but_relay.relay}" in detail
+    assert healthy_but_relay.relay.replace("docker.io/", "mirror.gcr.io/") in detail
+
+
+@pytest.mark.parametrize(
+    ("image", "names_mirror"),
+    [
+        (config.SandboxHost.model_fields["relay_image"].default, True),
+        ("docker.io/someone/socat:1", False),
+    ],
+    ids=["the-default-image", "an-image-the-operator-chose"],
+)
+def test_only_the_default_relay_image_is_sent_to_the_mirror(image, names_mirror):
+    refusal = docker.channel_refusal(docker.Runtime(), image, None)
+    assert ("mirror.gcr.io/" in refusal) is names_mirror
 
 
 @pytest.mark.parametrize(
