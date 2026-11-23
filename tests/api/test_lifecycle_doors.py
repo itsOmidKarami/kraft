@@ -28,6 +28,8 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     from kraft.api import deps
     from kraft.api.routes import lifecycle
 
+    # Its 10 s tick would start a `queued` row between the test's reads.
+    client.portal.call(client.app.state.queue_task.cancel)
     monkeypatch.setattr(lifecycle.forge_mod.run, "backend_for", lambda *_: "fake")
     job = lifecycle.forge_mod.FailedJob("e2e", "failed", "script_failure")
     red = {
