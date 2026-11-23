@@ -282,6 +282,10 @@ async def test_a_send_records_its_outcome(point, exc, sent, state):
 
     after = point.reread(intent)
     assert (got, after.state) == (sent, state)
+    assert len(point.events("reply_send_started")) == 1
+    # Only a write whose outcome was unknown is a recorded failure: a clean post or a
+    # refusal is not.
+    assert len(point.events("reply_send_failed")) == (state == "unclear")
     if exc is None:
         assert after.posted["ids"] == ["1", "N1"] and after.posted["via"] == "send"
 
@@ -309,7 +313,15 @@ async def test_a_crash_mid_send_leaves_the_intent_unclear(point):
         await point.pp.send(intent, gate=_go_ahead, write=_fails(asyncio.CancelledError()))
 
     after = point.reread(intent)
-    assert (after.state, after.sends) == ("unclear", 0)
+    assert (after.state, after.sends, after.ever_unclear) == ("unclear", 0, False)
+    assert len(point.events("reply_send_started")) == 1
+    assert point.events("reply_send_failed") == []
+    # The next posting point reconciles it: no copy on the forge, so it is pending again
+    # and now remembered as once unclear; nothing was written by the reconcile.
+    await point.pp.reconcile([after], viewer=VIEWER, notes=point.notes)
+    again = point.reread(intent)
+    assert (again.state, again.ever_unclear) == ("pending", True)
+    assert point.fake.writes == []
 
 
 async def test_a_posting_point_stops_sending_after_its_time_budget(point):
