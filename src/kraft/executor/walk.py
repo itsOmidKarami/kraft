@@ -3150,6 +3150,8 @@ async def _restart_span(
         ]
         await _reopen_gates(db, work_item_id, nodes, finals, "base_changed")
     await _clear_span_counters(db, work_item_id, span)
+    # No walk observes a wait of this run again, and a later one must not reuse its row.
+    await db.write(lambda c: store.close_parked_sessions(c, work_item_id, node.id))
     # The cursor moves last, after the gates reopened: a crash before it
     # leaves the item on node `index`, where a resume finds its unanswered
     # drop (`hold_interrupted_repair`); one after it resumes at the restart.
@@ -3610,9 +3612,30 @@ async def run_once(
             # A base the node moved before it stopped (its CI wait's conflict
             # rebase, then a wait still pending or a failed push) is the entry
             # base of the next call, which then sees no move: stand the item at
-            # the restart now, so whatever walks it next re-verifies it.
-            if base_change is not None and dispatch._current_base_ref(db, work_item_id) != pre_base:
+            # the restart now, so whatever walks it next re-verifies it. Not an
+            # item another door has since taken (a skip, a cancel): its cursor
+            # is that door's.
+            if (
+                base_change is not None
+                and dispatch._current_base_ref(db, work_item_id) != pre_base
+                and db.read(
+                    lambda c: c.execute(
+                        "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+                    ).fetchone()["status"]
+                )
+                == result
+            ):
                 key = f"{node.id}.on_base_changed"
+                cap = _base_change_cap(key)
+                if result in ("paused", "needs_human") and _span_breach(
+                    db, work_item_id, key, cap, policy
+                ):
+                    # Restarts spent: the stop a person already has stays, and
+                    # their next move still goes back through verification.
+                    await _hold_at_restart(
+                        db, work_item_id, nodes, i, base_change.restart_from, "base_changed"
+                    )
+                    return result
                 restarted = await _restart_span(
                     db,
                     work_item_id,
@@ -3621,7 +3644,7 @@ async def run_once(
                     base_change.restart_from,
                     policy,
                     key=key,
-                    cap=_base_change_cap(key),
+                    cap=cap,
                     restart_event=ChainEvent.BASE_CHANGE_RESTART,
                     reopen_gates=False,
                     reopen_reason="conflict_resolved",

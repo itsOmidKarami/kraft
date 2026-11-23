@@ -132,8 +132,14 @@ def _moves_base_once(it):
             "rate_limited",
             ["await_review", "triage", "await_ci"],
         ),
+        # The CI wait ran out after the rebase: a person's next move re-verifies.
+        (
+            {"await_ci": ["capped_out", "done"]},
+            "needs_human",
+            ["await_review", "triage", "await_ci"],
+        ),
     ],
-    ids=["completes", "parks-on-the-review-wait", "rate-limited"],
+    ids=["completes", "parks-on-the-review-wait", "rate-limited", "stops-for-a-person"],
 )
 async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head(
     item_on, script, default_chain, plan, parks, before
@@ -153,8 +159,11 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     await approve(it, "local_review")
     script.plan = plan
     script.effects = {"await_ci": _moves_base_once(it)}
+    await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
     walked = await _walk(it, default_chain, "merge_request_feedback")
+    # No later walk observes that wait, or reuses its row for the rebased head.
+    assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     if parks:
         assert walked == parks
         await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
@@ -179,6 +188,29 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
     assert requested == ["local_review", "final_review"]
     assert it.events("gate_reopened") == []
+
+
+@pytest.mark.parametrize("taken", [True, False], ids=["by-another-door", "restarts-spent"])
+async def test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite(
+    item_on, script, default_chain, taken
+):
+    """The node stopped after moving the base, but the restart cannot run: a door
+    that took the item keeps its cursor, and with the restarts spent a person's stop
+    keeps its own reason while the item still stands where it re-verifies."""
+    it = await item_on(default_chain, "merge_request_feedback")
+    await approve(it, "local_review")
+    key = "merge_request_feedback.on_base_changed"
+    await it.database.write(lambda c: store.bump_counter(c, it.id, key, _policy.Cap(1, 3600)))
+    script.plan = {"await_ci": ["paused" if taken else "capped_out"]}
+    script.effects = {"await_ci": _moves_base_once(it)}
+
+    walked = await _walk(it, default_chain, "merge_request_feedback")
+
+    assert walked == ("paused" if taken else "needs_human")
+    assert it.events("base_change_restart") == []
+    expected = "merge_request_feedback" if taken else "verification"
+    assert it.row()["current_node_id"] == expected
+    assert not any("exhausted" in e["payload"]["reason"] for e in it.events("needs_human"))
 
 
 async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback(

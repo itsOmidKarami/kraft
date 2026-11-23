@@ -1630,6 +1630,7 @@ async def _run_one(
                     # `merge` does below (Kraft-tx0dz).
                     log += "waiting for the rebased head's pipeline\n"
                     status = "waiting"
+                    reply = None  # a round's deadline is for the head it measured green
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
             if (
@@ -3061,6 +3062,8 @@ async def run_task(
     # A member's move is a base change `base_ref` cannot show: report it, as
     # `builtins.mr_rebase` does, so the node's declared span re-verifies it --
     # whatever the targets after it reported, or the move is never seen again.
+    # Not over a drop from the merge queue, whose own restart reopens the gates,
+    # or a stop a person must look at first.
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
@@ -3074,7 +3077,9 @@ async def run_task(
         return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
-    return BASE_MOVED if (moved and has_rebase_bounce) else recorded
+    if moved and has_rebase_bounce and recorded not in ("merge_rejected", "config_error"):
+        return BASE_MOVED
+    return recorded
 
 
 async def _observed(

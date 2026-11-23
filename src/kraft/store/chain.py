@@ -92,6 +92,24 @@ def stand_at(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     )
 
 
+def close_parked_sessions(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    """End the sessions `node_id` left parked on an external wait, as a skip does."""
+    now = _now()
+    for row in conn.execute(
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ? "
+        "ORDER BY rowid",
+        (work_item_id, node_id, SessionStatus.WAITING),
+    ).fetchall():
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, row[0]),
+        )
+        events.append(
+            conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": row[0]}
+        )
+
+
 def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # Idempotent: resume can re-enter an already-completed node (a reconciled
     # non-fix node, or a fix_loop node re-measured after a crash in the
