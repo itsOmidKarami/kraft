@@ -16,12 +16,12 @@ const preview = (mr: "open" | "merged" | null) => ({
   mr: mr ? { ref: 142, url: "https://forge/142", state: mr } : null,
   spend: { spent_usd: 2.41, cap_usd: 5 },
 });
-const open = (answers: Parameters<typeof stubFetch>[0]) => {
+const open = (answers: Parameters<typeof stubFetch>[0], neverStarted = false) => {
   const calls = stubFetch({ ...WRITES, ...answers });
   const anchor = createRef<HTMLDivElement>();
   const onDone = vi.fn();
   const onClose = vi.fn();
-  render(<><div ref={anchor} /><CancelCard id="w1" anchor={anchor} onClose={onClose} onDone={onDone} /></>);
+  render(<><div ref={anchor} /><CancelCard id="w1" neverStarted={neverStarted} anchor={anchor} onClose={onClose} onDone={onDone} /></>);
   return { calls, onDone, onClose };
 };
 
@@ -71,6 +71,14 @@ describe("CancelCard", () => {
     open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
     expect(await screen.findByText(/branch kraft\/cb59, the worktree until it is archived/)).toBeInTheDocument();
     expect(screen.getByText(/Archiving keeps the branch if it has commits that were never pushed/)).toBeInTheDocument();
+  });
+
+  // #1343: a never-started item has no branch or worktree to keep, even
+  // though the preview still names the ones it would have had.
+  it("says nothing was made yet for an item that never started, naming no branch or worktree", async () => {
+    open({ "GET /work-items/w1/cancel-preview": [200, { ...preview(null), running: null }] }, true);
+    expect(await screen.findByText("Nothing was made yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/branch|worktree/)).toBeNull();
   });
 
   it("offers closing the MR only while it is open", async () => {

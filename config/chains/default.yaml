@@ -91,13 +91,9 @@ nodes:
     kind: exec
     steps:
       - id: rebase
-        tasks:
-          - id: rebase
-            extends: mr_rebase
+        tasks: [{id: rebase, extends: mr_rebase}]
       - id: open
-        tasks:
-          - id: open
-            extends: open_draft_mr
+        tasks: [{id: open, extends: open_draft_mr}]
 
   - id: merge_request_feedback
     extends: post_draft_feedback

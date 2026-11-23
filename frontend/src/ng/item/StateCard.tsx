@@ -310,11 +310,16 @@ function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; s
         ],
       };
     }
+    // A cancelled item that never started made nothing: no branch, no
+    // worktree, no findings or threads to keep (#1343). `neverStarted()`
+    // only matches a paused item, so this reads `started_at` itself: it
+    // stays null until the chain's first node starts.
+    const neverRan = !item.started_at;
     return {
       tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
-      text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
+      text: neverRan ? "The run never started, so nothing was made yet. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain." : "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
-        ["work kept", "the branch, the worktree until it is archived, findings and threads"],
+        ...(neverRan ? [] : [["work kept", "the branch, the worktree until it is archived, findings and threads"] as [string, ReactNode]]),
         ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
         ["reason", item.ended_reason || str(ev?.payload.reason) || NO_REASON_GIVEN],
       ],

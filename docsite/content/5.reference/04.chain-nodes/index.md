@@ -200,6 +200,20 @@ Kraft refuses at load:
 | `icon` | string | no | unset | The [icon](#icons) the board draws for the step. |
 | `runner` | string | no | unset | Where it runs, as in the chain's `runner`. _Added in 2.4_ |
 
+### One-task steps
+
+_Added in next_
+
+A step that holds one task with only `id` and `extends` fits on one line, in YAML's inline list. The shipped chains write it this way, and so does a Templates save. Keys beside `tasks` are the step's; keys in the braces are the task's:
+
+```yaml
+- id: review_feedback
+  read_only: true
+  tasks: [{id: triage, extends: triage_review_feedback}]
+```
+
+Both IDs stay, so the task's path is still `<node>.review_feedback.triage`. A task with any other key is written in block form.
+
 ## Task keys
 
 Every task takes these keys, then the keys of its kind. A task takes no

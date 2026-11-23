@@ -571,12 +571,25 @@ describe("StateCard", () => {
 
   it("cancelled: the reason from the cancel event, Duplicate and Archive", async () => {
     stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "superseded", node_id: "verification" }, node_id: "verification", created_at: "t" }]] });
-    const { h } = show({ display_status: "cancelled", stop: null });
+    const { h } = show({ display_status: "cancelled", stop: null, started_at: "2026-09-13T09:00:00Z" });
     const card = screen.getByRole("region", { name: "Cancelled" });
     expect(await within(card).findByText("superseded")).toBeInTheDocument();
     expect(within(card).getByText("work kept")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "Duplicate as new item" }));
     expect(h.onDuplicate).toHaveBeenCalled();
+  });
+
+  // #1343: a cancelled item that never started made nothing, so its card
+  // says so and carries no work-kept fact naming a branch or a worktree.
+  it("cancelled before it started: nothing was made yet, and no work-kept fact", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "filed by mistake", node_id: null }, node_id: null, created_at: "t" }]] });
+    show({ display_status: "cancelled", stop: null, started_at: null, current_node_id: null });
+    const card = screen.getByRole("region", { name: "Cancelled" });
+    expect(await within(card).findByText("filed by mistake")).toBeInTheDocument();
+    expect(within(card).getByText(/nothing was made yet/)).toBeInTheDocument();
+    expect(within(card).queryByText("work kept")).toBeNull();
+    expect(card).not.toHaveTextContent("branch");
+    expect(card).not.toHaveTextContent("worktree");
   });
 
   it("abandoned: its own card, with the reason the abandon recorded", async () => {

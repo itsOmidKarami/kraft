@@ -114,6 +114,7 @@
           "reply_posted",
           "reply_round_started",
           "reply_send_failed",
+          "reply_send_started",
           "review_submitted",
           "reviewed_head_repinned",
           "rewind_cancelled",

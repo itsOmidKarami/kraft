@@ -11,8 +11,10 @@ import { CANCEL_THIS_ITEM } from "../sharedWords";
 
 /** Cancel… (Decisions §14, prototype lines 43–48): what stops, what is kept,
  *  what the spend does, the MR option, a reason, then `POST /cancel`. The
- *  reason is required: the server's EndWorkItem 422s a blank one (R49.1). */
-export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor: RefObject<HTMLElement | null>; onClose: () => void; onDone: () => void }) {
+ *  reason is required: the server's EndWorkItem 422s a blank one (R49.1).
+ *  `neverStarted`: the item was filed paused and never ran, so nothing was
+ *  made yet — the card says so and names no branch or worktree (#1343). */
+export function CancelCard({ id, neverStarted, anchor, onClose, onDone }: { id: string; neverStarted: boolean; anchor: RefObject<HTMLElement | null>; onClose: () => void; onDone: () => void }) {
   const [preview, setPreview] = useState<CancelPreview | null>(null);
   const [reason, setReason] = useState("");
   const [closeMr, setCloseMr] = useState(false);
@@ -38,9 +40,11 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
   const rows: [string, string][] = preview
     ? [
         ["stops now", stopsNow(preview.running)],
-        ["keeps", `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ", findings"}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ", threads"} and the run log`],
+        // A never-started item has no branch or worktree to keep: the preview
+        // still names the ones it would have had, so the card must not read it.
+        ["keeps", neverStarted ? "Nothing was made yet." : `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ", findings"}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ", threads"} and the run log`],
         ["spend", `${usd(preview.spend.spent_usd)} stays on the ledger and in today's total`],
-        ["afterwards", "Status CANCELLED. Archive it, or duplicate it as a new item. Archiving keeps the branch if it has commits that were never pushed."],
+        ["afterwards", `Status CANCELLED. Archive it, or duplicate it as a new item.${neverStarted ? "" : " Archiving keeps the branch if it has commits that were never pushed."}`],
       ]
     : [];
 

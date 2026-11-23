@@ -545,6 +545,7 @@ QUIET = frozenset(
         "external_wait_observed",
         "findings_measured",
         "reply_round_started",
+        "reply_send_started",
         "base_move_held",
         "run_forked",
         "cap_counters_reset",
