@@ -92,6 +92,12 @@ def ssl_context(account: ForgeAccount, *, plus_system: bool = False) -> ssl.SSLC
     return ctx
 
 
+def _no_answer(exc: httpx.HTTPError) -> bool:
+    """A connection that dropped or timed out, not a request httpx refused to make."""
+    dropped = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
+    return isinstance(exc, dropped) and not _is_tls(exc)
+
+
 def _is_tls(exc: BaseException) -> bool:
     chain = []
     while exc is not None and exc not in chain:
@@ -220,7 +226,7 @@ class HttpTransport:
             raise ForgeError(
                 f"{label}: cannot reach {shown} ({type(exc).__name__})",
                 reason="unreachable",
-                no_answer=True,
+                no_answer=_no_answer(exc),
             ) from None
         if blob is None:
             raise AssertionError("unreachable")  # pragma: no cover
@@ -280,7 +286,7 @@ class HttpTransport:
             raise ForgeError(
                 f"{label}: the log download from {shown} {why}",
                 reason="unreachable",
-                no_answer=not _is_tls(exc),
+                no_answer=_no_answer(exc),
             ) from None
 
     async def _call(self, label: str, method: str, url: str, **kw) -> ApiResponse:

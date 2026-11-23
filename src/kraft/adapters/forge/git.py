@@ -104,8 +104,10 @@ CLI_TIMEOUT_S = 120.0
 
 def _calls_the_forge(args: list[str]) -> bool:
     """Whether this command talks to the forge, so running out of time is the network's."""
-    return args[0] in ("gh", "glab") or (
-        args[0] == "git" and args[1:2] in (["push"], ["fetch"], ["pull"], ["ls-remote"], ["lfs"])
+    return (
+        args[0] in ("gh", "glab")
+        or args[:2] in (["git", "push"], ["git", "fetch"], ["git", "pull"], ["git", "ls-remote"])
+        or args[:3] == ["git", "lfs", "pre-push"]
     )
 
 

@@ -110,7 +110,12 @@ async def test_run_git_marks_a_call_the_network_cut_off(
 
 @pytest.mark.parametrize(
     ("args", "no_answer"),
-    [(["git", "push", "origin", "b"], True), (["git", "rebase", "main"], False)],
+    [
+        (["git", "push", "origin", "b"], True),
+        (["git", "lfs", "pre-push", "origin", "b"], True),
+        (["git", "lfs", "version"], False),
+        (["git", "rebase", "main"], False),
+    ],
 )
 async def test_only_a_forge_call_running_out_of_time_is_the_network(
     tmp_path, monkeypatch, args, no_answer

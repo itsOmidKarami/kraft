@@ -84,6 +84,76 @@ async def test_a_dropped_connection_parks_launches_nothing_and_recovers(
     assert [e["payload"]["deadline"] for e in started] == [deadline], "the wait's clock restarted"
 
 
+@pytest.mark.parametrize("control", ["on_failure", "fix_loop"])
+async def test_a_drop_in_a_repairs_sync_does_not_run_the_repair_again(
+    walk,  # noqa: F811
+    item_on,
+    wait_clock,
+    control,
+):
+    """Two of the incident's three failures were here: the repair's own sync."""
+    edit = shlex.join([sys.executable, "-c", "open('left.txt', 'a').write('x')"])
+    review = {"id": "await_review", "kind": "forge", "target": "mr.automated_review"}
+    node = {
+        "id": "feedback",
+        "kind": "exec",
+        "steps": [{"id": "automated_review", "tasks": [review]}],
+        control: {
+            "steps": [
+                {"id": "repair", "tasks": [{"id": "fix", "kind": "subprocess", "command": edit}]},
+                {"id": "sync", "tasks": [{"id": "sync", "kind": "forge", "target": "mr.sync"}]},
+            ]
+        },
+    }
+    fake = forge.FakeForge(
+        review_results=[
+            forge.ReviewResult("actionable", findings=("rename `x`",)),
+            forge.ReviewResult("clean"),
+        ]
+    )
+    dropped, real_push = [], fake.push
+
+    async def drop_the_repairs_push(**kw):
+        if (kw["repo"] / "left.txt").exists() and not dropped:  # the repair has run
+            dropped.append(kw)
+            raise DROPPED
+        await real_push(**kw)
+
+    fake.push = drop_the_repairs_push
+    it = await item_on([forge_node("open", "mr.open_draft"), node])
+
+    assert await walk(fake, it) == "waiting"
+    wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
+    assert await walk(fake, it) == "completed"
+
+    assert _hooks(it).count(f"feedback.{control}.repair.fix") == 1, "the repair ran again"
+    assert len(it.events("fix_cycle_started")) == (control == "fix_loop")
+    assert it.events("forge_no_answer")[0]["payload"]["task"] == f"feedback.{control}.sync.sync"
+
+
+async def test_a_merge_that_landed_but_lost_its_answer_is_not_asked_again(
+    walk,  # noqa: F811
+    item_on,
+    wait_clock,
+):
+    fake = forge.FakeForge(ci_states=["success"])
+    asked, real_merge = [], fake.merge
+
+    async def lands_then_drops(**kw):
+        asked.append(kw)
+        await real_merge(**kw)
+        raise DROPPED
+
+    fake.merge = lands_then_drops
+    it = await item_on([forge_node("open", "mr.open_draft"), forge_node("land", "mr.merge")])
+
+    assert await walk(fake, it) == "waiting"
+    wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
+    assert await walk(fake, it) == "completed"
+
+    assert len(asked) == 1
+
+
 async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_starts_over(
     walk,  # noqa: F811
     item_on,

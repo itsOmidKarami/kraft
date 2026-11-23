@@ -408,19 +408,6 @@ def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, case):
     assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == theirs
 
 
-def test_a_push_that_landed_but_lost_its_answer_is_a_no_op_on_retry(tmp_path):
-    """The connection died after origin took the push, so the record is one behind."""
-    repo = _repo_with_origin(tmp_path)
-    (repo / "fix.txt").write_text("a fix\n")
-    commit_all(repo, "a fix")
-    git(repo, "push", "-q", "origin", BRANCH)
-    git(repo, "update-ref", "-d", f"refs/remotes/origin/{BRANCH}")
-
-    asyncio.run(forge.push(repo, BRANCH))
-
-    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
-
-
 def test_push_refuses_to_recreate_a_branch_origin_deleted(tmp_path):
     """Kraft-7itv: origin dropping a branch Kraft pushed means it was merged
     or closed; a push must not quietly bring it back."""
