@@ -53,7 +53,9 @@ class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable.
 
     `status` and `reason` are set when a request was answered; `retry_after`
-    (seconds) and `sso_url` come from the response headers."""
+    (seconds) and `sso_url` come from the response headers. `no_answer` is a
+    call the network cut off: nothing about the work failed, and the same call
+    may succeed later (`dropped_connection`)."""
 
     def __init__(
         self,
@@ -65,6 +67,7 @@ class ForgeError(RuntimeError):
         sso_url: str = "",
         account: str = "",
         source: str = "",
+        no_answer: bool = False,
     ):
         super().__init__(redact.redact(message))
         self.status = status
@@ -73,6 +76,7 @@ class ForgeError(RuntimeError):
         self.sso_url = sso_url
         self.account = account
         self.source = source
+        self.no_answer = no_answer
 
 
 def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Reason | None:
@@ -152,6 +156,47 @@ _UNREACHABLE_MARKERS = (
     "could not connect",
     "timed out after",
 )
+#: A connection that dropped or never formed, in what git, ssh, gh and glab
+#: print. Not git's "could not read from remote repository": it follows a
+#: dropped connection and a refused key alike, so only the cause beside it counts.
+_DROPPED_MARKERS = (
+    *(m for m in _UNREACHABLE_MARKERS if m != "timed out after"),
+    "closed by remote host",
+    "connection closed by",
+    "broken pipe",
+    "connection reset",
+    "software caused connection abort",
+    "no route to host",
+    "network is down",
+    "host is down",
+    "no such host",
+    "i/o timeout",
+    "tls handshake timeout",
+    "unexpected disconnect while reading sideband",
+)
+#: The other side answered, whatever else the output says.
+_ANSWERED = re.compile(
+    r"\bhttp [1-5]\d\d\b|\[(?:remote )?rejected\]|stale info|non-fast-forward"
+    r"|repository not found|merge conflict",
+)
+#: What a CLI quotes rather than says: a quoted string (an apostrophe inside a word
+#: opens none), or a word holding a slash, a URL or path (`i/o timeout` is the one
+#: marker with a slash). The tools put the cause after these, never inside them.
+_QUOTED = re.compile(r""""[^"\n]*"|(?<!\w)'[^'\n]*'|(?<!\S)(?!i/o\s)\S*/\S*""")
+
+
+def dropped_connection(output: str) -> bool:
+    """Whether a CLI's own output (never its command line, which can hold a title
+    saying "broken pipe") says the network cut the call off. A refused credential or
+    any answer from the forge says otherwise, and unsure is not a drop. A marker
+    inside a quoted name, URL or path is that name's text, not a cause."""
+    low = output.lower()
+    if any(m in low for m in _AUTH_MARKERS) or _ANSWERED.search(low):
+        return False
+    said = _QUOTED.sub(" ", low)
+    return any(m in said for m in _DROPPED_MARKERS)
+
+
 #: Local git operations Kraft runs itself. Their messages carry a file name or
 #: git's own timeout, neither of which says anything about a forge: a file
 #: called "403 forbidden.txt" is not a refused credential, and a rebase that

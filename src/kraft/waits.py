@@ -40,7 +40,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from kraft import events, store, when_free
@@ -277,6 +277,96 @@ def next_observation(conn, work_item_id: str, tasks) -> str | None:
         and "next_observation_at" in wait.last
     ]
     return min(due, key=datetime.fromisoformat, default=None)
+
+
+# --- a forge the network cut off -----------------------------------------------
+
+#: How many tries a task gets while the forge does not answer, spaced by
+#: doubling from `_NO_ANSWER_FIRST_S` up to `_NO_ANSWER_MAX_S`: about 90 minutes
+#: of a machine that is awake and offline.
+NO_ANSWER_TRIES = 10
+_NO_ANSWER_FIRST_S = 30
+_NO_ANSWER_MAX_S = 900
+#: A try that starts this long after it was due: the machine slept or the server
+#: was down, so the gap says nothing about the network and the try is not spent.
+_NO_ANSWER_LATE = timedelta(minutes=2)
+
+
+def _last_no_answer(conn, work_item_id: str, task: str) -> dict | None:
+    """`task`'s standing `forge_no_answer`, or None once the forge answered it
+    or the run restarted (a person's retry is a fresh budget)."""
+    row = conn.execute(
+        "SELECT type, payload FROM events WHERE work_item_id = ? AND ("
+        "(type IN (?, ?) AND json_extract(payload, '$.task') = ?)"
+        f" OR type IN ({', '.join('?' * len(RESTARTS_RUN))})) ORDER BY seq DESC LIMIT 1",
+        (work_item_id, ForgeEvent.FORGE_NO_ANSWER, ForgeEvent.FORGE_ANSWERED, task, *RESTARTS_RUN),
+    ).fetchone()
+    return json.loads(row["payload"]) if row and row["type"] == ForgeEvent.FORGE_NO_ANSWER else None
+
+
+def note_no_answer(
+    conn, work_item_id: str, *, node_id: str, task: str, error: str, started: datetime
+) -> bool:
+    """Record a forge call the network cut off; True to park and try again, False
+    when the tries are spent. `started` is when this try began: a call can itself
+    take minutes to time out, and that must not read as a machine that slept."""
+    last = _last_no_answer(conn, work_item_id, task)
+    attempt = 1
+    if last is not None:
+        late = (
+            "retry_at" in last
+            and started - datetime.fromisoformat(last["retry_at"]) > _NO_ANSWER_LATE
+        )
+        attempt = last["attempt"] + (0 if late else 1)
+    ids = {"node_id": node_id, "task": task, "attempt": attempt, "error": error}
+    if attempt > NO_ANSWER_TRIES:
+        reason = (
+            f"{task} got no answer from the forge in {NO_ANSWER_TRIES} tries: {error}\n"
+            "The Kraft server's machine could not reach the forge. Check its network, then retry."
+        )
+        events.append(conn, work_item_id, ForgeEvent.FORGE_NO_ANSWER, {**ids, "reason": reason})
+        return False
+    delay = min(_NO_ANSWER_FIRST_S * 2 ** (attempt - 1), _NO_ANSWER_MAX_S)
+    # From now, not from when it was due: a machine that wakes spends one try.
+    retry_at = datetime.fromisoformat(_now()) + timedelta(seconds=delay)
+    events.append(
+        conn,
+        work_item_id,
+        ForgeEvent.FORGE_NO_ANSWER,
+        {**ids, "retry_at": retry_at.isoformat()},
+    )
+    return True
+
+
+def note_answered(conn, work_item_id: str, *, node_id: str, task: str) -> None:
+    """The forge answered `task`: an outage it was parked on is over."""
+    if (last := _last_no_answer(conn, work_item_id, task)) is not None:
+        events.append(
+            conn,
+            work_item_id,
+            ForgeEvent.FORGE_ANSWERED,
+            {"node_id": node_id, "task": task, "attempts": last["attempt"]},
+        )
+
+
+def no_answer_park(conn, work_item_id: str, tasks) -> tuple[str, str] | None:
+    """`(retry_at, reason)` when one of `tasks` is parked on the network, the
+    latest try's. A `retry_at` already past is an earlier outage's."""
+    now = datetime.fromisoformat(_now())
+    parked = [
+        p
+        for task in tasks
+        if (p := _last_no_answer(conn, work_item_id, task)) is not None
+        and "retry_at" in p
+        and datetime.fromisoformat(p["retry_at"]) > now
+    ]
+    if not parked:
+        return None
+    p = max(parked, key=lambda x: datetime.fromisoformat(x["retry_at"]))
+    return p["retry_at"], (
+        f"waiting for the network: no answer from the forge "
+        f"(try {p['attempt']} of {NO_ANSWER_TRIES})"
+    )
 
 
 # --- the scheduler --------------------------------------------------------------

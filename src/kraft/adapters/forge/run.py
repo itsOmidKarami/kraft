@@ -2874,6 +2874,9 @@ async def run_task(
     checkout_stopped = False
     #: What the forge said when a call failed, for `failure_cause` to read later.
     forge_error: dict | None = None
+    #: The forge answered this try; the network cut it off and the item parks.
+    answered = parked = False
+    started = waits.now()
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3). A
@@ -3058,6 +3061,7 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        answered = exc.status is not None
         if isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable)):
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
@@ -3082,14 +3086,36 @@ async def run_task(
                     {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
                 )
             )
+        elif exc.no_answer and exc.reason in (None, "unreachable") and status == "failed":
+            # Nothing about the work failed: no repair, no fix cycle. The session
+            # ends unfinished, as a rate limit's does, and the walk parks.
+            parked = await db.write(
+                lambda c, e=str(exc): waits.note_no_answer(
+                    c,
+                    work_item_id,
+                    node_id=node_id,
+                    task=hook_point,
+                    error=e,
+                    started=started,
+                )
+            )
+            status = "rate_limited" if parked else "infra_stop"
     except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
         # The person's checkout: stopped for them, as a refused take is.
         log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
         unobserved = str(exc)
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
+    else:
+        # A local refusal (an empty branch, say) says nothing about the network.
+        answered = status != "config_error"
 
-    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if answered:
+        await db.write(
+            lambda c: waits.note_answered(c, work_item_id, node_id=node_id, task=hook_point)
+        )
+    # A rate-limited or network-parked wait stays open as it was: ending it would
+    # restart its deadline.
     if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
@@ -3148,7 +3174,9 @@ async def run_task(
         return UNREVIEWED_HEAD
     if moved and has_rebase_bounce and recorded not in ("merge_rejected", "config_error"):
         return BASE_MOVED
-    return recorded
+    # The session ended unfinished; what the walk does next is park on the wait
+    # scheduler, which re-enters with no steer and restarts nothing.
+    return "waiting" if parked and recorded == "rate_limited" else recorded
 
 
 async def _observed(

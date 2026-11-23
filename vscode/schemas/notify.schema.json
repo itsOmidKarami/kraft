@@ -61,6 +61,8 @@
           "fix_cycle_finished",
           "fix_cycle_refunded",
           "fix_cycle_started",
+          "forge_answered",
+          "forge_no_answer",
           "gate_approved",
           "gate_auto_review_discarded",
           "gate_auto_review_skipped",
