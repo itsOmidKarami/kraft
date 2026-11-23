@@ -273,7 +273,11 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
             return None
 
         def read(self, fn):
-            return frozenset()  # nothing skipped (`store.skipped_paths`)
+            # Two readers: `store.skipped_paths` (nothing skipped) and the reply-round
+            # lookup (no open round). Tell them apart by what `fn` is.
+            if fn.__qualname__.startswith("current."):
+                return None
+            return frozenset()
 
     async def fake_dispatch_node(db, run_dirs, task, node, row, worktree, **kw):
         if task.task.id == "suite":
