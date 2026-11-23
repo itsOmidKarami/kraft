@@ -148,6 +148,64 @@ offer both keys, the Settings repos editor keeping them through a save.
 enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-fixed], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-needs-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-fixed-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-the-old-resolve-key], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-resolve-fixed], tests/adapters/forge/test_automated_review.py::test_the_schema_offers_replies_and_resolve, tests/adapters/forge/test_automated_review.py::test_repos_yaml_loads_a_bot_with_replies_and_resolve, tests/test_overrides.py::test_resolve_without_replies_is_refused_in_its_own_words, tests/test_overrides.py::test_replies_are_accepted_in_a_node_override, tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-and-a-check], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[none-sends-empty], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies-and-resolve-fixed], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-check-whose-name-holds-a-colon], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[not-a-kind], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[an-unknown-option], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[the-old-resolve-form], tests/drafts/test_repos.py::test_a_save_keeps_the_yaml_only_automated_review_as_written
 origin: src/kraft/automated_review.py §BotReviewer -- Omid, 2026-11-22: only a confirmed fix is resolved, so the key is `resolve_fixed`, a boolean.
 
+## REQ resolve-fixed-resolves-only-at-completion-from-a-fresh-read
+WHERE a bot has `resolve_fixed` on, the system SHALL resolve a thread only at node
+completion after the last reply round, never at a posting point that starts a
+round, from a read of the thread and the merge request made then, and SHALL
+re-read both at the send and refuse a thread on another head or a closed merge
+request. A bot without `resolve_fixed` SHALL have no thread resolved.
+enforced-by: tests/executor/test_resolve.py::test_a_confirmed_fix_the_bot_never_answers_is_resolved, tests/executor/test_resolve.py::test_resolve_only_runs_when_no_round_starts, tests/executor/test_resolve.py::test_resolve_fixed_off_resolves_nothing, tests/executor/test_resolve.py::test_only_the_bots_with_resolve_fixed_are_resolved, tests/executor/test_resolve.py::test_resolve_reads_the_thread_afresh, tests/executor/test_resolve.py::test_the_resolve_gate_checks_the_head_again, tests/executor/test_resolve.py::test_the_resolve_gate_refuses_a_closed_merge_request, tests/executor/test_resolve.py::test_resolve_with_a_stale_head_leaves_threads_open
+origin: src/kraft/executor/replies.py §_Point.resolve -- Omid, 2026-11-22: resolve only at node completion, from a fresh read.
+
+## REQ only-a-confirmed-fix-is-resolved
+WHERE a bot has `resolve_fixed` on, the system SHALL resolve a thread only when
+Kraft's latest note in it is a posted "Fixed in" reply, and SHALL NOT resolve a
+thread Kraft declined or answered, however the bot answers. A later decline,
+answer or pushback in a thread Kraft fixed SHALL leave it open, listed as
+`not_fixed`, `finding_outstanding` or `answer_unread`.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[confirmed-fix], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[fix-after-a-decline], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[decline-only], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[answer-only], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[fix-then-a-decline], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[triage-replied-after-the-fix], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[note-the-record-lacks], tests/executor/test_resolve.py::test_a_decline_the_bot_never_answers_stays_open, tests/executor/test_resolve.py::test_a_decline_repeated_on_a_second_head_stays_open, tests/executor/test_resolve.py::test_an_answered_thread_stays_open, tests/executor/test_resolve.py::test_a_declined_thread_fixed_in_a_later_cycle_is_resolved, tests/executor/test_resolve.py::test_a_fix_the_triage_later_declines_stays_open, tests/executor/test_resolve.py::test_a_fix_the_bot_pushes_back_on_stays_open
+origin: src/kraft/adapters/forge/replies/gate.py §resolve_refusal -- Omid, 2026-11-22: only a confirmed fix is resolved: a decline or an answer is a person's to resolve.
+
+## REQ resolve-needs-the-latest-triage-to-have-seen-every-note
+WHERE a thread is a candidate to be resolved, the system SHALL require a latest
+triage on the current head and SHALL leave the thread open when a note Kraft did
+not write was created after that triage read the bots, less a margin of five
+seconds, comparing creation times only; Kraft's own notes SHALL be left out of
+that test.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[bot-answered-after-the-read], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[skew-margin], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[kraft-note-after-the-read], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[no-latest-triage], tests/executor/test_resolve.py::test_a_bot_answer_nobody_read_is_not_resolved_over, tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-skip-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[only-a-skip]
+origin: src/kraft/adapters/forge/replies/gate.py §resolve_refusal
+
+## REQ resolve-never-follows-a-reply-held-back-or-a-finding-outstanding
+WHERE a thread is a candidate to be resolved, the system SHALL leave it open, with
+the reason in the reply report, when a reply intent of the node run for it is held
+back, when a finding of the run still names it (the last measurement's findings and
+unmeasured ones, the judge's declined ones and the latest triage's own result file),
+when a record of the run carries dropped findings, when a person wrote in it, when it
+was not started by a bot with replies on, when the forge says the viewer cannot
+resolve it or when Kraft's note in it is gone, and SHALL list a read that failed, a
+thread that is gone and a closed merge request.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[later-cycle-superseded-with-a-later-fix-posted], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[cap-refused], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[deferred], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[unclear], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[given-up], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[superseded-fix], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[later-cycle-superseded-alone], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[another-run], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[finding-outstanding], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[findings-dropped], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[kraft-note-deleted], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[person-written], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[an-edited-kraft-note], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[not-bot-started], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[bot-posts-as-a-user], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[cannot-resolve], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[locked-but-resolvable], tests/executor/test_resolve.py::test_outstanding_reads_every_source[last-record-findings], tests/executor/test_resolve.py::test_outstanding_reads_every_source[last-record-unmeasured], tests/executor/test_resolve.py::test_outstanding_reads_every_source[stop-downgrade-verdict], tests/executor/test_resolve.py::test_outstanding_reads_every_source[latest-triage-result-file], tests/executor/test_resolve.py::test_outstanding_reads_every_source[dropped-record], tests/executor/test_resolve.py::test_every_refusal_is_listed_left_open[read-failed], tests/executor/test_resolve.py::test_every_refusal_is_listed_left_open[thread-gone], tests/executor/test_resolve.py::test_every_refusal_is_listed_left_open[merge-request-closed]
+origin: src/kraft/adapters/forge/replies/gate.py §resolve_refusal -- Omid, 2026-11-22: nothing is resolved over a reply held back or a finding outstanding.
+
+## REQ a-resolved-thread-is-recorded-and-never-resolved-twice
+WHEN Kraft resolves a thread, the system SHALL record the resolve as an intent before
+the write and as posted after it, list it in the reply report as `resolved`, and
+send a pending resolve of the run again at the next posting point through the same
+gate. It SHALL leave a thread the bot resolved alone with no intent and no entry,
+SHALL NOT send a resolve twice, SHALL NOT search a resolve for a marker, and SHALL
+leave a thread open that it resolved once in any run of the item and someone
+reopened.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[already-resolved], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[already-resolved-and-not-resolvable], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[reopened-after-kraft-resolved], tests/adapters/forge/replies/test_gate.py::test_resolve_refusal[reopened-unclear], tests/adapters/forge/replies/test_record.py::test_intend_accepts_a_resolve_op, tests/executor/test_resolve.py::test_a_resolve_whose_answer_is_lost_is_not_sent_twice, tests/executor/test_resolve.py::test_a_pending_resolve_is_sent_at_the_next_posting_point, tests/executor/test_resolve.py::test_a_thread_kraft_resolved_is_not_resolved_again_after_a_retry, tests/executor/test_resolve.py::test_a_thread_the_bot_resolved_is_left_alone, tests/executor/test_resolve.py::test_a_resolve_intent_is_never_swept_for_a_marker, tests/executor/test_resolve.py::test_a_confirmed_fix_the_bot_never_answers_is_resolved
+origin: src/kraft/executor/replies.py §_Point._send_resolve -- Omid, 2026-11-22: a resolve is an intent like a reply; a thread Kraft resolved once is never resolved again.
+
+## REQ the-brief-says-what-kraft-resolved
+WHEN a node with `resolve_fixed` completes, the review brief SHALL be told to name
+each thread Kraft resolved because it confirmed the fix, and each thread left open
+with its reason, `not_fixed` above all as an open thread a person must decide, and
+SHALL call a comment still unresolved only when the report does not mark it resolved.
+enforced-by: tests/skills/test_review_feedback.py::test_the_review_brief_says_what_kraft_resolved[resolved-entry], tests/skills/test_review_feedback.py::test_the_review_brief_says_what_kraft_resolved[not-fixed-is-open], tests/skills/test_review_feedback.py::test_the_review_brief_says_what_kraft_resolved[unresolved-only-when-not-marked], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-beside-the-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-alone]
+origin: src/kraft/skills/review-brief/SKILL.md -- Omid, 2026-11-22: the brief says what Kraft resolved and what a person must decide.
+
 ## REQ a-finding-names-only-threads-on-its-own-file
 WHEN a reviewer's result file names review-bot threads on a finding, the system
 SHALL keep only the threads, of a bot with replies on, that were in the
@@ -325,7 +383,7 @@ origin: src/kraft/executor/replies.py §posting_point -- Omid, 2026-11-20: a rep
 WHEN a node with replies on completes, the system SHALL write what it posted and
 did not, every finding from a bot thread that never reached a fix, each thread still owed an
 answer at the reply-round limit or unread, and a CI look still pending when a reply
-round ended, to a
+round ended, each thread resolved or left open with its reason, to a
 report the review brief is pointed at, built into its section whenever the
 report lists anything, and SHALL remove its own node's report when the node
 completes with replies off.
