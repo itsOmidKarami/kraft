@@ -23,6 +23,11 @@ class ForgeEvent(StrEnum):
     EXTERNAL_WAIT_OBSERVED = "external_wait_observed"
     EXTERNAL_WAIT_REBOUNDED = "external_wait_rebounded"
     EXTERNAL_WAIT_ENDED = "external_wait_ended"
+    #: A forge call got no answer because of the network: the item parks and
+    #: tries again (`waits.note_no_answer`). With a `reason`, it gave up.
+    FORGE_NO_ANSWER = "forge_no_answer"
+    #: The forge answered that task again after `FORGE_NO_ANSWER`.
+    FORGE_ANSWERED = "forge_answered"
     CI_INFRA_EXHAUSTED = "ci_infra_exhausted"
     CI_RUN_ABANDONED = "ci_run_abandoned"
     #: A fix-loop repair asked Kraft to re-run the CI jobs that failed outside
@@ -82,6 +87,8 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.EXTERNAL_WAIT_STARTED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_OBSERVED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_REBOUNDED: _PLAIN,
+        ForgeEvent.FORGE_NO_ANSWER: _PLAIN,
+        ForgeEvent.FORGE_ANSWERED: _PLAIN,
         ForgeEvent.EXTERNAL_WAIT_ENDED: _PLAIN,
         ForgeEvent.CI_INFRA_EXHAUSTED: _PLAIN,
         ForgeEvent.CI_RUN_ABANDONED: _PLAIN,

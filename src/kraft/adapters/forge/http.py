@@ -206,7 +206,9 @@ class HttpTransport:
                     params = None  # the Location carries its own query
         except TimeoutError:
             raise ForgeError(
-                f"{label}: {shown} did not answer in {self.timeout:g}s", reason="unreachable"
+                f"{label}: {shown} did not answer in {self.timeout:g}s",
+                reason="unreachable",
+                no_answer=True,
             ) from None
         except httpx.HTTPError as exc:
             if _is_tls(exc):
@@ -216,7 +218,9 @@ class HttpTransport:
                     reason="tls",
                 ) from None
             raise ForgeError(
-                f"{label}: cannot reach {shown} ({type(exc).__name__})", reason="unreachable"
+                f"{label}: cannot reach {shown} ({type(exc).__name__})",
+                reason="unreachable",
+                no_answer=True,
             ) from None
         if blob is None:
             raise AssertionError("unreachable")  # pragma: no cover
@@ -265,6 +269,7 @@ class HttpTransport:
             raise ForgeError(
                 f"{label}: the log download from {shown} did not answer within the time left",
                 reason="unreachable",
+                no_answer=True,
             ) from None
         except httpx.HTTPError as exc:
             why = (
@@ -273,7 +278,9 @@ class HttpTransport:
                 else f"cannot be reached ({type(exc).__name__})"
             )
             raise ForgeError(
-                f"{label}: the log download from {shown} {why}", reason="unreachable"
+                f"{label}: the log download from {shown} {why}",
+                reason="unreachable",
+                no_answer=not _is_tls(exc),
             ) from None
 
     async def _call(self, label: str, method: str, url: str, **kw) -> ApiResponse:

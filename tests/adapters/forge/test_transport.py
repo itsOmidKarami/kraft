@@ -155,6 +155,15 @@ def test_no_request_made_carries_no_reason(cli, tmp_path):
         rest("gh", "user", tmp_path)
     assert (exc.value.status, exc.value.reason) == (None, None)
     assert forge.failure_cause(str(exc.value)) == "forge_auth"
+    assert not exc.value.no_answer
+
+
+def test_a_call_the_network_cut_off_says_so(cli, tmp_path):
+    cli.stub("gh", routes={"api *": "x"}, default="x")
+    (cli.bindir / "gh").write_text("#!/bin/sh\necho 'read: connection reset by peer' >&2\nexit 1\n")
+    with pytest.raises(forge.ForgeError, match="connection reset") as exc:
+        rest("gh", "user", tmp_path)
+    assert exc.value.no_answer
 
 
 def test_rate_limited_403_carries_retry_after_and_the_sso_url(cli, tmp_path):

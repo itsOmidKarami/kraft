@@ -485,6 +485,8 @@ async def test_an_error_is_a_structured_forge_error(mock_http, answer, reason, s
         await tr(m).rest("GET", "x")
     err = e.value
     assert (err.reason, err.status) == (reason, status)
+    # Only a call nothing answered; a 500 answered, and TLS will not heal by itself.
+    assert err.no_answer is (status is None and reason == "unreachable")
     assert len(m.requests) == 1
     if status:
         assert f"(HTTP {status})" in str(err)
