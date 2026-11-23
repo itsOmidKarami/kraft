@@ -100,6 +100,10 @@ def build(content: Path) -> tuple[str | None, dict[str, str]]:
         "carry something the latest release doesn't have. The list is built from the "
         'docs\' own "Added in next" notes, so it is as current as the pages.',
         "",
+        # A link repeats a heading verbatim, and a heading may switch the rule off
+        # for its own words; the copy would break it without this.
+        "<!-- vale Kraft.Contractions = NO -->",
+        "",
     ]
     for section, entries in sections.items():
         lines += [f"## {section}", "", *entries, ""]
