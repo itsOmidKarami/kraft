@@ -370,10 +370,12 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay
     ids=["the-default-image", "an-image-the-operator-chose"],
 )
 def test_only_the_default_relay_image_is_sent_to_the_mirror(image, names_mirror):
-    refusal = docker.channel_refusal(docker.Runtime(), image, None)
+    longest = docker.Runtime(cli="docker", engine="podman", rootless=True, selinux="relabel")
+    refusal = docker.channel_refusal(longest, image, None)
     mirror = image.replace("docker.io/", "mirror.gcr.io/", 1)
     assert (f"`relay_image: {mirror}`" in refusal) is names_mirror
-    assert f"docker pull {image}" in refusal[: walk._STOP_CAUSE_MAX]
+    # As the session log writes it, and as the board cuts it.
+    assert f"docker pull {image}" in f"kraft: {refusal}"[: walk._STOP_CAUSE_MAX - 1]
 
 
 @pytest.mark.parametrize(
