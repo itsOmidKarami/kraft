@@ -371,6 +371,15 @@ ROWS: dict[str, Row] = {
             )
         },
     ),
+    "github-conversation-rule-classic-unprotected": Row(
+        "requires_resolved_threads",
+        _call("requires_resolved_threads", base="main"),
+        {
+            "api*branches/main/protection*": Api(404, '{"message": "Branch not protected"}'),
+            "api*rules/branches/main*": json.dumps([{"type": "deletion"}]),
+            "api*branches/main *": json.dumps({"protected": True}),
+        },
+    ),
     "github-labels-two-pages": Row(
         "labels",
         _call("labels"),

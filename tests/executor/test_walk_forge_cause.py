@@ -9,6 +9,7 @@ import pytest
 
 from kraft import store, waits
 from kraft.adapters import forge as _forge
+from kraft.automated_review import as_reviewers
 from kraft.builtins import RebaseConflict
 from kraft.executor import dispatch, gates
 
@@ -268,6 +269,50 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
         assert ("Reinstall" in stop["reason"]) == (cause is None)
         # Plain text on the card: a backtick would show literally.
         assert "`" not in stop["reason"]
+
+
+class _RefusedOnThreads(_forge.FakeForge):
+    """A forge that refuses the merge in words that name no cause."""
+
+    async def merge(self, *, repo, branch="", mr, head=""):
+        raise _forge.ForgeError("GraphQL: Pull request is not mergeable")
+
+
+@pytest.mark.parametrize(
+    "file",
+    [
+        "docs/403 forbidden.md",
+        "notes/connection refused.txt",
+        "docs/a\n403 forbidden.md",
+        "src/calc.py",
+    ],
+    ids=["auth-words", "network-words", "a-line-break-in-the-name", "plain"],
+)
+async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
+    item_on, tmp_path, fake_agent, monkeypatch, file
+):
+    """The stop names the thread, and a thread's file name is repository content: it
+    must not read as a refused credential or an unreachable forge."""
+    bot = as_reviewers([{"bot": "coderabbitai"}])[0]
+    thread = {"id": "t1", "file": file, "line": 3, "body": "b"}
+    fake = _RefusedOnThreads(merge_detail="MERGEABLE/BLOCKED", resolved_rule=True)
+    fake.feedback_script = [[_forge.ReviewerFeedback(bot, None, threads=(thread,))]]
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    wait = {**_forge_task("wait", "mr.automated_review"), "reviewers": [{"bot": "coderabbitai"}]}
+    it = await item_on(
+        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"))], "land"
+    )
+    await fake.open_mr(
+        repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
+    )
+
+    await _walk(it, repo_entry=FORGE_REPO)
+
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop.get("facts") or {}).get("cause") is None
+    assert "GraphQL: Pull request is not mergeable" in stop["reason"]
+    named = " ".join(file.split())
+    assert f"{named}:3 (coderabbitai)" in stop["reason"], "the person still sees the thread"
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"

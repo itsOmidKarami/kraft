@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from kraft.adapters.forge import git
-from kraft.adapters.forge.models import ForgeError, Reason, reason_for, safe_sso_url
+from kraft.adapters.forge.models import (
+    ForgeError,
+    Reason,
+    dropped_connection,
+    reason_for,
+    safe_sso_url,
+)
 from kraft.config import _REMOTE, git_read
 
 #: Values `gh api` expands itself, so they go as `-F` and nothing else does.
@@ -217,7 +223,8 @@ class CliTransport:
                 raise ForgeError(f"{label}: {self.cli} printed no HTTP response")
             # No request was made (not signed in, no network): no status, no reason,
             # so `failure_cause`'s text markers still decide.
-            raise ForgeError(f"{label}: {_clip(done.stderr.strip() or done.stdout)}")
+            said = done.stderr.strip() or done.stdout
+            raise ForgeError(f"{label}: {_clip(said)}", no_answer=dropped_connection(said))
         if resp.status >= 400 or (done.returncode != 0 and not graphql):
             try:
                 message = error_message(resp.json())

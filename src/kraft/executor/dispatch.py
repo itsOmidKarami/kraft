@@ -29,6 +29,7 @@ from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import open_threads
 from kraft.adapters.forge.replies import owed as _owed
 from kraft.addons import load as _addons_load
 from kraft.automated_review import Reviewers, as_reviewers
@@ -1482,6 +1483,66 @@ def _reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None)
     )
 
 
+def _chain_bots(row, launch: LaunchContext | None) -> Reviewers:
+    """The bots any review wait of the item's chain names, once each."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:  # a legacy row has no chain to name a bot
+        return ()
+    found: dict = {}
+    for node in snapshot.chain.nodes:
+        for t in node.tasks():
+            if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_AUTOMATED_REVIEW:
+                for r in _reviewers(t.task, node.id, row, launch):
+                    if r.bot is not None:
+                        found.setdefault(r.bot.lower(), r)
+    return tuple(found.values())
+
+
+def _forge_reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None) -> Reviewers:
+    """The merge names open bot threads when it stops on them, and those bots are
+    configured on the chain's review wait, not on the merge."""
+    if task.target is ForgeAction.MR_MERGE:
+        return _chain_bots(row, launch)
+    return _reviewers(task, node_id, row, launch)
+
+
+async def _open_threads_note(db, row, launch: LaunchContext | None, worktree, run_dirs) -> str:
+    """Write what the brief states about open bot threads and name the file; "" with
+    no configured bot, before any forge call. Never raises: the brief goes on."""
+    try:
+        path = item_paths.item_dir(run_dirs, row["id"]) / item_paths.OPEN_THREADS_REPORT
+        path.unlink(missing_ok=True)  # a re-run with the bots removed names no old file
+        bots = _chain_bots(row, launch)
+        if not bots:
+            return ""
+        try:
+            forges, error = launch.forges() if launch and launch.forges else (None, None)
+            repo_entry = launch.repo_entry if launch else None
+            async with asyncio.timeout(open_threads.READ_LIMIT_S):
+                forge = await _forge.item_forge(db, row, repo_entry, forges, error)
+                base = await _builtins.base_branch(db, row["id"], Path(row["repo"]))
+        except Exception:  # noqa: BLE001 -- no forge to ask is an unknown answer
+            logger.warning("no forge to read open bot threads for %s", row["id"], exc_info=True)
+            found = open_threads.OpenThreads(None, "unknown")
+        else:
+            found = await open_threads.read(
+                forge, repo=worktree, branch=store.branch_for(row), base=base, bots=bots
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "open_bot_threads": None if found.threads is None else len(found.threads),
+            "threads": list(found.threads or ()),
+            "requires_resolved_conversations": found.rule,
+            # shortcut: the root's merge request only; read each member if asked for.
+            "members_not_read": [mount for mount, _ in _builtins.item_members(row)],
+        }
+        path.write_text(json.dumps(report, indent=2) + "\n")
+    except Exception:  # noqa: BLE001 -- never stops or delays the item
+        logger.exception("could not write the open bot threads for %s", row["id"])
+        return ""
+    return prompts.OPEN_THREADS_NOTE.format(path=path)
+
+
 def _item_paused(db, work_item_id: str) -> bool:
     """Whether the item reads `paused` right now. A broken base's pause
     (`store.pause_for_broken_base`) cannot cancel the item's walk, so whatever is queued or
@@ -1941,7 +2002,7 @@ async def _dispatch_task_in(
             repositories=launch.repositories if launch else None,
             forges=forges,
             forges_error=forges_error,
-            reviewers=_reviewers(t, node.id, work_item_row, launch),
+            reviewers=_forge_reviewers(t, node.id, work_item_row, launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
             post_merge_publish_jobs=(
                 launch.repo_entry.post_merge_publish_jobs if launch and launch.repo_entry else ()
@@ -2082,6 +2143,7 @@ async def _dispatch_task_in(
             instruction += prompts.triage_verdict_note(
                 db, work_item_row["id"], work_item_row, run_dirs=run_dirs
             )
+            instruction += await _open_threads_note(db, work_item_row, launch, worktree, run_dirs)
     # On every pass, a fix loop's override included: a repair is exactly the
     # job the repo's pull-request rules are written for.
     if AgentInput.PR_RULES in t.inputs:

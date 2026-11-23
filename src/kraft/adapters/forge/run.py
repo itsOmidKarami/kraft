@@ -18,7 +18,7 @@ from kraft import builtins as _builtins
 from kraft import config, events, inplace, item_paths, outputs, reviewed_head, store, waits
 from kraft import forges as forges_mod
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git, git_auth, settle
+from kraft.adapters.forge import ci, git, git_auth, open_threads, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.api_account import ApiAccount
 from kraft.adapters.forge.gh import GhCli
@@ -1043,6 +1043,42 @@ def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
         (wait.last or {}).get("grace_from") or wait.started["started_at"]
     )
     return waits.now() - started >= NO_POST_MERGE_CI_GRACE
+
+
+async def _held_by_threads(
+    db,
+    forge: Forge,
+    work_item_id: str,
+    target: tuple,
+    branch: str,
+    item_base: str,
+    reviewers: Reviewers,
+) -> str:
+    """The open bot threads, when a merge the forge accepted timed out held on them:
+    GitLab's auto-merge waits on unresolved threads instead of refusing. Read once,
+    at the stop, and never raises."""
+    if not any(r.bot is not None for r in reviewers):
+        return ""
+    _, repo, role = target
+    try:
+        async with asyncio.timeout(open_threads.READ_LIMIT_S):
+            base = (
+                await _builtins.base_branch(db, work_item_id, repo, member=True)
+                if role == "submodule"
+                else item_base
+            )
+            ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        return await open_threads.merge_hint(
+            forge,
+            repo=repo,
+            branch=branch,
+            base=base,
+            reviewers=reviewers,
+            detail=ci_read.merge_detail,
+        )
+    except Exception:  # noqa: BLE001 -- a hint never disturbs the stop
+        logger.warning("could not read what holds the merge of %s", branch, exc_info=True)
+        return ""
 
 
 async def _no_post_merge_ci(
@@ -2237,6 +2273,28 @@ async def _run_one(
                             db, work_item_id, node_id, repo, branch, exc.current
                         )
                         status = "unreviewed"
+                    except ForgeError as exc:
+                        if (
+                            not isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable))
+                            and exc.reason not in ("rate_limited", "auth", "unreachable")
+                            and not exc.no_answer
+                        ):
+                            try:
+                                hint = await open_threads.merge_hint(
+                                    forge,
+                                    repo=repo,
+                                    branch=branch,
+                                    base=base,
+                                    reviewers=reviewers,
+                                    detail=ci_status.merge_detail,
+                                    message=str(exc),
+                                )
+                            except Exception:  # noqa: BLE001 -- never replaces the failure
+                                logger.warning("no open-threads hint", exc_info=True)
+                                hint = ""
+                            # In the error itself: it is what the stop and the wait record.
+                            exc.args = (f"{exc}\n{hint}".rstrip(),) if hint else exc.args
+                        raise
                     else:
                         # And a refusal the CLI reported as success does not get
                         # through either: a merge with `auto_merge` answers 200 for "merge
@@ -2712,6 +2770,7 @@ async def run_task(
     #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
     #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
     wait: WaitBounds | None = None,
+    #: For `mr.merge`, the chain's review bots, whose open threads a stop names.
     #: The reviewers `mr.automated_review` waits for (Ruling 171), already
     #: resolved across the item, repository and task layers; empty names none.
     reviewers: Reviewers = (),
@@ -2971,6 +3030,9 @@ async def run_task(
     checkout_stopped = False
     #: What the forge said when a call failed, for `failure_cause` to read later.
     forge_error: dict | None = None
+    #: The forge answered this try; the network cut it off and the item parks.
+    answered = parked = False
+    started = waits.now()
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3). A
@@ -3156,6 +3218,7 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        answered = exc.status is not None
         if isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable)):
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
@@ -3180,14 +3243,36 @@ async def run_task(
                     {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
                 )
             )
+        elif exc.no_answer and exc.reason in (None, "unreachable") and status == "failed":
+            # Nothing about the work failed: no repair, no fix cycle. The session
+            # ends unfinished, as a rate limit's does, and the walk parks.
+            parked = await db.write(
+                lambda c, e=str(exc): waits.note_no_answer(
+                    c,
+                    work_item_id,
+                    node_id=node_id,
+                    task=hook_point,
+                    error=e,
+                    started=started,
+                )
+            )
+            status = "rate_limited" if parked else "infra_stop"
     except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
         # The person's checkout: stopped for them, as a refused take is.
         log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
         unobserved = str(exc)
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
+    else:
+        # A local refusal (an empty branch, say) says nothing about the network.
+        answered = status != "config_error"
 
-    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if answered:
+        await db.write(
+            lambda c: waits.note_answered(c, work_item_id, node_id=node_id, task=hook_point)
+        )
+    # A rate-limited or network-parked wait stays open as it was: ending it would
+    # restart its deadline.
     if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
@@ -3202,6 +3287,18 @@ async def run_task(
             session_id=session_id,
             note=note,
         )
+        if handler == "merge" and status == "capped_out" and merge_requested:
+            held = next((t for t in targets if t[0] == awaiting_landing), None)
+            if held is not None:
+                log += await _held_by_threads(
+                    db,
+                    member_forges.get(mounts_by_row.get(held[0]), live_forge),
+                    work_item_id,
+                    held,
+                    branch,
+                    item_base,
+                    reviewers,
+                )
     recorded = await _builtins.finish_session(
         db,
         log_path,
@@ -3234,7 +3331,9 @@ async def run_task(
         return UNREVIEWED_HEAD
     if moved and has_rebase_bounce and recorded not in ("merge_rejected", "config_error"):
         return BASE_MOVED
-    return recorded
+    # The session ended unfinished; what the walk does next is park on the wait
+    # scheduler, which re-enters with no steer and restarts nothing.
+    return "waiting" if parked and recorded == "rate_limited" else recorded
 
 
 async def _observed(

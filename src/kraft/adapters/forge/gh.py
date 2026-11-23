@@ -889,6 +889,42 @@ class GhCli(mr_ops.CliWaits):
             repo, f"repos/{{owner}}/{{repo}}/{kind}/comments/{note.rest_id}", method="DELETE"
         )
 
+    async def requires_resolved_threads(self, *, repo: Path, base: str) -> bool | None:
+        """A ruleset's `required_review_thread_resolution`, else classic protection's
+        `required_conversation_resolution`. Classic protection needs admin: GitHub
+        answers a non-admin a bare 404, and only "Branch not protected" means none."""
+        name = urlquote(base, safe="")
+        path = f"repos/{{owner}}/{{repo}}/branches/{name}"
+        try:
+            branch = await self._api(repo, path)
+        except ForgeError:
+            return None
+        if isinstance(branch, dict) and branch.get("protected") is False:
+            return False  # covers rulesets too: a ruleset-only branch reads protected
+        try:
+            rules = await self._api(
+                repo, f"repos/{{owner}}/{{repo}}/rules/branches/{name}", fields={"per_page": 100}
+            )
+        except ForgeError:
+            rules = None
+        readable = isinstance(rules, list)
+        if readable and any(
+            r.get("type") == "pull_request"
+            and (r.get("parameters") or {}).get("required_review_thread_resolution")
+            for r in rules
+        ):
+            return True
+        try:
+            classic = await self._api(repo, f"{path}/protection")
+        except ForgeError as exc:
+            none = exc.status == 404 and "Branch not protected" in str(exc)
+            return False if none and readable else None
+        if not isinstance(classic, dict):
+            return None
+        if (classic.get("required_conversation_resolution") or {}).get("enabled"):
+            return True
+        return False if readable else None
+
     async def _threads(self, repo: Path, number: int) -> list[dict]:
         """Every review thread of the pull request, each with every comment: the
         threads by cursor, then each thread's own comments by cursor."""
