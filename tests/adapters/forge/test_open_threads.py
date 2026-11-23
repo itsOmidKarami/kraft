@@ -146,7 +146,7 @@ async def test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why
     assert returned == "failed"
     log = run_forge.log("m1")
     assert message in log, "the forge's own words stay"
-    assert (says in log) if says else "calc.py" not in log
+    assert (says in log) if says else "review-bot threads" not in log and "calc.py" not in log
     if says:
         assert "calc.py:3 (coderabbitai)" in log
         # What the wait records is what a person reads at the stop.
