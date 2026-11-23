@@ -267,7 +267,7 @@ def _accepts(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
+def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path, *, timeout: float = 15.0) -> None:
     """`install-service` on a free KRAFT_PORT, baked into the unit at write time,
     once the daemon it supervises answers health there with its own pid."""
 
@@ -289,7 +289,7 @@ def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
         cli.main(["admin", "uninstall-service"])
         assert _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
 
-    on_a_free_port(start, owns, stop)
+    on_a_free_port(start, owns, stop, timeout=timeout)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="launchd is macOS-only")
@@ -315,7 +315,9 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     label = f"com.kraft.daemon.test-{uuid.uuid4().hex[:8]}"
     monkeypatch.setattr(cli.admin, "_LAUNCHD_LABEL", label)
     try:
-        _install_on_a_free_port(monkeypatch, run_dir)
+        # 1.5 s on an idle machine, 60 s with 56 busy loops on 14 CPUs: a full boot
+        # of the real server, inside this test's 240 s.
+        _install_on_a_free_port(monkeypatch, run_dir, timeout=120.0)
     finally:
         try:
             cli.main(["admin", "uninstall-service"])
