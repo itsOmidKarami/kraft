@@ -92,6 +92,52 @@ def stand_at(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     )
 
 
+def held_base_move(
+    conn: sqlite3.Connection, work_item_id, node_id, rerun: frozenset[str]
+) -> str | None:
+    """The base `node_id` stood on before a move it made ahead of a person's stop, while that
+    move is still owed its restart; None otherwise. `rerun` is the nodes after the node's
+    `restart_from`, up to itself: a retry or rejection entering at one of them does not
+    re-verify the move, and one entering earlier does. The node's completion, a skip of it or
+    inside it, and a restart each end the record."""
+    types = (
+        ChainEvent.BASE_MOVE_HELD,
+        ChainEvent.NODE_COMPLETED,
+        ChainEvent.NODE_SKIPPED,
+        ChainEvent.SCOPE_SKIPPED,
+        ChainEvent.RUN_FORKED,
+        ChainEvent.BASE_CHANGE_RESTART,
+        ChainEvent.MERGE_REJECTION_RESTART,
+        GateEvent.REJECTED,
+    )
+    rows = conn.execute(
+        f"SELECT type, payload FROM events WHERE work_item_id = ? AND type IN ({in_list(types)}) "
+        "ORDER BY seq DESC",
+        (work_item_id,),
+    ).fetchall()
+    for row in rows:
+        p = json.loads(row["payload"])
+        kind = row["type"]
+        if kind == ChainEvent.BASE_MOVE_HELD:
+            if p["node_id"] == node_id:
+                return p["before"]
+        elif kind in (ChainEvent.NODE_COMPLETED, ChainEvent.NODE_SKIPPED):
+            if p.get("node_id") == node_id:
+                return None
+        elif kind == ChainEvent.SCOPE_SKIPPED:
+            if p["path"].startswith(f"{node_id}."):
+                return None
+        elif kind == ChainEvent.RUN_FORKED:
+            if (p.get("path") or "").split(".")[0] not in rerun:
+                return None
+        elif kind == GateEvent.REJECTED:
+            if p.get("node") not in rerun:
+                return None
+        else:
+            return None
+    return None
+
+
 def close_parked_sessions(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     """End the sessions `node_id` left parked on an external wait, as a skip does."""
     now = _now()

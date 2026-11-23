@@ -10,7 +10,7 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
-const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "reply_round_started", "run_forked", "cap_counters_reset", "session_reattached"]);
+const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "reply_round_started", "base_move_held", "run_forked", "cap_counters_reset", "session_reattached"]);
 
 /** What reopened an approved gate (`gate_reopened`'s `reason`), as the console says it. */
 const REOPENED_WHY: Readonly<Record<string, string>> = {

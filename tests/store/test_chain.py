@@ -8,7 +8,8 @@ import json
 import pytest
 from support.store_fixtures import CHAIN
 
-from kraft import db, store
+from kraft import db, events, store
+from kraft.vocab import ChainEvent, GateEvent
 
 
 @pytest.fixture
@@ -71,3 +72,47 @@ def test_an_empty_agent_patch_clears_every_field(conn):
     store.replace_agent_overrides(conn, "w1", {"model": "opus", "effort": "high"})
     assert store.replace_agent_overrides(conn, "w1", {}) == {}
     assert _stored(conn, "agent_overrides") is None
+
+
+@pytest.mark.parametrize(
+    ("after", "owed"),
+    [
+        (None, True),
+        ((ChainEvent.NODE_COMPLETED, {"node_id": "other"}), True),
+        ((ChainEvent.SCOPE_SKIPPED, {"path": "nodes.main.t"}), True),
+        ((ChainEvent.RUN_FORKED, {"path": "n.main"}), True),
+        ((GateEvent.REJECTED, {"node": "n"}), True),
+        ((ChainEvent.NODE_COMPLETED, {"node_id": "n"}), False),
+        ((ChainEvent.NODE_SKIPPED, {"node_id": "n"}), False),
+        ((ChainEvent.SCOPE_SKIPPED, {"path": "n.main.t"}), False),
+        ((ChainEvent.BASE_CHANGE_RESTART, {"node_id": "n"}), False),
+        ((ChainEvent.MERGE_REJECTION_RESTART, {"node_id": "n"}), False),
+        ((ChainEvent.RUN_FORKED, {"path": "verify"}), False),
+        ((ChainEvent.RUN_FORKED, {"path": None}), False),
+        ((GateEvent.REJECTED, {"node": "verify"}), False),
+    ],
+    ids=[
+        "held",
+        "another-node-completing",
+        "a-skip-in-another-node",
+        "a-retry-of-the-node",
+        "a-rejection-into-the-node",
+        "the-node-completed",
+        "the-node-skipped",
+        "a-skip-inside-the-node",
+        "a-base-restart",
+        "a-merge-rejection-restart",
+        "a-retry-before-the-node",
+        "a-restart-of-the-chain",
+        "a-rejection-before-the-node",
+    ],
+)
+def test_a_held_base_move_is_owed_until_something_re_verifies_or_drops_it(conn, after, owed):
+    events.append(conn, "w1", ChainEvent.BASE_MOVE_HELD, {"node_id": "n", "before": "b0"})
+    if after is not None:
+        events.append(conn, "w1", after[0], after[1])
+
+    held = store.held_base_move(conn, "w1", "n", frozenset({"n"}))
+
+    assert held == ("b0" if owed else None)
+    assert store.held_base_move(conn, "w1", "other", frozenset({"other"})) is None
