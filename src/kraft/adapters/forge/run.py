@@ -18,7 +18,7 @@ from kraft import builtins as _builtins
 from kraft import config, events, inplace, item_paths, outputs, reviewed_head, store, waits
 from kraft import forges as forges_mod
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git, git_auth, settle
+from kraft.adapters.forge import ci, git, git_auth, open_threads, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.api_account import ApiAccount
 from kraft.adapters.forge.gh import GhCli
@@ -911,6 +911,26 @@ def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
         (wait.last or {}).get("grace_from") or wait.started["started_at"]
     )
     return waits.now() - started >= NO_POST_MERGE_CI_GRACE
+
+
+async def _held_by_threads(
+    forge: Forge, repo: Path, branch: str, base: str, reviewers: Reviewers
+) -> str:
+    """The open bot threads, when the forge holds an accepted merge on them."""
+    if not any(r.bot is not None for r in reviewers):
+        return ""
+    try:
+        ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+    except Exception:  # noqa: BLE001 -- a hint never disturbs the wait
+        return ""
+    return await open_threads.merge_hint(
+        forge,
+        repo=repo,
+        branch=branch,
+        base=base,
+        reviewers=reviewers,
+        detail=ci_read.merge_detail,
+    )
 
 
 async def _no_post_merge_ci(
@@ -1970,6 +1990,9 @@ async def _run_one(
                 )
                 log = f"!{existing.number} is still open; waiting for the merge to land{where}\n"
                 log += unread
+                # Accepted, then held: on GitLab, auto-merge waits on unresolved threads
+                # instead of refusing, so this wait's timeout is the stop a person reads.
+                log += await _held_by_threads(forge, repo, branch, base, reviewers)
                 status = "merge_pending"
             elif (
                 refused := await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
@@ -2083,6 +2106,22 @@ async def _run_one(
                             db, work_item_id, node_id, repo, branch, exc.current
                         )
                         status = "unreviewed"
+                    except ForgeError as exc:
+                        if not isinstance(
+                            exc, (git.UnsafeWorktree, git.CliUnavailable)
+                        ) and exc.reason not in ("rate_limited", "auth", "unreachable"):
+                            hint = await open_threads.merge_hint(
+                                forge,
+                                repo=repo,
+                                branch=branch,
+                                base=base,
+                                reviewers=reviewers,
+                                detail=ci_status.merge_detail,
+                                message=str(exc),
+                            )
+                            # In the error itself: it is what the stop and the wait record.
+                            exc.args = (f"{exc}\n{hint}".rstrip(),) if hint else exc.args
+                        raise
                     else:
                         # And a refusal the CLI reported as success does not get
                         # through either: a merge with `auto_merge` answers 200 for "merge

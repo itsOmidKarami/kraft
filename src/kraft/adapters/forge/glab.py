@@ -1194,6 +1194,19 @@ class GlabCli(mr_ops.CliWaits):
             fields={"auto_merge": "true", "sha": head},
         )
 
+    async def requires_resolved_threads(self, *, repo: Path, base: str) -> bool | None:
+        """GitLab's rule is the project's, whatever the branch."""
+        try:
+            project = await self._api(repo, "projects/:id")
+        except ForgeError:
+            return None
+        value = (
+            project.get("only_allow_merge_if_all_discussions_are_resolved")
+            if isinstance(project, dict)
+            else None
+        )
+        return value if isinstance(value, bool) else None
+
     async def _train_enabled(self, repo: Path) -> bool:
         """Whether the project merges through a merge train: both
         `merge_trains_enabled` and `merge_pipelines_enabled` are true. A field

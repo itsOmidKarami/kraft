@@ -567,6 +567,11 @@ class Forge(Protocol):
         ...
 
     async def resolve_thread(self, *, repo: Path, thread: ForgeThread) -> None: ...
+    async def requires_resolved_threads(self, *, repo: Path, base: str) -> bool | None:
+        """Whether merging into `base` needs every conversation resolved; None
+        when the forge will not say."""
+        ...
+
     async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
         """The merge request's top-level comments, every page, system notes left out."""
         ...
@@ -628,6 +633,10 @@ class FakeForge:
     """
 
     ci_states: list[CIState] = field(default_factory=lambda: ["success"])
+    #: What `requires_resolved_threads` answers; a `ForgeError` is raised.
+    resolved_rule: bool | None | ForgeError = False
+    #: Every base it was asked about, so a test can see no forge call was made.
+    rule_reads: list[str] = field(default_factory=list)
     #: Parallel to `ci_states`: the `sha` each successive `ci_status` call
     #: reports. Consumed the same one-at-a-time way; repeats its last entry.
     #: Defaults to "" — "the backend didn't say" — so a test that never sets
@@ -957,6 +966,12 @@ class FakeForge:
 
     async def read_thread(self, *, repo: Path, branch: str, thread_id: str) -> ForgeThread | None:
         return self.threads.get(thread_id)
+
+    async def requires_resolved_threads(self, *, repo: Path, base: str) -> bool | None:
+        self.rule_reads.append(base)
+        if isinstance(self.resolved_rule, ForgeError):
+            raise self.resolved_rule
+        return self.resolved_rule
 
     async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
         return tuple(self.comments)

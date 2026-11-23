@@ -224,6 +224,15 @@ ROWS: dict[str, Row] = {
             "api projects/:id/merge_requests": outputs.GLAB_MERGED_LIST,
         },
     ),
+    "conversation-rule": Row(
+        "requires_resolved_threads",
+        lambda f, r: f.requires_resolved_threads(repo=r, base="main"),
+        {
+            "api projects/:id": json.dumps(
+                {"only_allow_merge_if_all_discussions_are_resolved": True}
+            )
+        },
+    ),
     "labels-two-pages": Row(
         "labels",
         lambda f, r: f.labels(repo=r),
