@@ -451,7 +451,12 @@ def _task_cause(
         )
     ]
     line = own[-1] if own else next(iter(lines), "")
-    return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+    # Beside the cause, not instead of it: the forge's words stay first.
+    threads = [ln for ln in lines[1:] if ln.startswith(forge_mod.OPEN_THREADS_LINE)]
+    return " ".join(
+        ln if len(ln) <= _STOP_CAUSE_MAX else ln[: _STOP_CAUSE_MAX - 1] + "…"
+        for ln in (line, *threads[-1:])
+    )
 
 
 def _named_for_stop(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask) -> str:

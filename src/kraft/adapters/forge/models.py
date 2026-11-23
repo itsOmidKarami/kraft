@@ -157,6 +157,9 @@ _UNREACHABLE_MARKERS = (
 #: called "403 forbidden.txt" is not a refused credential, and a rebase that
 #: ran out of time did not fail to reach a host.
 _LOCAL_GIT = ("git rebase ", "git worktree add timed out")
+#: Starts the line naming a merge's open bot threads (`open_threads`). It quotes
+#: file names, so `failure_cause` never reads it.
+OPEN_THREADS_LINE = "Open review-bot threads"
 
 
 #: What each `ForgeError.reason` means for a stop. A reason missing here (a rate
@@ -184,7 +187,7 @@ def failure_cause(
     the text's markers decide."""
     if record and record.get("reason"):
         return _CAUSE_OF_REASON.get(str(record["reason"]))
-    low = text.lower()
+    low = "\n".join(ln for ln in text.splitlines() if not ln.startswith(OPEN_THREADS_LINE)).lower()
     if any(m in low for m in _LOCAL_GIT):
         return None
     if any(m in low for m in _AUTH_MARKERS):

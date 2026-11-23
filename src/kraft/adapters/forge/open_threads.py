@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from kraft.adapters.forge.models import Forge
+from kraft.adapters.forge.models import OPEN_THREADS_LINE, Forge
 from kraft.automated_review import Reviewers
 
 logger = logging.getLogger(__name__)
@@ -70,10 +70,8 @@ async def read(forge: Forge, *, repo: Path, branch: str, base: str, bots: Review
 
 
 def _where(thread: dict) -> str:
-    # One line each: a path is repository content, and this goes into a stop's log.
-    file = " ".join(str(thread.get("file") or "(no file)").split())
     line = f":{thread['line']}" if thread.get("line") else ""
-    return f"  {file}{line} ({thread['reviewer']})\n"
+    return f"{thread.get('file') or '(no file)'}{line} ({thread['reviewer']})"
 
 
 async def merge_hint(
@@ -100,22 +98,26 @@ async def merge_hint(
     if found.rule == "no" and not says:
         return ""
     if found.threads is None:
-        unread = "The forge says unresolved threads block this merge; Kraft could not read them.\n"
-        return unread if says else ""
+        if not says:
+            return ""
+        return (
+            f"{OPEN_THREADS_LINE} (unread). The forge says unresolved threads block this "
+            "merge; Kraft could not read them.\n"
+        )
     if not found.threads:
         return ""
     if says:
-        lead = "The forge says unresolved threads block this merge. Open review-bot threads:"
+        lead = "The forge says unresolved threads block this merge."
     elif found.rule == "yes":
-        lead = (
-            "Likely blocker: the base branch requires resolved conversations, and these "
-            "review-bot threads are open:"
-        )
+        lead = "Likely blocker: the base branch requires resolved conversations."
     else:
         lead = (
             "Possible blocker: Kraft could not read whether the base branch requires "
-            "resolved conversations, and these review-bot threads are open:"
+            "resolved conversations."
         )
-    named = "".join(_where(t) for t in found.threads[:_NAMED])
-    more = len(found.threads) - _NAMED
-    return f"{lead}\n{named}" + (f"  and {more} more\n" if more > 0 else "")
+    named = [_where(t) for t in found.threads[:_NAMED]]
+    if (more := len(found.threads) - _NAMED) > 0:
+        named.append(f"and {more} more")
+    text = f"{OPEN_THREADS_LINE} ({len(found.threads)}). {lead} {', '.join(named)}"
+    # One line whatever a file is called, so all of it stays behind the marker.
+    return " ".join(text.split()) + "\n"

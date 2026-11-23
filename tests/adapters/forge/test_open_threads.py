@@ -4,12 +4,14 @@ merge's stop says about the open bot threads when it may be held by that rule.""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from kraft.adapters import forge
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import as_reviewers
+from kraft.executor import walk
 
 from .nodes import Api
 
@@ -188,3 +190,7 @@ async def test_a_merge_the_forge_holds_names_the_threads_when_its_wait_times_out
     assert "timed out" in log
     assert ("calc.py:3 (coderabbitai)" in log) is says
     assert log.count("calc.py:3") == int(says), "named once, at the stop"
+    # What the timed-out stop's reason is built from.
+    node, task = SimpleNamespace(id="mr_checks"), SimpleNamespace(path="on.ci.poll")
+    cause = walk._task_cause(run_forge.database, "w1", node, task, "capped_out")
+    assert ("calc.py:3 (coderabbitai)" in cause) is says
