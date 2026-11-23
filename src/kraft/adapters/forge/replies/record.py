@@ -26,6 +26,7 @@ _OPS = ("reply", "summary", "resolve")
 _COUNTED = ("unclear", "rate_limited")
 _TYPES = (
     ForgeEvent.REPLY_INTENDED,
+    ForgeEvent.REPLY_SEND_STARTED,
     ForgeEvent.REPLY_SEND_FAILED,
     ForgeEvent.REPLY_POSTED,
     ForgeEvent.REPLY_NOT_FOUND,
@@ -64,14 +65,7 @@ def intend(c, work_item_id: str, intent: str, payload: dict) -> None:
 def send_began(c, work_item_id: str, intent: str) -> None:
     """Recorded just before a write: if the process dies before the outcome is, the
     intent reads `unclear` and is reconciled, never sent blind. Not a counted send."""
-    payload = {
-        "intent": intent,
-        "failure": "unclear",
-        "counted": False,
-        "began": True,
-        "message": "send began",
-    }
-    events.append(c, work_item_id, ForgeEvent.REPLY_SEND_FAILED, payload)
+    events.append(c, work_item_id, ForgeEvent.REPLY_SEND_STARTED, {"intent": intent})
 
 
 def send_failed(c, work_item_id: str, intent: str, failure: Failure, exc: BaseException) -> None:
@@ -127,15 +121,18 @@ def fold(rows: Iterable[dict]) -> dict[str, Intent]:
         cur = out.get(p.get("intent"))
         if cur is None:
             continue
-        if kind == ForgeEvent.REPLY_SEND_FAILED:
+        if kind == ForgeEvent.REPLY_SEND_STARTED:
+            # Unclear until an outcome follows, but only a recorded failure or a
+            # reconcile makes it `ever_unclear`: a clean post never does.
+            out[cur.id] = replace(cur, state="unclear")
+        elif kind == ForgeEvent.REPLY_SEND_FAILED:
             counted = bool(p.get("counted"))
-            began = bool(p.get("began"))
             out[cur.id] = replace(
                 cur,
                 state="unclear" if p["failure"] == "unclear" else "pending",
                 sends=cur.sends + counted,
                 ever_unclear=cur.ever_unclear or (counted and p["failure"] == "unclear"),
-                failure=cur.failure if began else {**p, "at": row["created_at"]},
+                failure={**p, "at": row["created_at"]},
             )
         elif kind == ForgeEvent.REPLY_POSTED:
             out[cur.id] = replace(

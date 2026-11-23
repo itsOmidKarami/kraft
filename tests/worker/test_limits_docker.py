@@ -7,6 +7,7 @@ import os
 import subprocess
 
 import pytest
+from support.sandbox_image import pull_failure
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
@@ -39,9 +40,8 @@ def runtime(request, monkeypatch) -> docker.Runtime:
     cli = request.param
     have = subprocess.run([cli, "image", "inspect", IMAGE], capture_output=True)
     if have.returncode != 0:
-        pulled = subprocess.run([cli, "pull", "-q", IMAGE], capture_output=True, text=True)
-        if pulled.returncode != 0:
-            _unavailable(cli, f"e2e: {cli} could not pull {IMAGE}: {pulled.stderr.strip()}")
+        if why := pull_failure(cli, IMAGE):
+            _unavailable(cli, f"e2e: {cli} could not pull {IMAGE}: {why}")
     templates = config_dir()
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")

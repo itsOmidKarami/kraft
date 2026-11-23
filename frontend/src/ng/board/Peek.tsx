@@ -123,7 +123,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
       <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where subagents={subagents} onTask={(sel) => navigate(placeUrl(item.id, { node: sel.kind === "chain" ? undefined : sel.node, sel, tab: "overview" }))} />
-      {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
+      {cancelling && <CancelCard id={item.id} neverStarted={neverStarted(item)} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );

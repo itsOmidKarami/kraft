@@ -487,14 +487,10 @@ nodes:
     kind: exec
     steps:
       - id: tests
-        tasks:
-          - id: test_changed_scopes
-            extends: verify_changed_scopes
+        tasks: [{id: test_changed_scopes, extends: verify_changed_scopes}]
       - id: review
         read_only: true
-        tasks:
-          - id: code_review
-            extends: code_review
+        tasks: [{id: code_review, extends: code_review}]
     fix_loop:
       tasks:
         - id: repair
@@ -518,34 +514,22 @@ nodes:
               total_time_cap_minutes: 10
       - id: review_feedback
         read_only: true
-        tasks:
-          - id: triage
-            extends: triage_review_feedback
+        tasks: [{id: triage, extends: triage_review_feedback}]
       - id: ci
-        tasks:
-          - id: await_ci
-            extends: await_mr_ci
+        tasks: [{id: await_ci, extends: await_mr_ci}]
     on_failure:
       steps:
         - id: repair
-          tasks:
-            - id: repair_feedback
-              extends: repair_mr_checks
+          tasks: [{id: repair_feedback, extends: repair_mr_checks}]
         - id: sync
-          tasks:
-            - id: sync_mr
-              extends: sync_draft_mr
+          tasks: [{id: sync_mr, extends: sync_draft_mr}]
     fix_loop:
       early: true
       steps:
         - id: repair
-          tasks:
-            - id: repair
-              extends: repair_mr_feedback
+          tasks: [{id: repair, extends: repair_mr_feedback}]
         - id: sync
-          tasks:
-            - id: sync
-              extends: sync_draft_mr
+          tasks: [{id: sync, extends: sync_draft_mr}]
       judge:
         id: judge
         extends: strict_judge
@@ -676,13 +660,9 @@ nodes:
     kind: exec
     steps:
       - id: rebase
-        tasks:
-          - id: rebase
-            extends: mr_rebase
+        tasks: [{id: rebase, extends: mr_rebase}]
       - id: open
-        tasks:
-          - id: open
-            extends: open_draft_mr
+        tasks: [{id: open, extends: open_draft_mr}]
 
   - id: merge_request_feedback
     extends: post_draft_feedback

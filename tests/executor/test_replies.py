@@ -179,6 +179,8 @@ async def test_a_triage_reply_is_posted_once_across_wakes(rig, monkeypatch):
     assert posted.body.endswith(facts.reply_marker(intended["payload"]["intent"]))
     assert f"for work item `{rig.item.id}`" in posted.body
     assert facts.body_hash(posted.body) == intended["payload"]["body_sha256"]
+    assert len(_of(rig, "reply_send_started")) == 1, "the write-ahead marker"
+    assert _of(rig, "reply_send_failed") == [], "a clean post records no failure"
 
 
 def _a_person_writes(rig, fake, monkeypatch):
@@ -606,11 +608,11 @@ async def test_a_lost_write_is_reconciled_not_sent_again(rig, monkeypatch):
 
     assert fake.writes == [("reply", "T1")]
     assert _story(rig) == [
-        ("reply_send_failed", "send began"),
         ("reply_send_failed", "fake: the answer was lost"),
         ("reply_posted", "reconcile"),
     ]
-    [failed] = [e for e in _of(rig, "reply_send_failed") if not e["payload"].get("began")]
+    assert len(_of(rig, "reply_send_started")) == 1
+    [failed] = _of(rig, "reply_send_failed")
     assert (failed["payload"]["failure"], failed["payload"]["counted"]) == ("unclear", True)
     assert len(_marked(fake.threads["T1"])) == 1
 

@@ -456,6 +456,17 @@ describe("the other composers (C.7)", () => {
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/cancel", body: { reason: "wrong repo", close_mr: true } }));
   });
 
+  // #1343: the cancel screen of a never-started item says nothing was made
+  // yet, even though the preview still names the branch it would have had.
+  it("Cancel for a never-started item says nothing was made yet, naming no branch or worktree", async () => {
+    mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [] }), "/work-items/w1?compose=cancel", {
+      "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "kraft/x", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }],
+    });
+    expect(await screen.findByText("Nothing was made yet, so there is nothing to keep. A cancelled item stays cancelled.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing was made yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/branch|worktree/)).toBeNull();
+  });
+
   it("keeps a refusal under the button and the text in the box", async () => {
     mount(gateItem(), "/work-items/w1?compose=reject", { "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await userEvent.type(await screen.findByRole("textbox"), "no");
