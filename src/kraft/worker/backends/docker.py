@@ -750,7 +750,7 @@ def _vm_evidence(host: Runtime) -> str:
     return f"OperatingSystem: {system}" if "Docker Desktop" in system else ""
 
 
-def _relay_mirror_hint(relay_image: str) -> str:
+def _relay_mirror_hint(host: Runtime, relay_image: str) -> str:
     """Where to get the default relay image when Docker Hub's pull limit refuses
     it: the same digest, so the same image. Nothing for an image the operator
     chose, which the mirror may not hold."""
@@ -760,8 +760,9 @@ def _relay_mirror_hint(relay_image: str) -> str:
         return ""
     mirror = relay_image.replace("docker.io/", "mirror.gcr.io/", 1)
     return (
-        ". If Docker Hub refuses the pull (toomanyrequests), set `relay_image` in "
-        f"sandbox.yaml to {mirror} and pull that"
+        f"; if Docker Hub refuses it (toomanyrequests), set `relay_image: {mirror}` in "
+        f"{config_dir() / config.SandboxHost.FILE}, run `{host.cli} pull {mirror}`, "
+        "and retry any item it stopped"
     )
 
 
@@ -784,11 +785,10 @@ def channel_refusal(
             "then check `kraft admin doctor`"
         )
     return (
-        f"could not tell whether {host.describe()} lets a container reach a host "
-        f"unix socket, which decides how a sandbox with `network:` reaches Kraft's "
-        f"egress proxy: the probe did not run. Pull the relay image "
-        f"({host.cli} pull {relay_image}) and check `kraft admin doctor`"
-        f"{_relay_mirror_hint(relay_image)}"
+        # The board keeps a stop's first 300 characters: the command comes before the hint.
+        f"could not tell whether {host.describe()} lets a container reach a host unix "
+        "socket: the probe did not run. Check `kraft admin doctor`, or pull the egress "
+        f"relay image: {host.cli} pull {relay_image}{_relay_mirror_hint(host, relay_image)}"
     )
 
 
@@ -1845,7 +1845,7 @@ class DockerBackend:
             if pulled is None or pulled[0] != 0:
                 return False, (
                     f"the egress relay image {relay!r} is not pulled -- "
-                    f"run: {host.cli} pull {relay}{_relay_mirror_hint(relay)}"
+                    f"run: {host.cli} pull {relay}{_relay_mirror_hint(host, relay)}"
                 )
             reachable = await asyncio.to_thread(socket_channel, relay)
             said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
