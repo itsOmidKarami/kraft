@@ -13,6 +13,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from support.certs import cert
+from support.sandbox_image import pull_failure
 
 from kraft.worker.backends import docker, docker_forward
 
@@ -84,9 +85,8 @@ def runtime_with_ca(request, tmp_path, monkeypatch, tls_server):
     cli = request.param
     have = subprocess.run([cli, "image", "inspect", IMAGE], capture_output=True, text=True)
     if have.returncode != 0:
-        pulled = subprocess.run([cli, "pull", "-q", IMAGE], capture_output=True, text=True)
-        if pulled.returncode != 0:
-            why = f"e2e: {cli} could not pull {IMAGE}: {pulled.stderr.strip()}"
+        if failure := pull_failure(cli, IMAGE):
+            why = f"e2e: {cli} could not pull {IMAGE}: {failure}"
             if cli in os.environ.get("KRAFT_E2E_REQUIRE", "").split(","):
                 pytest.fail(why)
             pytest.skip(why)
