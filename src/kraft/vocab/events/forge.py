@@ -43,6 +43,9 @@ class ForgeEvent(StrEnum):
     AUTOMATED_REVIEW_SETTLED = "automated_review_settled"
     #: Kraft is about to write a reply or the summary comment: recorded before any write.
     REPLY_INTENDED = "reply_intended"
+    #: Recorded just before a write: if no outcome follows, the send reads as unclear and
+    #: is reconciled. Not a failure and not a counted send.
+    REPLY_SEND_STARTED = "reply_send_started"
     #: A send that did not post: it may have landed (`unclear`), hit a rate limit or
     #: cannot succeed now (`deferred`).
     REPLY_SEND_FAILED = "reply_send_failed"
@@ -93,6 +96,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_SETTLED: _PLAIN,
         ForgeEvent.REPLY_INTENDED: _PLAIN,
+        ForgeEvent.REPLY_SEND_STARTED: _PLAIN,
         ForgeEvent.REPLY_SEND_FAILED: _PLAIN,
         ForgeEvent.REPLY_POSTED: _PLAIN,
         ForgeEvent.REPLY_NOT_FOUND: _PLAIN,
