@@ -28,7 +28,7 @@ from kraft.worker import channel
 # Shared, not copied: the runtime under test, over each transport.
 from worker.test_egress_docker import _pulled, probed, runtime, short_run  # noqa: F401
 
-IMAGE = "quay.io/curl/curl:latest"
+IMAGE = "docker.io/curlimages/curl:latest"
 PLAN = "# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n"
 _CODEX_BASH = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/work"}
 

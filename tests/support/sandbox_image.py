@@ -23,8 +23,7 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False
     context.mkdir()
     image = f"{IMAGE.split(':')[0]}-curl:latest" if curl else IMAGE
     (context / "Dockerfile").write_text(
-        "FROM public.ecr.aws/docker/library/alpine:3\n"
-        "RUN apk add --no-cache git\n"
+        "FROM docker.io/alpine/git:latest\n"
         + ("RUN apk add --no-cache curl\n" if curl else "")
         + "ENTRYPOINT []\n"
     )

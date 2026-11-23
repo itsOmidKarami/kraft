@@ -44,7 +44,7 @@ from kraft.worker import channel
 from kraft.worker.backends import docker
 from kraft.worker.egress import EgressProxy
 
-IMAGE = "public.ecr.aws/docker/library/alpine:3"
+IMAGE = "docker.io/library/alpine:3"
 #: What `allowed.test` resolves to, for the proxy only: private, so only an
 #: exact allow entry reaches it.
 ALLOWED_ADDRESS = "10.254.254.254"

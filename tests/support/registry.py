@@ -31,7 +31,7 @@ from kraft.worker import kit
 
 #: registry:2, by its multi-arch index digest.
 IMAGE = (
-    "public.ecr.aws/docker/library/registry@sha256:"
+    "docker.io/library/registry@sha256:"
     "a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 )
 _INDEX = (

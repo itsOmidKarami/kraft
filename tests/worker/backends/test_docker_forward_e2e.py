@@ -18,7 +18,7 @@ from kraft.worker.backends import docker, docker_forward
 
 #: Python's `ssl` reads `SSL_CERT_FILE`, the variable that *replaces* the
 #: store: the case a bundle of the extra CA alone would break.
-IMAGE = "public.ecr.aws/docker/library/python:3.14-slim"
+IMAGE = "docker.io/library/python:3.14-slim"
 
 FETCH = """
 import ssl, sys, urllib.request
