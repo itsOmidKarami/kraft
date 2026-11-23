@@ -166,17 +166,25 @@ async def test_a_refused_merge_with_no_bot_asks_the_forge_nothing(run_forge, tmp
     assert "calc.py" not in run_forge.log("m1")
 
 
-async def test_a_merge_the_forge_holds_on_its_threads_says_so_while_it_waits(run_forge, tmp_path):
+@pytest.mark.parametrize(
+    "detail, says",
+    [("discussions_not_resolved", True), ("mergeable", False)],
+    ids=["held-on-its-threads", "held-on-something-else"],
+)
+async def test_a_merge_the_forge_holds_names_the_threads_when_its_wait_times_out(
+    run_forge, tmp_path, wait_clock, detail, says
+):
     """GitLab accepts auto-merge and holds it, so no refusal ever comes."""
-    fake = _with_threads(
-        forge.FakeForge(merge_delay=5, merge_detail="discussions_not_resolved", resolved_rule=True),
-        1,
-    )
+    fake = _with_threads(forge.FakeForge(merge_delay=9, merge_detail=detail, resolved_rule=True), 1)
     await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="b")
 
-    await run_forge(fake, "merge", "m1", reviewers=BOT)
-    assert "calc.py" not in run_forge.log("m1"), "the first look only asked for the merge"
-    await run_forge(fake, "merge", "m2", reviewers=BOT)
+    assert (await run_forge(fake, "merge", "m1", reviewers=BOT))[0] == "waiting"
+    assert (await run_forge(fake, "merge", "m2", reviewers=BOT))[0] == "waiting"
+    assert fake.rule_reads == [], "a look that is still waiting reads nothing extra"
+    wait_clock.advance(24 * 60 * 60)
+    assert (await run_forge(fake, "merge", "m3", reviewers=BOT))[0] == "capped_out"
 
-    # A wait's later observations append to its first session's log.
-    assert "calc.py:3 (coderabbitai)" in run_forge.log("m1")
+    log = run_forge.log("m1")
+    assert "timed out" in log
+    assert ("calc.py:3 (coderabbitai)" in log) is says
+    assert log.count("calc.py:3") == int(says), "named once, at the stop"

@@ -507,6 +507,23 @@ async def test_the_merge_is_handed_the_bots_of_the_chains_review_wait(item_on, r
     assert [r.bot for r in got] == expected
 
 
+async def test_the_brief_reads_through_the_items_real_forge(item_on, fake_agent, monkeypatch):
+    fake = _forge.FakeForge(resolved_rule=True)
+    said = _forge.ReviewerFeedback(_BOTS[0], None, threads=(_THREAD,))
+    fake.feedback_script = [[said]]
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    it = await item_on(_briefed(reviewers=[{"bot": "coderabbitai"}]), "brief")
+    launch = executor.LaunchContext(repo_entry=entry_of({"setup_command": "", "forge": "fake"}))
+
+    assert await executor.run_once(it.database, it.run_dirs, work_item_id=it.id, launch=launch) == (
+        "completed"
+    )
+
+    report = item_paths.item_dir(it.run_dirs, it.id) / item_paths.OPEN_THREADS_REPORT
+    written = json.loads(report.read_text())
+    assert (written["open_bot_threads"], written["requires_resolved_conversations"]) == (1, "yes")
+
+
 async def test_a_repository_with_no_review_bot_gets_no_read_and_no_note(
     item_on, fake_agent, monkeypatch
 ):

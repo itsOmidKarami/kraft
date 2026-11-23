@@ -914,23 +914,38 @@ def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
 
 
 async def _held_by_threads(
-    forge: Forge, repo: Path, branch: str, base: str, reviewers: Reviewers
+    db,
+    forge: Forge,
+    work_item_id: str,
+    target: tuple,
+    branch: str,
+    item_base: str,
+    reviewers: Reviewers,
 ) -> str:
-    """The open bot threads, when the forge holds an accepted merge on them."""
+    """The open bot threads, when a merge the forge accepted timed out held on them:
+    GitLab's auto-merge waits on unresolved threads instead of refusing. Read once,
+    at the stop, and never raises."""
     if not any(r.bot is not None for r in reviewers):
         return ""
+    _, repo, role = target
     try:
+        base = (
+            await _builtins.base_branch(db, work_item_id, repo, member=True)
+            if role == "submodule"
+            else item_base
+        )
         ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-    except Exception:  # noqa: BLE001 -- a hint never disturbs the wait
+        return await open_threads.merge_hint(
+            forge,
+            repo=repo,
+            branch=branch,
+            base=base,
+            reviewers=reviewers,
+            detail=ci_read.merge_detail,
+        )
+    except Exception:  # noqa: BLE001 -- a hint never disturbs the stop
+        logger.warning("could not read what holds the merge of %s", branch, exc_info=True)
         return ""
-    return await open_threads.merge_hint(
-        forge,
-        repo=repo,
-        branch=branch,
-        base=base,
-        reviewers=reviewers,
-        detail=ci_read.merge_detail,
-    )
 
 
 async def _no_post_merge_ci(
@@ -1990,9 +2005,6 @@ async def _run_one(
                 )
                 log = f"!{existing.number} is still open; waiting for the merge to land{where}\n"
                 log += unread
-                # Accepted, then held: on GitLab, auto-merge waits on unresolved threads
-                # instead of refusing, so this wait's timeout is the stop a person reads.
-                log += await _held_by_threads(forge, repo, branch, base, reviewers)
                 status = "merge_pending"
             elif (
                 refused := await _refuse_unreviewed(db, work_item_id, node_id, repo, branch)
@@ -3087,6 +3099,18 @@ async def run_task(
             session_id=session_id,
             note=note,
         )
+        if handler == "merge" and status == "capped_out" and merge_requested:
+            held = next((t for t in targets if t[0] == awaiting_landing), None)
+            if held is not None:
+                log += await _held_by_threads(
+                    db,
+                    member_forges.get(mounts_by_row.get(held[0]), live_forge),
+                    work_item_id,
+                    held,
+                    branch,
+                    item_base,
+                    reviewers,
+                )
     recorded = await _builtins.finish_session(
         db,
         log_path,

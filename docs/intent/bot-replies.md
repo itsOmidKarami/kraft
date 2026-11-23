@@ -471,3 +471,15 @@ did not re-read that never reached a fix, including after a round whose triage w
 skipped.
 enforced-by: tests/executor/test_reply_round_walks.py::test_an_owed_at_limit_entry_carries_the_unread_answer, tests/executor/test_reply_round_walks.py::test_a_reply_round_report_keeps_what_an_earlier_measurement_found, tests/executor/test_reply_round_walks.py::test_the_per_head_limit_ends_the_conversation, tests/executor/test_reply_round_walks.py::test_a_pending_pipeline_in_a_reply_round_completes_at_the_reply_deadline, tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[viewer-unreadable], tests/executor/test_reply_round_walks.py::test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed[read-thread-raises]
 origin: src/kraft/executor/replies.py §_Point.write_report
+
+## REQ the-final-review-states-open-bot-threads-and-the-conversation-rule
+WHEN the task that declares `triage_verdict` starts on an item with a configured
+review bot, the system SHALL read the merge request's open bot threads and whether
+the base branch requires resolved conversations, write both to a report the brief
+is pointed at, and record `unknown` for what it cannot read, without stopping or
+delaying the item. An item with no configured bot SHALL make no forge call and get
+no note. WHEN a merge is refused, or held until its wait times out, on that rule, the
+stop SHALL name the open bot threads, as the likely blocker unless the forge said
+so, and SHALL NOT name them for any other refusal.
+enforced-by: tests/executor/test_agent_inputs.py::test_the_brief_is_told_the_open_bot_threads_and_the_rule[required-some-open], tests/executor/test_agent_inputs.py::test_the_brief_is_told_the_open_bot_threads_and_the_rule[rule-read-failed], tests/executor/test_agent_inputs.py::test_the_brief_reads_through_the_items_real_forge, tests/executor/test_agent_inputs.py::test_a_repository_with_no_review_bot_gets_no_read_and_no_note, tests/adapters/forge/test_open_threads.py::test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why[blocked-rule-yes-is-likely], tests/adapters/forge/test_open_threads.py::test_a_refused_merge_names_the_open_bot_threads_only_when_they_are_why[another-refusal], tests/adapters/forge/test_open_threads.py::test_a_merge_the_forge_holds_names_the_threads_when_its_wait_times_out[held-on-its-threads]
+origin: src/kraft/adapters/forge/open_threads.py
