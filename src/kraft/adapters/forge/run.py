@@ -508,7 +508,8 @@ def _wrote_before_records(
     """Whether a Kraft from before these records wrote this merge request's
     description: it wrote one on every `mr_opened`, reused merge requests included.
     This item's own record of this number, per repository where it has several. A
-    `kept` event means this Kraft already judged it not to be its own."""
+    `kept` event means this Kraft already judged it not to be its own, and an
+    `mr_opened` from a reuse that could not read the description vouches for nothing."""
     kept = c.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
         "AND json_extract(payload, '$.repo') = ? LIMIT 1",
@@ -518,14 +519,17 @@ def _wrote_before_records(
         return False
     if repo_row_id is not None:
         row = c.execute(
-            "SELECT json_extract(mr_ref, '$.number') AS number FROM work_item_repos WHERE id = ?",
+            "SELECT json_extract(mr_ref, '$.number') AS number, "
+            "json_extract(mr_ref, '$.description_unread') AS unread "
+            "FROM work_item_repos WHERE id = ?",
             (repo_row_id,),
         ).fetchone()
-        return row is not None and row["number"] == number
+        return row is not None and row["number"] == number and not row["unread"]
     return (
         c.execute(
             "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
-            "AND json_extract(payload, '$.number') = ? LIMIT 1",
+            "AND json_extract(payload, '$.number') = ? "
+            "AND json_extract(payload, '$.description_unread') IS NULL LIMIT 1",
             (work_item_id, ForgeEvent.MR_OPENED, number),
         ).fetchone()
         is not None
@@ -544,7 +548,7 @@ async def _describe_mr(
     body: str,
     number: int,
     repo_row_id: int | None,
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, bool]:
     """Rewrite an open merge request's description, unless that would destroy
     what a person wrote there: the live text must be one Kraft recorded writing,
     reach one through saves made only by bot accounts (`mr_ops.only_bots_since`),
@@ -552,9 +556,11 @@ async def _describe_mr(
     (`_wrote_before_records`). Anything else, an emptied body included, stays as
     it is, whole, so nothing can come out half-merged.
 
-    Returns the description this replaced (None when it wrote nothing) and a log
-    line. Hashes go in before the write and every one counts, so a write that
-    landed with its answer lost, or never landed, is not mistaken for an edit."""
+    Returns the description this replaced (None when it wrote nothing), a log
+    line, and whether the live description could not be read. A failed read
+    decides nothing, so an outage never marks a description as kept. Hashes go
+    in before the write and every one counts, so a write that landed with its
+    answer lost, or never landed, is not mistaken for an edit."""
 
     def _earlier(c) -> bool:
         return _wrote_before_records(c, work_item_id, orig_repo, repo_row_id, number)
@@ -562,13 +568,7 @@ async def _describe_mr(
     try:
         live = await forge.mr_body(repo=repo, branch=branch)
     except ForgeError:
-        # The `mr_opened` a reuse records next must not vouch for text never read.
-        def _hold(c) -> None:
-            if not _our_descriptions(c, work_item_id, orig_repo) and not _earlier(c):
-                _keep_description(c, work_item_id, node_id, orig_repo)
-
-        await db.write(_hold)
-        return None, "could not read the description to check for edits: left it as it is\n"
+        return None, "could not read the description to check for edits: left it as it is\n", True
     new = mr_ops.body_hash(body)
     current = mr_ops.body_hash(live)
     ours = db.read(lambda c: _our_descriptions(c, work_item_id, orig_repo))
@@ -585,7 +585,11 @@ async def _describe_mr(
                 revisions = ()
             if not mr_ops.only_bots_since(live, revisions, ours):
                 await db.write(lambda c: _keep_description(c, work_item_id, node_id, orig_repo))
-                return None, "the description is not the one Kraft last wrote: left it as it is\n"
+                return (
+                    None,
+                    "the description is not the one Kraft last wrote: left it as it is\n",
+                    False,
+                )
 
     def _before_write(c) -> None:
         newest = c.execute(
@@ -603,7 +607,7 @@ async def _describe_mr(
 
     await db.write(_before_write)
     await forge.update_mr(repo=repo, branch=branch, body=body)
-    return live, ""
+    return live, "", False
 
 
 async def _rebase_conflict_away(
@@ -1621,6 +1625,7 @@ async def _run_one(
             # an open_mr that crashed after the create lands here too. A
             # second `mr create` for one branch is an error on both CLIs
             # (Kraft-xron).
+            unread = False
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "open":
                 # The same two calls `sync_mr` makes, for the same reason:
@@ -1637,7 +1642,7 @@ async def _run_one(
                     repo=repo,
                     branch=branch,
                 )
-                _, described = await _describe_mr(
+                _, described, unread = await _describe_mr(
                     forge,
                     db,
                     work_item_id=work_item_id,
@@ -1690,13 +1695,10 @@ async def _run_one(
             # A multi-repo item's event carries no repo, so each repo's own
             # merge request is recorded on its row too (Kraft-mjsf).
             def _record(c, n=number, u=url):
-                events.append(
-                    c, work_item_id, ForgeEvent.MR_OPENED, {"number": n, "url": u}, node_id=node_id
-                )
+                ref = {"number": n, "url": u, **({"description_unread": True} if unread else {})}
+                events.append(c, work_item_id, ForgeEvent.MR_OPENED, ref, node_id=node_id)
                 if repo_row_id is not None:
-                    store.update_repo_state(
-                        c, repo_row_id, merge_state="open", mr_ref={"number": n, "url": u}
-                    )
+                    store.update_repo_state(c, repo_row_id, merge_state="open", mr_ref=ref)
 
             await db.write(_record)
         case "ci_poll":
@@ -2005,7 +2007,7 @@ async def _run_one(
             # and mr_checks added, so it is rewritten from the branch head
             # before a human is asked to read it (Kraft-c09h), unless a person
             # edited it.
-            replaced, described = await _describe_mr(
+            replaced, described, _ = await _describe_mr(
                 forge,
                 db,
                 work_item_id=work_item_id,

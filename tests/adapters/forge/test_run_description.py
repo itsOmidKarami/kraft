@@ -119,12 +119,22 @@ async def test_a_failed_first_read_does_not_turn_a_reused_merge_request_into_kra
 
 
 @pytest.mark.parametrize(
-    "row_number, event_number, wrote",
-    [(1, None, True), (2, None, False), (None, 1, False)],
-    ids=["its-row-names-it", "its-row-names-another", "only-a-sibling-event-names-it"],
+    "row_number, event_number, unread, wrote",
+    [
+        (1, None, False, True),
+        (2, None, False, False),
+        (None, 1, False, False),
+        (1, None, True, False),
+    ],
+    ids=[
+        "its-row-names-it",
+        "its-row-names-another",
+        "only-a-sibling-event-names-it",
+        "its-row-came-from-a-failed-read",
+    ],
 )
 async def test_a_workspace_member_asks_its_own_row_who_opened_it(
-    run_forge, tmp_path, row_number, event_number, wrote
+    run_forge, tmp_path, row_number, event_number, unread, wrote
 ):
     fake = forge.FakeForge()
     await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="b")
@@ -135,7 +145,11 @@ async def test_a_workspace_member_asks_its_own_row_who_opened_it(
             c, work_item_id="w1", repo_path=str(tmp_path), role="submodule", merge_rank=0
         )
         if row_number is not None:
-            ref = {"number": row_number, "url": "u"}
+            ref = {
+                "number": row_number,
+                "url": "u",
+                **({"description_unread": 1} if unread else {}),
+            }
             store.update_repo_state(c, row, merge_state="open", mr_ref=ref)
         if event_number is not None:
             payload = {"number": event_number, "url": "u"}
@@ -150,6 +164,37 @@ async def test_a_workspace_member_asks_its_own_row_who_opened_it(
         )
         is wrote
     )
+
+
+async def test_a_dropped_connection_does_not_mark_kraft_s_description_kept(run_forge, tmp_path):
+    """An older item whose read fails once is regenerated on the next pass."""
+
+    class _DropsOnce(forge.FakeForge):
+        dropped = False
+
+        async def mr_body(self, *, repo, branch):
+            if not self.dropped:
+                self.dropped = True
+                raise forge.ForgeError("connection reset", no_answer=True)
+            return await super().mr_body(repo=repo, branch=branch)
+
+    fake = _DropsOnce()
+    await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body="old")
+    await run_forge(fake, "mark_ready", "x1")
+    payload = {"number": 1, "url": "u"}
+    await run_forge.database.write(
+        lambda c: events.append(c, "w1", forge.ForgeEvent.MR_OPENED, payload)
+    )
+    new = _authored(tmp_path, "A window.")
+
+    await run_forge(fake, "sync_mr", "x2")
+    assert run_forge.events("mr_description_kept") == []
+    assert "kraft/w1" not in fake.bodies
+
+    await run_forge(fake, "sync_mr", "x3")
+
+    assert fake.bodies["kraft/w1"].startswith(new)
+    assert run_forge.events("mr_description_kept") == []
 
 
 async def test_a_failed_first_write_on_an_older_item_does_not_freeze_it(run_forge, tmp_path):
