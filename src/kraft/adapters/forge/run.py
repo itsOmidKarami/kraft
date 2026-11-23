@@ -2817,8 +2817,8 @@ async def run_task(
     checkout_stopped = False
     #: What the forge said when a call failed, for `failure_cause` to read later.
     forge_error: dict | None = None
-    #: The network cut this call off (`cut_off`), and the item parks to try again.
-    cut_off = parked = False
+    #: The forge answered this try; the network cut it off and the item parks.
+    answered = parked = False
     started = waits.now()
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
@@ -3004,6 +3004,7 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        answered = exc.status is not None
         if isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable)):
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
@@ -3031,7 +3032,6 @@ async def run_task(
         elif exc.no_answer and exc.reason in (None, "unreachable") and status == "failed":
             # Nothing about the work failed: no repair, no fix cycle. The session
             # ends unfinished, as a rate limit's does, and the walk parks.
-            cut_off = True
             parked = await db.write(
                 lambda c, e=str(exc): waits.note_no_answer(
                     c,
@@ -3049,8 +3049,11 @@ async def run_task(
         unobserved = str(exc)
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
+    else:
+        # A local refusal (an empty branch, say) says nothing about the network.
+        answered = status != "config_error"
 
-    if not cut_off:
+    if answered:
         await db.write(
             lambda c: waits.note_answered(c, work_item_id, node_id=node_id, task=hook_point)
         )

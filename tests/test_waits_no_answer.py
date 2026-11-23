@@ -154,6 +154,59 @@ async def test_a_merge_that_landed_but_lost_its_answer_is_not_asked_again(
     assert len(asked) == 1
 
 
+@pytest.mark.parametrize(
+    "error, answered",
+    [
+        (forge.CliUnavailable("gh is not installed or not on PATH"), False),
+        (forge.git.UnsafeWorktree("HEAD is off the branch"), False),
+        (forge.ForgeError("Validation failed (HTTP 422)", status=422), True),
+    ],
+    ids=["cli-gone", "unsafe-worktree", "the-forge-answered"],
+)
+async def test_only_an_answer_from_the_forge_ends_the_count_of_tries(
+    walk,  # noqa: F811
+    item_on,
+    wait_clock,
+    error,
+    answered,
+):
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(side_effect=DROPPED)
+    it = await item_on([forge_node("ci", "mr.ci")])
+    assert await walk(fake, it) == "waiting"
+
+    fake.ci_status = AsyncMock(side_effect=error)
+    wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
+    await walk(fake, it)
+
+    assert bool(it.events("forge_answered")) is answered
+    kept = it.database.read(lambda c: waits._last_no_answer(c, it.id, "ci.main.ci"))
+    assert (kept is None) is answered
+
+
+async def test_a_local_refusal_on_the_next_try_keeps_the_count(
+    walk,  # noqa: F811
+    item_on,
+    wait_clock,
+    monkeypatch,
+):
+    """The branch came up empty: `config_error` with no call to the forge at all."""
+    ahead = AsyncMock(return_value=1)
+    monkeypatch.setattr(forge.git, "commits_ahead", ahead)
+    fake = forge.FakeForge()
+    fake.find_mr = AsyncMock(side_effect=DROPPED)
+    it = await item_on([forge_node("open", "mr.open_draft")])
+    assert await walk(fake, it) == "waiting"
+
+    ahead.return_value = 0
+    wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
+    assert await walk(fake, it) == "needs_human"
+
+    assert not it.events("forge_answered")
+    kept = it.database.read(lambda c: waits._last_no_answer(c, it.id, "open.main.open"))
+    assert kept["attempt"] == 1
+
+
 async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_starts_over(
     walk,  # noqa: F811
     item_on,

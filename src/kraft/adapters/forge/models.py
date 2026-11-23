@@ -179,16 +179,22 @@ _ANSWERED = re.compile(
     r"\bhttp [1-5]\d\d\b|\[(?:remote )?rejected\]|stale info|non-fast-forward"
     r"|repository not found|merge conflict",
 )
+#: What a CLI quotes rather than says: a quoted string (an apostrophe inside a word
+#: opens none), or a word holding a slash, a URL or path (`i/o timeout` is the one
+#: marker with a slash). The tools put the cause after these, never inside them.
+_QUOTED = re.compile(r""""[^"\n]*"|(?<!\w)'[^'\n]*'|(?<!\S)(?!i/o\s)\S*/\S*""")
 
 
 def dropped_connection(output: str) -> bool:
     """Whether a CLI's own output (never its command line, which can hold a title
     saying "broken pipe") says the network cut the call off. A refused credential or
-    any answer from the forge says otherwise, and unsure is not a drop."""
+    any answer from the forge says otherwise, and unsure is not a drop. A marker
+    inside a quoted name, URL or path is that name's text, not a cause."""
     low = output.lower()
     if any(m in low for m in _AUTH_MARKERS) or _ANSWERED.search(low):
         return False
-    return any(m in low for m in _DROPPED_MARKERS)
+    said = _QUOTED.sub(" ", low)
+    return any(m in said for m in _DROPPED_MARKERS)
 
 
 #: Local git operations Kraft runs itself. Their messages carry a file name or

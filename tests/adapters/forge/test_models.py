@@ -66,6 +66,25 @@ _NO_REMOTE = (
         ("net/http: TLS handshake timeout", True),
         ("kex_exchange_identification: Connection closed by remote host", True),
         ("send-pack: unexpected disconnect while reading sideband packet", True),
+        ("batch response: read tcp 10.0.0.2:5->1.2.3.4:443: i/o timeout", True),
+        (
+            "fatal: unable to access 'https://github.com/o/r.git/': "
+            "Recv failure: Connection reset by peer",
+            True,
+        ),
+        (
+            'LFS: Put "https://h/lfs/objects/a.bin": read tcp 1.1.1.1:2->3.3.3.3:443: '
+            "write: broken pipe",
+            True,
+        ),
+        # An apostrophe opens no quote, so the cause before a quoted name still counts.
+        ("the server's connection reset by peer on 'origin'", True),
+        # A file or URL that merely contains a marker is not a cause.
+        ('ERROR: LFS: Put "https://h/lfs/objects/connection reset.bin": EOF', False),
+        ("error: failed to push 'docs/broken pipe.bin'", False),
+        ("error: failed to push 'broken pipe.bin'", False),
+        ("LFS: upload failed: https://h/no%20such/no-route/connection-reset/broken/pipe", False),
+        ("LFS: missing /tmp/up/connection reset.bin", False),
         # git's ambiguous line, alone: unsure is a real failure.
         (_NO_REMOTE, False),
         (f"git@github.com: Permission denied (publickey).\n{_NO_REMOTE}", False),
