@@ -2597,6 +2597,7 @@ async def run_task(
     #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
     #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
     wait: WaitBounds | None = None,
+    #: For `mr.merge`, the chain's review bots, whose open threads a stop names.
     #: The reviewers `mr.automated_review` waits for (Ruling 171), already
     #: resolved across the item, repository and task layers; empty names none.
     reviewers: Reviewers = (),
