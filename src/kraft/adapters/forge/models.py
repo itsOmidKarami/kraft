@@ -427,6 +427,15 @@ class MRDetails:
 
 
 @dataclass(frozen=True)
+class DescriptionRevision:
+    """One saved version of a merge request's description, and whether a bot
+    account saved it. An unknown or deleted editor is not a bot."""
+
+    text: str
+    bot: bool
+
+
+@dataclass(frozen=True)
 class Pipeline:
     """One pipeline or workflow run; `status` is the forge's own word."""
 
@@ -489,6 +498,13 @@ class Forge(Protocol):
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
     async def mr_body(self, *, repo: Path, branch: str) -> str: ...
+    async def mr_description_history(
+        self, *, repo: Path, branch: str
+    ) -> tuple[DescriptionRevision, ...]:
+        """The description's saved versions, newest first; empty when the forge
+        cannot say who made them."""
+        ...
+
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str, pipeline_id: str = ""
     ) -> CIStatus: ...
@@ -709,6 +725,10 @@ class FakeForge:
     opened_check_clean: dict[int, bool] = field(default_factory=dict)
     #: The branch each opened merge request targets, by number.
     opened_base: dict[int, str] = field(default_factory=dict)
+    #: What `mr_description_history` answers, newest first, or the error it raises.
+    description_history: tuple[DescriptionRevision, ...] | ForgeError = ()
+    #: How many times that history was read.
+    description_history_reads: int = 0
     #: `automated_review`'s answers, consumed like `ci_states`. A bare state
     #: string is shorthand for a `ReviewResult` with nothing else to say.
     review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
@@ -848,6 +868,14 @@ class FakeForge:
         if branch in self.bodies:
             return self.bodies[branch]
         return next((b for n, b in self.opened_bodies.items() if self.opened[n] == branch), "")
+
+    async def mr_description_history(
+        self, *, repo: Path, branch: str
+    ) -> tuple[DescriptionRevision, ...]:
+        self.description_history_reads += 1
+        if isinstance(self.description_history, ForgeError):
+            raise self.description_history
+        return self.description_history
 
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""

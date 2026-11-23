@@ -308,7 +308,12 @@ async def test_every_forge_method_answers_alike(cli, tmp_path, name):
     await assert_alike(cli, tmp_path, ROWS[name], GLAB_API)
 
 
-@pytest.mark.parametrize("rows", [ROWS, GITHUB_ROWS], ids=["glab", "gh"])
-def test_every_forge_method_has_a_parity_row(rows):
+@pytest.mark.parametrize(
+    "rows, no_call",
+    # GitLab answers this one without a request, so there is no call to compare.
+    [(ROWS, {"mr_description_history"}), (GITHUB_ROWS, set())],
+    ids=["glab", "gh"],
+)
+def test_every_forge_method_has_a_parity_row(rows, no_call):
     """A method added to `Forge` without a row fails: the twin proof must not go stale."""
-    assert methods_without_a_row(rows) == set()
+    assert methods_without_a_row(rows) == no_call

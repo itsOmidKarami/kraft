@@ -203,7 +203,7 @@ _REPLY_REPORT = (
 #: a person's. Kraft's words only: the description itself is never pasted in.
 _MR_DESCRIPTION_KEPT = (
     "\n\nThe merge request description in {repos} is not the one Kraft last wrote: "
-    "a person edited it on the forge, or it predates Kraft's record of what it wrote, "
+    "a person may have edited it on the forge, or it predates Kraft's record of what it wrote, "
     "so Kraft left it exactly as it is and did not apply the description it "
     'generated{document}. Add a short section, "Merge request description", saying '
     "so, and name what the generated description says that the live one (`kraft view "

@@ -16,6 +16,7 @@ from kraft.adapters.forge.models import (
     MR,
     CIState,
     CIStatus,
+    DescriptionRevision,
     DropCause,
     FailedJob,
     ForgeError,
@@ -445,6 +446,14 @@ class GlabCli(mr_ops.CliWaits):
 
     async def mr_body(self, *, repo: Path, branch: str) -> str:
         return str((await self._mr(repo, branch)).get("description") or "")
+
+    async def mr_description_history(
+        self, *, repo: Path, branch: str
+    ) -> tuple[DescriptionRevision, ...]:
+        """None to give: GitLab's merge request names only its last editor, which
+        proves nothing about the edits before it, and description versions are
+        not on every tier. So a changed description stays a person's here."""
+        return ()
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge (`_merge_view`)."""

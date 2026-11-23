@@ -145,6 +145,22 @@ ROWS: dict[str, Row] = {
     "github-mr_body": Row(
         "mr_body", _call("mr_body", branch=BR), {READ_BRANCH: pr_by_branch(pull_request(body="b"))}
     ),
+    "github-mr_description_history": Row(
+        "mr_description_history",
+        _call("mr_description_history", branch=BR),
+        {
+            "api*graphql*userContentEdits*": gql(
+                {
+                    "node": {
+                        "userContentEdits": {
+                            "nodes": [{"diff": "b", "editor": {"__typename": "Bot"}}]
+                        }
+                    }
+                }
+            ),
+            READ_BRANCH: pr_by_branch(pull_request()),
+        },
+    ),
     "github-ci_status": Row(
         "ci_status",
         lambda f, r: f.ci_status(repo=r, mr=forge.MR(0, ""), branch=BR),

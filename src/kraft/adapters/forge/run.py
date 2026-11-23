@@ -495,7 +495,8 @@ async def _describe_mr(
     body: str,
 ) -> tuple[str | None, str]:
     """Rewrite an open merge request's description, unless that would destroy
-    what a person wrote there: the live text must be one Kraft recorded writing.
+    what a person wrote there: the live text must be one Kraft recorded writing,
+    or reach one through saves made only by bot accounts (`mr_ops.only_bots_since`).
     Anything else, an emptied body or a merge request with no record included,
     stays as it is, whole, so nothing can come out half-merged.
 
@@ -507,30 +508,33 @@ async def _describe_mr(
     except ForgeError:
         return None, "could not read the description to check for edits: left it as it is\n"
     new = mr_ops.body_hash(body)
-
-    def _decide(c) -> bool:
-        ours = {
-            row["sha"]
-            for row in c.execute(
+    ours = {
+        row["sha"]
+        for row in db.read(
+            lambda c: c.execute(
                 "SELECT json_extract(payload, '$.sha256') AS sha FROM events "
                 "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ?",
                 (work_item_id, ForgeEvent.MR_DESCRIPTION_WRITTEN, str(orig_repo)),
+            ).fetchall()
+        )
+    }
+    if mr_ops.body_hash(live) not in ours | {new}:
+        try:
+            revisions = await forge.mr_description_history(repo=repo, branch=branch)
+        except ForgeError:
+            revisions = ()
+        if not mr_ops.only_bots_since(live, revisions, ours):
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    ForgeEvent.MR_DESCRIPTION_KEPT,
+                    {"node_id": node_id, "repo": str(orig_repo)},
+                )
             )
-        }
-        if mr_ops.body_hash(live) not in ours | {new}:
-            events.append(
-                c,
-                work_item_id,
-                ForgeEvent.MR_DESCRIPTION_KEPT,
-                {"node_id": node_id, "repo": str(orig_repo)},
-            )
-            return False
-        if new not in ours:
-            _record_description(c, work_item_id, node_id, orig_repo, new)
-        return True
-
-    if not await db.write(_decide):
-        return None, "the description is not the one Kraft last wrote: left it as it is\n"
+            return None, "the description is not the one Kraft last wrote: left it as it is\n"
+    if new not in ours:
+        await db.write(lambda c: _record_description(c, work_item_id, node_id, orig_repo, new))
     await forge.update_mr(repo=repo, branch=branch, body=body)
     return live, ""
 

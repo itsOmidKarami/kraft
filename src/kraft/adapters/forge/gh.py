@@ -17,6 +17,7 @@ from kraft.adapters.forge.models import (
     MR,
     CIState,
     CIStatus,
+    DescriptionRevision,
     DropCause,
     FailedJob,
     ForgeError,
@@ -90,6 +91,17 @@ def _gh_notes(nodes: list[dict]) -> tuple[ForgeNote, ...]:
 
 
 _VIEWER_QUERY = "query { viewer { login } }"
+#: `diff` is the whole description as of that save, despite its name. A history
+#: longer than this page never reaches Kraft's text, so it reads as a person's.
+_DESCRIPTION_HISTORY_QUERY = """
+query($id: ID!) {
+  node(id: $id) {
+    ... on PullRequest {
+      userContentEdits(first: 50) { nodes { diff editor { __typename } } }
+    }
+  }
+}
+"""
 _RESOLVE_MUTATION = """
 mutation($thread: ID!) {
   resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } }
@@ -615,6 +627,20 @@ class GhCli(mr_ops.CliWaits):
     async def mr_body(self, *, repo: Path, branch: str) -> str:
         data = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         return str(data.get("body") or "")
+
+    async def mr_description_history(
+        self, *, repo: Path, branch: str
+    ) -> tuple[DescriptionRevision, ...]:
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
+        data = await self._gql(repo, _DESCRIPTION_HISTORY_QUERY, {"id": pr["id"]})
+        nodes = ((data.get("node") or {}).get("userContentEdits") or {}).get("nodes") or []
+        return tuple(
+            DescriptionRevision(
+                text=str((n or {}).get("diff") or ""),
+                bot=((n or {}).get("editor") or {}).get("__typename") == "Bot",
+            )
+            for n in nodes
+        )
 
     async def ci_status(
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""

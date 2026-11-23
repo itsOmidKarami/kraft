@@ -6,6 +6,8 @@ from __future__ import annotations
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge.github_api import GitHubApi
+from kraft.adapters.forge.gitlab_api import GitLabApi
 
 
 def _authored(worktree, text: str, front: str = "") -> str:
@@ -89,3 +91,114 @@ async def test_a_description_write_whose_answer_was_lost_is_not_read_as_an_edit(
 
     assert fake.bodies["kraft/w1"].startswith(third)
     assert run_forge.events("mr_description_kept") == []
+
+
+BOT, PERSON = True, False
+
+
+@pytest.mark.parametrize("handler", ["open_mr", "sync_mr"])
+@pytest.mark.parametrize(
+    "saves, reaches_ours, regenerated",
+    [
+        ([BOT], True, True),
+        ([BOT, BOT], True, True),
+        ([BOT, PERSON], True, False),
+        ([PERSON, BOT], True, False),
+        ([BOT], False, False),
+    ],
+    ids=["bot", "two-bots", "bot-then-person", "person-then-bot", "history-stops-short"],
+)
+async def test_a_description_only_bots_edited_is_regenerated(
+    run_forge, tmp_path, handler, saves, reaches_ours, regenerated
+):
+    """`saves` is oldest first, each on top of Kraft's own text."""
+    _authored(tmp_path, "A door.")
+    fake = forge.FakeForge()
+    await run_forge(fake, "open_mr", "x1")
+    ours = fake.opened_bodies[1]
+    texts = [f"{ours}\n\nsave {i}" for i in range(len(saves))]
+    history = [forge.DescriptionRevision(t, b) for t, b in zip(texts, saves, strict=True)]
+    if reaches_ours:
+        history.insert(0, forge.DescriptionRevision(ours, False))
+    fake.description_history = tuple(reversed(history))
+    fake.bodies["kraft/w1"] = texts[-1]
+    new = _authored(tmp_path, "A window.")
+
+    await run_forge(fake, handler, "x2")
+
+    assert fake.bodies["kraft/w1"].startswith(new) is regenerated
+    assert (run_forge.events("mr_description_kept") == []) is regenerated
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        lambda ours: (),
+        lambda ours: forge.ForgeError("history unavailable"),
+        lambda ours: (
+            forge.DescriptionRevision("a bot's older save", True),
+            forge.DescriptionRevision(ours, False),
+        ),
+    ],
+    ids=["no-history", "failed-read", "history-is-not-the-live-text"],
+)
+async def test_a_description_with_unknown_history_is_kept(run_forge, tmp_path, history):
+    _authored(tmp_path, "A door.")
+    fake = forge.FakeForge()
+    await run_forge(fake, "open_mr", "x1")
+    live = fake.opened_bodies[1] + "\n\nedited"
+    fake.bodies["kraft/w1"] = live
+    fake.description_history = history(fake.opened_bodies[1])
+    _authored(tmp_path, "A window.")
+
+    assert await run_forge(fake, "sync_mr", "x2") == ("done", "done")
+
+    assert fake.bodies["kraft/w1"] == live
+    assert len(run_forge.events("mr_description_kept")) == 1
+
+
+async def test_an_untouched_description_reads_no_history(run_forge, tmp_path):
+    _authored(tmp_path, "A door.")
+    fake = forge.FakeForge()
+    await run_forge(fake, "open_mr", "x1")
+    _authored(tmp_path, "A window.")
+
+    await run_forge(fake, "sync_mr", "x2")
+
+    assert fake.description_history_reads == 0
+
+
+@pytest.mark.parametrize(
+    "client",
+    [lambda: forge.GhCli(), lambda: GitHubApi("corp", None)],
+    ids=["cli", "api"],
+)
+@pytest.mark.parametrize(
+    "editor, bot",
+    [({"__typename": "Bot"}, True), ({"__typename": "User"}, False), (None, False)],
+    ids=["bot", "user", "ghost"],
+)
+async def test_github_reads_who_saved_each_description(monkeypatch, tmp_path, client, editor, bot):
+    gh = client()
+
+    async def _pr(*a, **k):
+        return {"id": "PR_1"}
+
+    async def _gql(repo, query, variables):
+        assert variables == {"id": "PR_1"}
+        node = {"diff": "the text", "editor": editor}
+        return {"node": {"userContentEdits": {"nodes": [node]}}}
+
+    monkeypatch.setattr(gh, "_pr", _pr)
+    monkeypatch.setattr(gh, "_gql", _gql)
+
+    assert await gh.mr_description_history(repo=tmp_path, branch="b") == (
+        forge.DescriptionRevision("the text", bot),
+    )
+
+
+@pytest.mark.parametrize(
+    "client", [lambda: forge.GlabCli(), lambda: GitLabApi("corp", None)], ids=["cli", "api"]
+)
+async def test_gitlab_claims_no_description_history(tmp_path, client):
+    assert await client().mr_description_history(repo=tmp_path, branch="b") == ()
