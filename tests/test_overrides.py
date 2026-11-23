@@ -63,13 +63,16 @@ def test_node_override_takes_a_list_of_reviewers_each_named_one_way():
         ]
 
 
-def test_replies_before_they_arrive_is_refused_in_its_own_words():
-    assert overrides.validate_node_override_fields(
-        {"reviewers": [{"bot": "b", "replies": True}]}
-    ) == ["reviewers: `replies` arrives in a later release of Kraft"]
+def test_replies_are_accepted_in_a_node_override():
+    assert (
+        overrides.validate_node_override_fields(
+            {"reviewers": [{"bot": "b", "replies": True, "resolve_fixed": True}]}
+        )
+        == []
+    )
 
 
-def test_resolve_without_replies_is_refused_in_its_own_words(replies_on):
+def test_resolve_without_replies_is_refused_in_its_own_words():
     assert overrides.validate_node_override_fields(
         {"reviewers": [{"bot": "b", "resolve_fixed": True}]}
     ) == ["reviewers: `resolve_fixed` needs `replies: true` on the same entry"]

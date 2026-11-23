@@ -68,9 +68,7 @@ def _ended(run_forge):
     return [e["outcome"] for e in run_forge.events("external_wait_ended")]
 
 
-async def test_the_reply_wait_waits_then_settles(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
-):
+async def test_the_reply_wait_waits_then_settles(run_forge, on_branch, monkeypatch, wait_clock):
     """One silent thread, Kraft's note at 20s: waiting until its deadline (5 minutes on),
     then done. The observation is `settled`, never `timed_out`, so no stop."""
     fake = _fake(monkeypatch, at=20)
@@ -89,7 +87,7 @@ async def test_the_reply_wait_waits_then_settles(
 
 
 async def test_the_reply_wait_ignores_the_push_deadline(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     """The push is long past (a head wait would be settled by its timeout), and the
     thread's deadline is not."""
@@ -104,7 +102,7 @@ async def test_the_reply_wait_ignores_the_push_deadline(
 
 
 async def test_the_reply_wait_records_no_settled_review(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     fake = _fake(monkeypatch, 40, at=20)
 
@@ -114,7 +112,7 @@ async def test_the_reply_wait_records_no_settled_review(
 
 
 async def test_the_reply_wait_writes_the_collection_with_read_at(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     fake = _fake(monkeypatch, 40, at=20)
     wait_clock.advance(60)
@@ -130,7 +128,7 @@ async def test_the_reply_wait_writes_the_collection_with_read_at(
 
 
 async def test_the_reply_wait_still_pushes_and_reads_ci_with_watch_ci(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     fake = _fake(monkeypatch, at=20, ci_states=["pending"])
     ask = _ask(on_branch, watch_ci=True, ci_task="feedback.ci.await_ci")
@@ -142,7 +140,7 @@ async def test_the_reply_wait_still_pushes_and_reads_ci_with_watch_ci(
 
 
 async def test_an_ordinary_wait_never_waits_for_a_reply_deadline(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     """The same feedback with no round: the bot has shown no activity since the push, so
     the head wait is pending on its own terms (not the thread's deadline), and the thread
@@ -160,7 +158,7 @@ async def test_an_ordinary_wait_never_waits_for_a_reply_deadline(
 
 
 async def test_a_bot_resolving_a_thread_after_fixed_in_does_not_extend_the_next_heads_wait(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     """Kraft posts in T1 between two checks of a head wait (the record knows, the first read
     shows no Kraft note) and the bot then resolves it: the thread leaving the read is not bot

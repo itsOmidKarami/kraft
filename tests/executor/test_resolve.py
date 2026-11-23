@@ -77,7 +77,7 @@ async def _two_threads(rig, monkeypatch, verdicts, repairs, *, first_file="repai
     return fake
 
 
-async def test_a_confirmed_fix_the_bot_never_answers_is_resolved(rig, monkeypatch, replies_on):
+async def test_a_confirmed_fix_the_bot_never_answers_is_resolved(rig, monkeypatch):
     fake = await fixed_thread(rig, monkeypatch)
 
     assert fake.writes == [("reply", "T1"), ("resolve", "T1")]  # "Fixed in", then the resolve
@@ -85,7 +85,7 @@ async def test_a_confirmed_fix_the_bot_never_answers_is_resolved(rig, monkeypatc
     assert _outcome(rig) == ("resolved", None)
 
 
-async def test_a_decline_the_bot_never_answers_stays_open(rig, monkeypatch, replies_on):
+async def test_a_decline_the_bot_never_answers_stays_open(rig, monkeypatch):
     fake = await filed(rig, monkeypatch, t1(), bot=on())
     _live(fake, monkeypatch, rig)
     rig.verdicts = [DECLINE]
@@ -97,7 +97,7 @@ async def test_a_decline_the_bot_never_answers_stays_open(rig, monkeypatch, repl
     assert _outcome(rig) == ("left_open", "not_fixed")
 
 
-async def test_an_answered_thread_stays_open(rig, monkeypatch, replies_on):
+async def test_an_answered_thread_stays_open(rig, monkeypatch):
     fake = await filed(rig, monkeypatch, t1(), bot=on())
     _live(fake, monkeypatch, rig)
     rig.verdicts = [
@@ -111,7 +111,7 @@ async def test_an_answered_thread_stays_open(rig, monkeypatch, replies_on):
     assert _outcome(rig) == ("left_open", "not_fixed")
 
 
-async def test_a_decline_repeated_on_a_second_head_stays_open(rig, monkeypatch, replies_on):
+async def test_a_decline_repeated_on_a_second_head_stays_open(rig, monkeypatch):
     """T1 is declined on head 1; T2's fix makes head 2, whose triage declines T1 again. Kraft's
     decline is the thread's last note, so the second is withheld: T1 stays open, T2 is resolved."""
     again = {"findings": [], "replies": [{**DECLINE_T1, "body": "Still the call."}]}
@@ -129,7 +129,7 @@ async def test_a_decline_repeated_on_a_second_head_stays_open(rig, monkeypatch, 
     assert _outcome(rig, "T2") == ("resolved", None)
 
 
-async def test_a_declined_thread_fixed_in_a_later_cycle_is_resolved(rig, monkeypatch, replies_on):
+async def test_a_declined_thread_fixed_in_a_later_cycle_is_resolved(rig, monkeypatch):
     """Declined first, the bot pushes back, the round's triage raises a finding, a cycle fixes it
     and "Fixed in" posts, the bot is silent: Kraft's latest note is the fix."""
     thread = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
@@ -154,7 +154,7 @@ async def test_a_declined_thread_fixed_in_a_later_cycle_is_resolved(rig, monkeyp
     assert _outcome(rig) == ("resolved", None)
 
 
-async def test_a_fix_the_triage_later_declines_stays_open(rig, monkeypatch, replies_on):
+async def test_a_fix_the_triage_later_declines_stays_open(rig, monkeypatch):
     """T1 is fixed and "Fixed in" posts; a later triage (T2's fix makes another head) declines T1:
     withheld, Kraft's note is last, and the thread no longer stands as a confirmed fix."""
     again = {"findings": [], "replies": [{**DECLINE_T1, "body": "Still the call."}]}
@@ -170,7 +170,7 @@ async def test_a_fix_the_triage_later_declines_stays_open(rig, monkeypatch, repl
     assert _outcome(rig, "T1") == ("left_open", "not_fixed")
 
 
-async def test_a_fix_the_bot_pushes_back_on_stays_open(rig, monkeypatch, replies_on):
+async def test_a_fix_the_bot_pushes_back_on_stays_open(rig, monkeypatch):
     """ "Fixed in" posts and the bot answers after every triage's read: nobody judged the answer."""
 
     def tweak(fake):
@@ -193,7 +193,7 @@ async def test_a_fix_the_bot_pushes_back_on_stays_open(rig, monkeypatch, replies
     assert _outcome(rig) == ("left_open", "answer_unread")
 
 
-async def test_resolve_fixed_off_resolves_nothing(rig, monkeypatch, replies_on):
+async def test_resolve_fixed_off_resolves_nothing(rig, monkeypatch):
     fake = await fix_walk(rig, monkeypatch, [], reviewers=(bot_on(),))
 
     assert fake.writes == [("reply", "T1")]  # "Fixed in", and nothing else
@@ -201,7 +201,7 @@ async def test_resolve_fixed_off_resolves_nothing(rig, monkeypatch, replies_on):
     assert _resolve_entries(rig) == []
 
 
-async def test_only_the_bots_with_resolve_fixed_are_resolved(rig, monkeypatch, replies_on):
+async def test_only_the_bots_with_resolve_fixed_are_resolved(rig, monkeypatch):
     """Two bots take replies, one resolves; each has a confirmed fix. The collection files both
     threads under `a`, so the choice is made on who started each thread."""
     keeps = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
@@ -227,7 +227,7 @@ async def test_only_the_bots_with_resolve_fixed_are_resolved(rig, monkeypatch, r
     assert [e["thread"] for e in _resolve_entries(rig)] == ["T1"]
 
 
-async def test_a_bot_answer_nobody_read_is_not_resolved_over(rig, monkeypatch, replies_on):
+async def test_a_bot_answer_nobody_read_is_not_resolved_over(rig, monkeypatch):
     """One round per head: the round's triage reads the bot, which answers again after that read;
     the limit is reached and the node completes with the answer unjudged."""
 
@@ -253,7 +253,7 @@ async def test_a_bot_answer_nobody_read_is_not_resolved_over(rig, monkeypatch, r
     assert _outcome(rig) == ("left_open", "answer_unread")
 
 
-async def test_a_thread_the_bot_resolved_is_left_alone(rig, monkeypatch, replies_on):
+async def test_a_thread_the_bot_resolved_is_left_alone(rig, monkeypatch):
     def tweak(fake):
         read = fake.read_thread
 
@@ -295,7 +295,7 @@ def _resolve_intents(rig) -> list[record.Intent]:
     return [i for i in held.values() if i.payload["op"] == "resolve"]
 
 
-async def test_a_resolve_whose_answer_is_lost_is_not_sent_twice(rig, monkeypatch, replies_on):
+async def test_a_resolve_whose_answer_is_lost_is_not_sent_twice(rig, monkeypatch):
     """The resolve lands and its answer is lost: the intent is unclear. The next posting point
     reconciles it (no marker: not found) and the gate finds the thread resolved: no second write."""
     _repeating(monkeypatch)
@@ -306,7 +306,7 @@ async def test_a_resolve_whose_answer_is_lost_is_not_sent_twice(rig, monkeypatch
     assert (intent.state, intent.why) == ("refused", "resolved")
 
 
-async def test_a_pending_resolve_is_sent_at_the_next_posting_point(rig, monkeypatch, replies_on):
+async def test_a_pending_resolve_is_sent_at_the_next_posting_point(rig, monkeypatch):
     """The forge refuses the first resolve for the rate: the intent stays pending, the thread
     open, and the next posting point sends it again, without a second intent."""
     _repeating(monkeypatch)
@@ -318,7 +318,7 @@ async def test_a_pending_resolve_is_sent_at_the_next_posting_point(rig, monkeypa
     assert fake.writes.count(("resolve", "T1")) == 2  # the refused attempt and the one that landed
 
 
-async def test_a_resolve_intent_is_never_swept_for_a_marker(rig, monkeypatch, replies_on):
+async def test_a_resolve_intent_is_never_swept_for_a_marker(rig, monkeypatch):
     """A resolve sent again after an unclear send is posted with `ever_unclear`; it has no marker,
     so a later posting point never reads the thread to look for a copy of it."""
     _repeating(monkeypatch, times=2)
@@ -345,9 +345,7 @@ async def test_a_resolve_intent_is_never_swept_for_a_marker(rig, monkeypatch, re
     assert not [w for w in fake.writes if w[0] == "delete"]
 
 
-async def test_a_thread_kraft_resolved_is_not_resolved_again_after_a_retry(
-    rig, monkeypatch, replies_on
-):
+async def test_a_thread_kraft_resolved_is_not_resolved_again_after_a_retry(rig, monkeypatch):
     """Kraft resolved T1 in run 1; the run is forked (a retry), someone reopened the thread, and a
     triage of the new run read it. The check reads every run: the thread stays open, `reopened`."""
     calls = _repeating(monkeypatch, times=0)
@@ -410,7 +408,7 @@ def _changed(fake, **change) -> None:
     fake.mr_details = mr_details
 
 
-async def test_the_resolve_gate_checks_the_head_again(rig, monkeypatch, replies_on):
+async def test_the_resolve_gate_checks_the_head_again(rig, monkeypatch):
     """A push lands between the candidate check and the send: the gate reads the merge request
     afresh, sees another head and refuses; nothing is written."""
 
@@ -423,7 +421,7 @@ async def test_the_resolve_gate_checks_the_head_again(rig, monkeypatch, replies_
     assert _outcome(rig) == ("left_open", "head_moved")
 
 
-async def test_the_resolve_gate_refuses_a_closed_merge_request(rig, monkeypatch, replies_on):
+async def test_the_resolve_gate_refuses_a_closed_merge_request(rig, monkeypatch):
 
     def tweak(fake):
         _after_the_intent(monkeypatch, lambda: _changed(fake, state="closed"))
@@ -434,7 +432,7 @@ async def test_the_resolve_gate_refuses_a_closed_merge_request(rig, monkeypatch,
     assert _outcome(rig) == ("left_open", "mr_not_open")
 
 
-async def test_resolve_reads_the_thread_afresh(rig, monkeypatch, replies_on):
+async def test_resolve_reads_the_thread_afresh(rig, monkeypatch):
     """The candidate read shows a settled thread; the gate's read shows a bot answer created
     after the triage read it: refused, no write."""
 
@@ -450,7 +448,7 @@ async def test_resolve_reads_the_thread_afresh(rig, monkeypatch, replies_on):
     assert _outcome(rig) == ("left_open", "answer_unread")
 
 
-async def test_resolve_with_a_stale_head_leaves_threads_open(rig, monkeypatch, replies_on):
+async def test_resolve_with_a_stale_head_leaves_threads_open(rig, monkeypatch):
     """The forge's head is not the triage's once "Fixed in" is up: nothing is resolved on a head
     no triage judged."""
     box = {}
@@ -480,7 +478,7 @@ async def test_resolve_with_a_stale_head_leaves_threads_open(rig, monkeypatch, r
         ),
     ],
 )
-async def test_every_refusal_is_listed_left_open(rig, monkeypatch, replies_on, act, why):
+async def test_every_refusal_is_listed_left_open(rig, monkeypatch, act, why):
     _at_the_resolve(monkeypatch, act)
 
     fake = await fixed_thread(rig, monkeypatch)
@@ -493,7 +491,7 @@ async def _fail(**_):
     raise ForgeError("fake: the read failed")
 
 
-async def test_resolve_only_runs_when_no_round_starts(rig, monkeypatch, replies_on):
+async def test_resolve_only_runs_when_no_round_starts(rig, monkeypatch):
     """ "Fixed in" waits for the bot's answer in a round first: no resolve is written at the
     completion that starts it, only at the one that does not."""
     at_a_round, box = [], {}
@@ -540,9 +538,7 @@ _MEASURED, _JUDGED = ChainEvent.FINDINGS_MEASURED, ChainEvent.JUDGE_VERDICT
         pytest.param({"record": {"findings": []}}, (set(), False), id="nothing-outstanding"),
     ],
 )
-async def test_outstanding_reads_every_source(
-    item_on, database, run_dirs, replies_on, seed, expected
-):
+async def test_outstanding_reads_every_source(item_on, database, run_dirs, seed, expected):
     """Each source that can name a thread, alone: no other source names T1 in a row."""
     it = await item_on([review_node(30, reviewers=(bot_on(),), loop=True)])
     node = store.materialized_chain_of(it.row()).chain.nodes[0]

@@ -120,7 +120,7 @@ async def _verdict(
         "a-bogus-same-as",
     ],
 )
-async def test_the_fix_verdict(item_on, database, run_dirs, replies_on, arguments, expected):
+async def test_the_fix_verdict(item_on, database, run_dirs, arguments, expected):
     assert await _verdict(item_on, database, run_dirs, **arguments) == expected
 
 
@@ -165,7 +165,7 @@ _TRIAGE_REPLY = {
     ],
 )
 async def test_a_fix_reply_waits_for_the_triage_on_its_commit(
-    rig, monkeypatch, replies_on, second, state, writes, ended, posted
+    rig, monkeypatch, second, state, writes, ended, posted
 ):
     fake = await fix_walk(rig, monkeypatch, second, state=state)
 
@@ -177,7 +177,7 @@ async def test_a_fix_reply_waits_for_the_triage_on_its_commit(
         assert fake.threads["T1"].notes[-1].body.startswith(posted.format(sha=sha))
 
 
-async def test_a_fix_reply_needs_its_commit_on_the_forge(rig, monkeypatch, replies_on, repo):
+async def test_a_fix_reply_needs_its_commit_on_the_forge(rig, monkeypatch, repo):
     """A person's force-push dropped the fix: the forge's head is not the cycle's commit."""
     fake = await fix_walk(rig, monkeypatch, [], head=lambda: git(repo, "rev-parse", "HEAD"))
 
@@ -186,7 +186,7 @@ async def test_a_fix_reply_needs_its_commit_on_the_forge(rig, monkeypatch, repli
     assert _ended(rig) == [("superseded", "head_moved")]
 
 
-async def test_a_fix_reply_needs_the_thread_s_file_changed(rig, monkeypatch, replies_on):
+async def test_a_fix_reply_needs_the_thread_s_file_changed(rig, monkeypatch):
     """The repair commits only `repaired.txt`; the thread is on `calc.py`."""
     fake = await fix_walk(
         rig,
@@ -201,7 +201,7 @@ async def test_a_fix_reply_needs_the_thread_s_file_changed(rig, monkeypatch, rep
     assert _ended(rig) == [("superseded", "file_unchanged")]
 
 
-async def test_a_fix_reply_goes_once(rig, monkeypatch, replies_on):
+async def test_a_fix_reply_goes_once(rig, monkeypatch):
     """The CI wait parks after the triage confirmed the fix: later posting points
     see the same fix, and it is written once."""
     fake = await fix_walk(rig, monkeypatch, [], ci_states=("pending",) * 6 + ("success",))
@@ -224,7 +224,7 @@ def _second_triage_copy(rig) -> dict:
     return json.loads(rig.item.files(triages[1]["id"]).bot_feedback.read_text())
 
 
-async def test_the_triage_is_told_which_fix_waits(rig, monkeypatch, replies_on):
+async def test_the_triage_is_told_which_fix_waits(rig, monkeypatch):
     await fix_walk(rig, monkeypatch, [])
 
     short = _of(rig, ChainEvent.FIX_CYCLE_FINISHED)[0]["payload"]["head_sha"][:7]
@@ -233,7 +233,7 @@ async def test_the_triage_is_told_which_fix_waits(rig, monkeypatch, replies_on):
 
 
 async def test_threads_from_a_replies_off_bot_change_nothing(rig, monkeypatch):
-    """No `replies_on`: bot `a` takes none, so the triage's thread ids are dropped and
+    """Bot `a` has replies off and takes none, so the triage's thread ids are dropped and
     the fix loop is as it was before replies."""
     fake = await fix_walk(rig, monkeypatch, [], reviewers=(BotReviewer(bot="a"),))
 
@@ -256,7 +256,7 @@ async def test_threads_from_a_replies_off_bot_change_nothing(rig, monkeypatch):
     assert fake.writes == []
 
 
-async def test_a_failed_read_skips_one_reply_not_the_rest(rig, monkeypatch, replies_on):
+async def test_a_failed_read_skips_one_reply_not_the_rest(rig, monkeypatch):
     t2 = bot_thread("T2", note("N2", "a", "rename y"), file="repaired.txt")
     t1 = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
 
@@ -297,7 +297,7 @@ async def test_a_failed_read_skips_one_reply_not_the_rest(rig, monkeypatch, repl
 
 
 async def test_a_reply_left_unsent_is_never_sent_by_a_later_run(
-    rig, monkeypatch, replies_on, database, run_dirs
+    rig, monkeypatch, database, run_dirs
 ):
     limited = ForgeError("x (HTTP 429)", status=429, reason="rate_limited", retry_after=3600)
 
@@ -332,7 +332,7 @@ async def test_a_reply_left_unsent_is_never_sent_by_a_later_run(
 
 @pytest.mark.parametrize("with_threads", [True, False], ids=["with-threads", "without"])
 async def test_the_repair_is_asked_for_replies_only_when_a_finding_names_a_thread(
-    rig, monkeypatch, replies_on, with_threads
+    rig, monkeypatch, with_threads
 ):
     flag = FLAG if with_threads else {k: v for k, v in FLAG.items() if k != "threads"}
     await fix_walk(rig, monkeypatch, [], flags=[flag], repair={})
@@ -452,7 +452,6 @@ async def test_top_level_declines_go_in_one_comment(
     request,
     rig,
     monkeypatch,
-    replies_on,
     database,
     seed,
     lines,
@@ -516,7 +515,7 @@ def _entries(rig) -> list[tuple]:
 _DECLINE = {"thread": "T1", "kind": "declined", "body": "The caller reads it, so it stays."}
 
 
-async def test_the_reply_report_lists_what_was_and_was_not_posted(rig, monkeypatch, replies_on):
+async def test_the_reply_report_lists_what_was_and_was_not_posted(rig, monkeypatch):
     t1 = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
     t2 = bot_thread(
         "T2", note("N2", "a", "rename y"), note("P", "alice", "I disagree", type_="User")
@@ -544,9 +543,7 @@ async def test_the_reply_report_lists_what_was_and_was_not_posted(rig, monkeypat
     assert first["bot_last_word"] == "rename x" and first["reviewer"] == "bot:a"
 
 
-async def test_a_finding_still_raised_after_its_cycle_is_not_fixed(
-    item_on, database, run_dirs, replies_on
-):
+async def test_a_finding_still_raised_after_its_cycle_is_not_fixed(item_on, database, run_dirs):
     it, node, point, event = await _direct(item_on, database, run_dirs)
     await event(
         ChainEvent.FIX_CYCLE_STARTED,
@@ -582,7 +579,7 @@ def _flag():
     return _findings.Finding(**{k: v for k, v in FLAG.items() if k != "threads"}, threads=("T1",))
 
 
-async def test_a_fix_with_no_reply_is_reported(rig, monkeypatch, replies_on):
+async def test_a_fix_with_no_reply_is_reported(rig, monkeypatch):
     fake = await fix_walk(rig, monkeypatch, [], repair={})
 
     assert fake.writes == []
@@ -592,9 +589,7 @@ async def test_a_fix_with_no_reply_is_reported(rig, monkeypatch, replies_on):
 @pytest.mark.parametrize(
     "report_of", ["feedback", "another"], ids=["this-node-s", "another-node-s"]
 )
-async def test_a_completion_with_replies_off_removes_the_report(
-    rig, monkeypatch, replies_on, report_of
-):
+async def test_a_completion_with_replies_off_removes_the_report(rig, monkeypatch, report_of):
     fake = await filed(rig, monkeypatch, t1(), bot=BotReviewer(bot="a"))
     path = replies.report_path(rig.item.run_dirs, rig.item.id)
     path.parent.mkdir(parents=True, exist_ok=True)

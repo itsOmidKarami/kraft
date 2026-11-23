@@ -57,7 +57,7 @@ async def _two_checks(run_forge, on_branch, monkeypatch, wait_clock, reviewer):
 
 
 async def test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     reviewer = BotReviewer(bot="a", replies=True)
 
@@ -77,7 +77,7 @@ async def test_a_replies_off_wait_never_reads_the_viewer(
 
 
 async def test_a_bot_resolving_a_thread_kraft_replied_in_does_not_settle_the_wait(
-    run_forge, on_branch, monkeypatch, wait_clock, replies_on
+    run_forge, on_branch, monkeypatch, wait_clock
 ):
     """Kraft posts in T1 between two checks (the thread shows no Kraft note), then the bot
     resolves it: the thread leaving the collection is not the bot reviewing the push, so

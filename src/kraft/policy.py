@@ -78,7 +78,7 @@ DEFAULT_ESCALATION_GRANTS = ("git-commit", "git-rebase", "git-push")
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 #: `storage.outputs.max_size` when policy.yaml sets none: 64M.
 DEFAULT_OUTPUTS_MAX_BYTES = 64 << 20
-#: What a missing reply key reads (Part 2's third item): code defaults, so a
+#: What a missing reply key reads: code defaults, so a
 #: `policy.yaml` seeded before the keys, a chain and an item filed before them
 #: all get a value.
 DEFAULT_REPLY_CAP_PER_THREAD = 2

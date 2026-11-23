@@ -1,20 +1,7 @@
-"""Fixtures for Kraft's replies to the review bots, loaded for every test
-through `tests/conftest.py`'s `pytest_plugins`."""
+"""Fixtures for Kraft's replies to the review bots, loaded for every test through
+`tests/conftest.py`'s `pytest_plugins`."""
 
 import pytest
-
-
-@pytest.fixture
-def replies_on(monkeypatch):
-    """Lift the load refusal of `replies: true` (`automated_review.REPLIES_ARRIVED`),
-    as Part 2's third item will. Every test that turns replies on takes it:
-
-        def test_x(replies_on):
-            BotReviewer(bot="a", replies=True)
-    """
-    from kraft import automated_review
-
-    monkeypatch.setattr(automated_review, "REPLIES_ARRIVED", True)
 
 
 @pytest.fixture(autouse=True)

@@ -33,9 +33,7 @@ from kraft.automated_review import BotReviewer
 from kraft.executor import replies, reply_round
 
 
-async def test_a_silent_bot_gets_one_reply_round_then_the_node_completes(
-    rig, monkeypatch, replies_on
-):
+async def test_a_silent_bot_gets_one_reply_round_then_the_node_completes(rig, monkeypatch):
     fake = await filed(rig, monkeypatch, t1())
     live_bot(fake, bot_on(), rig.moment(1), monkeypatch)
     rig.verdicts = [DECLINE]
@@ -72,7 +70,7 @@ def _ci_first(node):
     ids=["shipped", "no-early", "ci-first"],
 )
 async def test_a_reply_round_runs_on_every_shape_that_takes_replies(
-    rig, monkeypatch, replies_on, watch_ci, tweak
+    rig, monkeypatch, watch_ci, tweak
 ):
     """`a-reply-round-runs-instead-of-completing-up-to-the-limit`: the shipped shape (the review
     wait watching CI, an early fix loop, the CI step), a node with neither, and one that
@@ -110,9 +108,7 @@ def _red_after_the_triage_until_repaired(fake, rig):
     fake.ci_status = ci_status
 
 
-async def test_a_round_starts_from_the_exit_after_a_passing_on_failure(
-    rig, monkeypatch, replies_on
-):
+async def test_a_round_starts_from_the_exit_after_a_passing_on_failure(rig, monkeypatch):
     """The first measurement's CI is red, `on_failure` repairs it and its re-measure passes, and
     the thread Kraft declined is still owed: a round starts from that exit."""
     fake = await filed(rig, monkeypatch, t1(), watch_ci=True)
@@ -140,7 +136,7 @@ def _with_a_judge(node):
     }
 
 
-async def test_a_round_starts_from_the_judge_s_stop_downgrade_exit(rig, monkeypatch, replies_on):
+async def test_a_round_starts_from_the_judge_s_stop_downgrade_exit(rig, monkeypatch):
     """T1 is flagged and fixed, then raised again and the judge downgrades it: the node would
     complete, but T2, which Kraft declined, is still owed: a round starts from that exit."""
     t2 = bot_thread("T2", note("N2", "a", "rename y"))
@@ -192,9 +188,7 @@ async def _walk_answering(rig, fake, answers, *, walks=14, step=63):
         pytest.param([], [("reply", "T1")], 1, id="answer-the-triage-accepts"),
     ],
 )
-async def test_a_bot_answer_is_judged_in_the_same_run(
-    rig, monkeypatch, replies_on, second, replies, rounds
-):
+async def test_a_bot_answer_is_judged_in_the_same_run(rig, monkeypatch, second, replies, rounds):
     """The bot answers Kraft's decline while the round waits: the round's triage reads it. A
     second decline is posted (and, the bot being silent after it, a second round waits for it);
     an answer the triage accepts ends the conversation."""
@@ -214,7 +208,7 @@ def _report_entries(rig, **match):
     return [e for e in report_of(rig)["entries"] if all(e.get(k) == v for k, v in match.items())]
 
 
-async def test_the_per_head_limit_ends_the_conversation(rig, monkeypatch, replies_on):
+async def test_the_per_head_limit_ends_the_conversation(rig, monkeypatch):
     """With one round per head and a bot that answers every time, the round runs once and the node
     then completes: the thread still owed is listed as `owed_at_limit`, with one round event."""
     fake = await filed(rig, monkeypatch, t1(), policy={"reply_rounds_per_head": 1})
@@ -231,7 +225,7 @@ async def test_the_per_head_limit_ends_the_conversation(rig, monkeypatch, replie
     assert "limit 1" in entry["why"]
 
 
-async def test_an_owed_at_limit_entry_carries_the_unread_answer(rig, monkeypatch, replies_on):
+async def test_an_owed_at_limit_entry_carries_the_unread_answer(rig, monkeypatch):
     """The bot answers after the round's triage read the thread, before the node completes: at the
     limit, the entry's last word is that answer, which no triage's copy of the thread holds."""
     fake = await filed(rig, monkeypatch, t1(), policy={"reply_rounds_per_head": 1})
@@ -255,9 +249,7 @@ async def test_an_owed_at_limit_entry_carries_the_unread_answer(rig, monkeypatch
     assert (entry["outcome"], entry["bot_last_word"]) == ("owed_at_limit", "One more thing.")
 
 
-async def test_a_reply_round_report_keeps_what_an_earlier_measurement_found(
-    rig, monkeypatch, replies_on
-):
+async def test_a_reply_round_report_keeps_what_an_earlier_measurement_found(rig, monkeypatch):
     """T1 is flagged below the loop's severities (never fixed), T2 is declined and owed a look; the
     round's triage is skipped, so the last record holds no finding: the report still names T1."""
     t2 = bot_thread("T2", note("N2", "a", "rename y"))
@@ -280,7 +272,7 @@ async def test_a_reply_round_report_keeps_what_an_earlier_measurement_found(
     )
 
 
-async def test_a_waiting_fix_reply_survives_a_round(rig, monkeypatch, replies_on):
+async def test_a_waiting_fix_reply_survives_a_round(rig, monkeypatch):
     """T1 is fixed but its commit is never pushed (no CI step), so its "Fixed in" waits; T2,
     declined, is owed a look and starts a round at the completion exit. The fix reply is neither
     ended nor posted there, and is ended only when the node finally completes."""
@@ -308,7 +300,7 @@ async def test_a_waiting_fix_reply_survives_a_round(rig, monkeypatch, replies_on
     assert fake.writes == [("reply", "T2")]
 
 
-async def test_a_node_with_no_fix_loop_never_starts_a_round(rig, monkeypatch, replies_on):
+async def test_a_node_with_no_fix_loop_never_starts_a_round(rig, monkeypatch):
     """Nothing here can act on an answer: replies are inert on a node with no fix loop, and no round
     starts."""
     fake = await filed(rig, monkeypatch, t1(), loop=False)
@@ -340,9 +332,7 @@ async def test_replies_off_starts_no_round_and_reads_nothing(rig, monkeypatch):
     assert events_of(rig, "reply_round_started") == [] and reads == []
 
 
-async def test_the_owed_check_makes_no_forge_call_without_a_posted_reply(
-    rig, monkeypatch, replies_on
-):
+async def test_the_owed_check_makes_no_forge_call_without_a_posted_reply(rig, monkeypatch):
     """Replies are on, but the triage writes none: at completion nothing is read for a round."""
     fake = await filed(rig, monkeypatch, t1())
     reads = counting(fake, monkeypatch, "read_thread")
@@ -398,7 +388,7 @@ def _read_thread_raises_after_the_reply(fake):
     ids=["viewer-unreadable", "merge-request-closed", "read-thread-raises"],
 )
 async def test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed(
-    rig, monkeypatch, replies_on, cannot, listed
+    rig, monkeypatch, cannot, listed
 ):
     """What the owed check cannot read at the end of the node is not owed: the node completes with
     no round and nothing parked, and the report lists the thread it could not read (a closed merge
@@ -418,9 +408,7 @@ async def test_an_unreadable_viewer_closed_request_or_failed_read_is_not_owed(
     )
 
 
-async def test_an_error_in_the_round_decision_still_completes_the_node(
-    rig, monkeypatch, replies_on
-):
+async def test_an_error_in_the_round_decision_still_completes_the_node(rig, monkeypatch):
     """A failure while deciding the round completes the node as if none were owed: what waits is
     ended and the report is written."""
     t2 = bot_thread("T2", note("N2", "a", "rename y"))
@@ -444,7 +432,7 @@ async def test_an_error_in_the_round_decision_still_completes_the_node(
     assert {e["thread"] for e in report_of(rig)["entries"]} >= {"T1", "T2"}
 
 
-async def test_the_owed_check_reads_the_review_tasks_timeout(rig, monkeypatch, replies_on):
+async def test_the_owed_check_reads_the_review_tasks_timeout(rig, monkeypatch):
     """The review task allows the bot a minute: Kraft's reply, a minute old and unanswered, is not
     owed (the node's own five minutes would call it owed), so no round starts."""
 
@@ -462,7 +450,7 @@ async def test_the_owed_check_reads_the_review_tasks_timeout(rig, monkeypatch, r
     assert fake.writes == [("reply", "T1")]
 
 
-async def test_an_answer_at_the_cap_is_read_and_judged_not_answered(rig, monkeypatch, replies_on):
+async def test_an_answer_at_the_cap_is_read_and_judged_not_answered(rig, monkeypatch):
     """With one reply allowed per thread, the bot answers Kraft's one: a round still runs, the
     triage reads the answer and writes another decline, and the gate refuses it at the cap."""
     fake = await filed(rig, monkeypatch, t1(), policy={"reply_cap_per_thread": 1})
@@ -505,7 +493,7 @@ def _ci_task_waits(rig):
 
 
 async def test_a_pending_pipeline_in_a_reply_round_completes_at_the_reply_deadline(
-    rig, monkeypatch, replies_on
+    rig, monkeypatch
 ):
     """`a-reply-round-never-stops-the-item-on-pending-ci`: a check a reply's workflow added keeps
     the head's CI pending through the round. The CI look parks while the round has time, then
@@ -530,7 +518,7 @@ async def test_a_pending_pipeline_in_a_reply_round_completes_at_the_reply_deadli
     assert started["payload"]["deadline"] and fake.writes == [("reply", "T1")]
 
 
-async def test_a_pipeline_that_goes_red_in_a_reply_round_still_fails(rig, monkeypatch, replies_on):
+async def test_a_pipeline_that_goes_red_in_a_reply_round_still_fails(rig, monkeypatch):
     """The same pending check goes red before the round's time is up: the round's measurement fails
     and takes the node's `on_failure`, as any measurement's red pipeline does."""
     fake = await filed(rig, monkeypatch, t1(), watch_ci=True, tweak=_early)
@@ -548,7 +536,7 @@ async def test_a_pipeline_that_goes_red_in_a_reply_round_still_fails(rig, monkey
 
 
 async def test_a_reply_posted_on_one_head_is_read_on_the_next(
-    item_on, database, run_dirs, monkeypatch, replies_on
+    item_on, database, run_dirs, monkeypatch
 ):
     """The candidates are the threads Kraft ever posted a reply of this node in, whatever head the
     reply was made on: the bot's answer, created after the latest triage's read of the thread on

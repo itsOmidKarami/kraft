@@ -37,7 +37,7 @@ def _declined(body):
     return {"findings": [], "replies": [{**DECLINE["replies"][0], "body": body}]}
 
 
-async def test_a_cap_of_three_allows_a_third(rig, monkeypatch, replies_on):
+async def test_a_cap_of_three_allows_a_third(rig, monkeypatch):
     """The item's own cap of three replies per thread lets the bot's second answer, read in the
     second round, be met with a third decline."""
     fake = await filed(rig, monkeypatch, t1(), policy={"reply_cap_per_thread": 3})
@@ -51,7 +51,7 @@ async def test_a_cap_of_three_allows_a_third(rig, monkeypatch, replies_on):
     assert len(events_of(rig, "reply_round_started")) == 2
 
 
-async def test_a_crash_inside_a_reply_round_resumes_it(rig, monkeypatch, replies_on):
+async def test_a_crash_inside_a_reply_round_resumes_it(rig, monkeypatch):
     """The process dies the moment the round starts, before its first step: the cursor is at the
     round's first step (not where the node's last measurement ended), so a fresh `executor.run`
     resumes the round itself: no second round event, the wait runs, and the triage was launched
@@ -83,9 +83,7 @@ async def test_a_crash_inside_a_reply_round_resumes_it(rig, monkeypatch, replies
     assert len(_round_records(rig)) == 1
 
 
-async def test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery(
-    rig, monkeypatch, replies_on
-):
+async def test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery(rig, monkeypatch):
     """The round's CI goes red: `on_failure` runs once, its re-measure passes on the same head and
     the node completes. The one round counts toward the limit, and its event's round is the loop
     counter's count, never the repair's."""
@@ -118,9 +116,7 @@ def _red_in_the_round_until_fixed(fake, rig, fixes):
     fake.ci_status = ci_status
 
 
-async def test_after_a_fix_cycle_a_red_round_goes_straight_to_the_fix_loop(
-    rig, monkeypatch, replies_on
-):
+async def test_after_a_fix_cycle_a_red_round_goes_straight_to_the_fix_loop(rig, monkeypatch):
     """The recovery is for the first measurement of an entry: a round that follows a fix cycle and
     goes red does not run `on_failure` again, it enters the fix loop."""
     t2 = bot_thread("T2", note("N2", "a", "rename y"))
@@ -143,7 +139,7 @@ async def test_after_a_fix_cycle_a_red_round_goes_straight_to_the_fix_loop(
     assert len(heads) == 2 and len(set(heads)) == 2
 
 
-async def test_a_new_head_is_never_in_a_reply_round(rig, monkeypatch, replies_on):
+async def test_a_new_head_is_never_in_a_reply_round(rig, monkeypatch):
     """The head moves while a round waits: the next measurement is an ordinary one of the new head,
     with Part 1's full head wait and skip rule and a CI look bounded by the CI wait's own time."""
     fake = await filed(rig, monkeypatch, t1(), watch_ci=True, tweak=_early)

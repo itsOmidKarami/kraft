@@ -199,7 +199,7 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
     ids=["gh-replies-on", "gh-replies-off", "gh-a-changes-requested-reply"],
 )
 async def test_a_reply_only_review_is_not_the_bot_s_review_where_kraft_replies(
-    cli, tmp_path, replies_on, replies, reply_state, expected
+    cli, tmp_path, replies, reply_state, expected
 ):
     """Where nothing collects there are no Kraft facts: a blank `COMMENTED` review
     made only of replies is the bot answering a thread, so the review before it
@@ -428,29 +428,27 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
 
 
 @pytest.mark.parametrize(
-    ("entry", "kind", "refused_at", "flag"),
+    ("entry", "kind", "refused_at"),
     [
-        ({"bot": "x", "check": None}, BotReviewer, None, False),
-        ({"check": "c", "bot": None}, CheckReviewer, None, False),
-        ({"check": "c", "replies": True}, None, ("check", "replies"), False),
-        ({"bot": "x", "replies": True}, None, ("bot", "replies"), False),
-        ({"bot": "x", "replies": True}, BotReviewer, None, True),
-        ({"bot": "x", "replies": False}, BotReviewer, None, False),
-        ({"check": "c", "replies": True}, None, ("check", "replies"), True),
-        ({"bot": "x", "replies": True, "resolve_fixed": True}, BotReviewer, None, True),
-        ({"bot": "x", "resolve_fixed": True}, None, ("bot",), True),
-        ({"bot": "x", "replies": True, "resolve_fixed": False}, BotReviewer, None, True),
-        ({"check": "c", "resolve_fixed": True}, None, ("check", "resolve_fixed"), True),
-        ({"bot": "x", "replies": True, "resolve": "kraft"}, None, ("bot", "resolve"), True),
+        ({"bot": "x", "check": None}, BotReviewer, None),
+        ({"check": "c", "bot": None}, CheckReviewer, None),
+        ({"check": "c", "replies": True}, None, ("check", "replies")),
+        ({"check": "c", "replies": True, "resolve_fixed": True}, None, ("check", "replies")),
+        ({"bot": "x", "replies": True}, BotReviewer, None),
+        ({"bot": "x", "replies": False}, BotReviewer, None),
+        ({"bot": "x", "replies": True, "resolve_fixed": True}, BotReviewer, None),
+        ({"bot": "x", "resolve_fixed": True}, None, ("bot",)),
+        ({"bot": "x", "replies": True, "resolve_fixed": False}, BotReviewer, None),
+        ({"check": "c", "resolve_fixed": True}, None, ("check", "resolve_fixed")),
+        ({"bot": "x", "replies": True, "resolve": "kraft"}, None, ("bot", "resolve")),
     ],
     ids=[
         "stored-bot-with-a-null-check",
         "stored-check-with-a-null-bot",
         "a-check-with-a-key-it-lacks",
-        "a-bot-with-replies-before-they-arrive",
+        "a-check-with-replies",
         "a-bot-with-replies",
         "a-bot-with-replies-off",
-        "a-check-with-replies-after-they-arrive",
         "a-bot-with-resolve-fixed",
         "a-bot-with-resolve-needs-replies",
         "a-bot-with-resolve-fixed-off",
@@ -458,20 +456,16 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
         "a-bot-with-the-old-resolve-key",
     ],
 )
-def test_a_reviewer_entry_is_a_bot_or_a_check(request, entry, kind, refused_at, flag):
-    """`reviewer-entry-is-a-bot-or-a-check`: every stored list holds the other
-    name as null, and loads; a key is checked against the entry's own kind.
-    `replies-are-refused-until-the-conversation-arrives`: a bot's `replies: true`
-    is refused until the flag lifts it, a check never takes it, and a dump leaves
-    `replies: false` out."""
-    if flag:
-        request.getfixturevalue("replies_on")
+def test_a_reviewer_entry_is_a_bot_or_a_check(entry, kind, refused_at):
+    """`reviewer-entry-is-a-bot-or-a-check`: every stored list holds the other name as null, and
+    loads; a key is checked against the entry's own kind.
+    `a-bot-reviewer-entry-takes-replies-and-resolve-fixed`: a bot takes both keys, a check never
+    does, `resolve_fixed` needs `replies`, the old `resolve` key is refused and a dump leaves a
+    key out at False."""
     if kind is None:
         with pytest.raises(ValidationError) as refused:
             as_reviewers([entry])
         assert refused.value.errors()[0]["loc"] == refused_at
-        if refused_at == ("bot", "replies"):
-            assert "arrives in a later release" in str(refused.value)
         if refused_at == ("bot",):
             assert "needs `replies: true`" in str(refused.value)
         return
@@ -481,8 +475,22 @@ def test_a_reviewer_entry_is_a_bot_or_a_check(request, entry, kind, refused_at, 
     assert (read.bot, read.check) == (entry.get("bot"), entry.get("check"))
 
 
-def test_the_schema_does_not_offer_replies_before_they_arrive():
-    """`replies-are-refused-until-the-conversation-arrives`: VS Code never
-    suggests a key the loader refuses (item 3 lifts both)."""
+def test_the_schema_offers_replies_and_resolve():
+    """VS Code suggests both keys of a bot entry, and neither on a check."""
     for mode in ("validation", "serialization"):
-        assert "replies" not in BotReviewer.model_json_schema(mode=mode)["properties"]
+        assert {"replies", "resolve_fixed"} <= set(
+            BotReviewer.model_json_schema(mode=mode)["properties"]
+        )
+        assert not {"replies", "resolve_fixed"} & set(
+            CheckReviewer.model_json_schema(mode=mode)["properties"]
+        )
+
+
+def test_repos_yaml_loads_a_bot_with_replies_and_resolve(tmp_path):
+    repos = tmp_path / "repos.yaml"
+    entry = {"bot": "coderabbitai", "replies": True, "resolve_fixed": True}
+    repos.write_text(json.dumps({"repos": [{"path": "/r", "automated_review": [entry]}]}))
+
+    [loaded] = config.load_repos(repos)
+
+    assert as_reviewers(loaded.automated_review) == (BotReviewer(**entry),)

@@ -115,7 +115,7 @@ DECLINE = {
 
 
 def bot_on(resolve_fixed=False):
-    """Bot `a` with replies on (the test takes `replies_on`), and `resolve_fixed` as given."""
+    """Bot `a` with replies on, and `resolve_fixed` as given."""
     return BotReviewer(bot="a", replies=True, resolve_fixed=resolve_fixed)
 
 

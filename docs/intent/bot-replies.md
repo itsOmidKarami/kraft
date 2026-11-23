@@ -137,14 +137,16 @@ it kept, at later posting points, within the posting point's time budget.
 enforced-by: tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-moves-to-the-earliest], tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-holds-the-earliest], tests/adapters/forge/replies/test_send.py::test_the_sweep_reads_nothing_past_its_budget
 origin: src/kraft/adapters/forge/replies/send.py
 
-## REQ replies-are-refused-until-the-conversation-arrives
-WHILE the reply round and its limits have not shipped, IF a bot reviewer entry
-sets `replies: true` in a task's `config`, `repos.yaml` or a node override, THEN
-the system SHALL refuse it, naming that it arrives in a later release. A check
-entry SHALL never take `replies`, and an entry's dump SHALL leave `replies` out
-when it is false.
-enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-before-they-arrive], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-replies-after-they-arrive], tests/adapters/forge/test_automated_review.py::test_the_schema_does_not_offer_replies_before_they_arrive, tests/test_overrides.py::test_replies_before_they_arrive_is_refused_in_its_own_words
-origin: src/kraft/automated_review.py §BotReviewer -- Omid, 2026-11-20: refuse `replies: true` at load until the third Part 2 item lands.
+## REQ a-bot-reviewer-entry-takes-replies-and-resolve-fixed
+WHERE a bot reviewer entry is named in a task's `config`, in `repos.yaml` or in a
+node override, the system SHALL accept `replies` and `resolve_fixed` on it, leave
+each out of the entry's dump when it is false, and refuse `resolve_fixed` without
+`replies: true` on the same entry, in its own words. A check entry SHALL never
+take either key, the old `resolve: kraft` SHALL be refused as an unknown key, and
+the schema and the `--reviewer` flag (`bot:LOGIN[:replies[:resolve_fixed]]`) SHALL
+offer both keys, the Settings repos editor keeping them through a save.
+enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-fixed], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-needs-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-fixed-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-the-old-resolve-key], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-resolve-fixed], tests/adapters/forge/test_automated_review.py::test_the_schema_offers_replies_and_resolve, tests/adapters/forge/test_automated_review.py::test_repos_yaml_loads_a_bot_with_replies_and_resolve, tests/test_overrides.py::test_resolve_without_replies_is_refused_in_its_own_words, tests/test_overrides.py::test_replies_are_accepted_in_a_node_override, tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-and-a-check], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[none-sends-empty], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies-and-resolve-fixed], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-check-whose-name-holds-a-colon], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[not-a-kind], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[an-unknown-option], tests/cli/test_item_reviewers.py::test_a_malformed_reviewer_flag_is_an_argument_error[the-old-resolve-form], tests/drafts/test_repos.py::test_a_save_keeps_the_yaml_only_automated_review_as_written
+origin: src/kraft/automated_review.py §BotReviewer -- Omid, 2026-11-22: only a confirmed fix is resolved, so the key is `resolve_fixed`, a boolean.
 
 ## REQ a-finding-names-only-threads-on-its-own-file
 WHEN a reviewer's result file names review-bot threads on a finding, the system

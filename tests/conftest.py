@@ -30,7 +30,7 @@ from kraft.paths import RunDirs
 pytest_plugins = [
     f"support.{m}"
     for m in ("rig_fixtures", "local_worker", "redaction", "agent_shell", "forge_probe")
-    + ("basetemp", "replies_on")
+    + ("basetemp", "reply_spacing")
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

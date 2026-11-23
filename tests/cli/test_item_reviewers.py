@@ -44,9 +44,7 @@ def _node_overrides(capsys, wid: str) -> dict:
         "a-check-whose-name-holds-a-colon",
     ],
 )
-def test_a_node_gets_its_reviewers_from_the_terminal(
-    app, monkeypatch, capsys, repo, flags, stored, replies_on
-):
+def test_a_node_gets_its_reviewers_from_the_terminal(app, monkeypatch, capsys, repo, flags, stored):
     connect_repo(repo)
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "t", "--json"])

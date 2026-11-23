@@ -207,7 +207,7 @@ def test_a_collection_names_each_reviewer_with_its_threads_and_failed_check():
     assert (first["replies"], second["replies"]) == (False, False)
 
 
-def test_a_collection_says_which_bots_take_replies(replies_on):
+def test_a_collection_says_which_bots_take_replies():
     feedback = ReviewerFeedback(BotReviewer(bot="a", replies=True), at(1), (), ())
 
     assert decide([feedback], now=100).collection[0]["replies"] is True
@@ -317,8 +317,7 @@ def _kraft_said(nid, seconds):
 
 
 def _replying(*threads, replies=True):
-    """One bot's feedback whose threads are `(id, notes)`, built in the test (the
-    `replies_on` fixture lifts the load refusal of `replies: true` first)."""
+    """One bot's feedback whose threads are `(id, notes)`, built in the test."""
     return lambda: ReviewerFeedback(
         BotReviewer(bot="x", replies=replies),
         None,
@@ -397,7 +396,7 @@ _PERSON = (
         ),
     ],
 )
-def test_the_reply_wait_is_done_when(replies_on, feedback, threads, now, expected):
+def test_the_reply_wait_is_done_when(feedback, threads, now, expected):
     got = settle.reply_wait(
         [build() for build in feedback],
         owed.ReplyWait(threads, _TIMEOUT),

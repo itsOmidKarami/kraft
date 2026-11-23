@@ -151,9 +151,6 @@ def _errors(
         if field == "auto_escalate_delay_s":
             return ["auto_escalate_delay_s must be a non-negative int"]
         if field == "reviewers":
-            later = next((e["msg"] for e in errors if "later release" in e["msg"]), None)
-            if later is not None:
-                return [f"reviewers: {later.removeprefix('Value error, ')}"]
             needs = next((e["msg"] for e in errors if "needs `replies: true`" in e["msg"]), None)
             if needs is not None:
                 return [f"reviewers: {needs.removeprefix('Value error, ')}"]

@@ -20,16 +20,9 @@ from pydantic import (
     StrictStr,
     Tag,
     TypeAdapter,
-    field_validator,
     model_serializer,
     model_validator,
 )
-from pydantic.json_schema import SkipJsonSchema
-
-#: Whether a bot entry may turn replies on. False until the reply round, the
-#: policy keys and the user docs land: Part 2's third item deletes this flag and
-#: the refusal below. Tests set it (`replies_on`).
-REPLIES_ARRIVED = False
 
 
 class _Reviewer(BaseModel):
@@ -49,21 +42,12 @@ class BotReviewer(_Reviewer):
 
     bot: StrictStr = Field(min_length=1)
     #: Kraft replies in this bot's threads and posts its summary comment
-    #: (`executor.replies`). Left out of the schema until it can be turned on.
-    replies: SkipJsonSchema[StrictBool] = False
+    #: (`executor.replies`).
+    replies: StrictBool = False
     #: Kraft resolves a thread only when it is a confirmed fix, at node completion
     #: (`executor.replies`). Needs `replies`.
-    resolve_fixed: SkipJsonSchema[StrictBool] = False
+    resolve_fixed: StrictBool = False
     check: ClassVar[None] = None
-
-    @field_validator("replies")
-    @classmethod
-    def _not_yet(cls, value: bool) -> bool:
-        # Read at validation time: a reviewer rebuilt from stored JSON or a frozen
-        # chain is checked the same way in a test as in production.
-        if value and not REPLIES_ARRIVED:
-            raise ValueError("`replies` arrives in a later release of Kraft")
-        return value
 
     @model_validator(mode="after")
     def _resolve_needs_replies(self) -> BotReviewer:

@@ -11,6 +11,16 @@
         },
         "check": {
           "type": "null"
+        },
+        "replies": {
+          "default": false,
+          "title": "Replies",
+          "type": "boolean"
+        },
+        "resolve_fixed": {
+          "default": false,
+          "title": "Resolve Fixed",
+          "type": "boolean"
         }
       },
       "required": [
