@@ -14,7 +14,7 @@ from kraft.paths import config_dir
 from kraft.vocab import SandboxEvent
 from kraft.worker.backends import docker
 
-IMAGE = "docker.io/library/alpine:3"
+IMAGE = "public.ecr.aws/docker/library/alpine:3"
 
 
 def _unavailable(cli: str, why: str):

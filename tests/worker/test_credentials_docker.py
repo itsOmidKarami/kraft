@@ -37,7 +37,7 @@ from worker.test_egress_docker import (  # noqa: F401
     short_run,
 )
 
-IMAGE = "docker.io/curlimages/curl:latest"
+IMAGE = "quay.io/curl/curl:latest"
 REAL = "sk-real-e2e-7f3a9c"
 SENTINEL = "sk-sentinel-e2e"
 CREDENTIAL = SandboxCredential.model_validate(
@@ -159,7 +159,7 @@ def _cli_image(cli: str, harness_id: str) -> str:
     if subprocess.run([cli, "image", "inspect", tag], capture_output=True).returncode == 0:
         return tag
     containerfile = (
-        "FROM docker.io/library/node:22-slim\n"
+        "FROM public.ecr.aws/docker/library/node:22-slim\n"
         "RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates"
         " curl && rm -rf /var/lib/apt/lists/*\n"
         f"RUN npm install -g {_CLI_PACKAGES[harness_id]}\n"
