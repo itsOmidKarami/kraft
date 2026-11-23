@@ -603,8 +603,9 @@ def build() -> MCPServer:
         with (above the item-wide `set_agent_overrides`), an `extra_prompt`
         appended to each of their instructions (a person's to set: refused
         from an MCP session; `clear` drops it with the rest), and the `reviewers` its
-        automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
-        over the repository's; `[]` expects none) -- without touching the Policy
+        automated-review wait reads (each `{"bot": LOGIN, "replies": bool,
+        "resolve_fixed": bool}` or `{"check": NAME}`, over the repository's; `[]` expects none;
+        `resolve_fixed` needs `replies`) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `runner` is
         where the node's steps run: a machine or a group from workers.yaml,

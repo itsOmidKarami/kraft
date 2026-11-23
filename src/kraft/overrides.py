@@ -154,7 +154,12 @@ def _errors(
             later = next((e["msg"] for e in errors if "later release" in e["msg"]), None)
             if later is not None:
                 return [f"reviewers: {later.removeprefix('Value error, ')}"]
-            return ["reviewers must be a list of {bot: LOGIN} or {check: NAME}"]
+            needs = next((e["msg"] for e in errors if "needs `replies: true`" in e["msg"]), None)
+            if needs is not None:
+                return [f"reviewers: {needs.removeprefix('Value error, ')}"]
+            return [
+                "reviewers must be a list of {bot: LOGIN, replies, resolve_fixed} or {check: NAME}"
+            ]
         return [f"{field} must be a positive int"]
     return []
 

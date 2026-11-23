@@ -696,7 +696,8 @@ async def set_node_overrides(
     chain template sets per node -- without touching either of those -- plus
     the `model`/`effort` its agent tasks launch with and an `extra_prompt`
     appended to each of their instructions (Kraft-a7ers), and the `reviewers`
-    its automated-review wait reads, over the repository's. `clear`
+    its automated-review wait reads (each `{bot: LOGIN, replies, resolve_fixed}` or
+    `{check: NAME}`), over the repository's. `clear`
     sends `{}` for this node, dropping its overrides back to the template;
     naming a field sets it and keeps the node's other fields, as it always
     has (the PATCH route merges a node's fields). 409s once the node has

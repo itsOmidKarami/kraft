@@ -437,6 +437,11 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
         ({"bot": "x", "replies": True}, BotReviewer, None, True),
         ({"bot": "x", "replies": False}, BotReviewer, None, False),
         ({"check": "c", "replies": True}, None, ("check", "replies"), True),
+        ({"bot": "x", "replies": True, "resolve_fixed": True}, BotReviewer, None, True),
+        ({"bot": "x", "resolve_fixed": True}, None, ("bot",), True),
+        ({"bot": "x", "replies": True, "resolve_fixed": False}, BotReviewer, None, True),
+        ({"check": "c", "resolve_fixed": True}, None, ("check", "resolve_fixed"), True),
+        ({"bot": "x", "replies": True, "resolve": "kraft"}, None, ("bot", "resolve"), True),
     ],
     ids=[
         "stored-bot-with-a-null-check",
@@ -446,6 +451,11 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
         "a-bot-with-replies",
         "a-bot-with-replies-off",
         "a-check-with-replies-after-they-arrive",
+        "a-bot-with-resolve-fixed",
+        "a-bot-with-resolve-needs-replies",
+        "a-bot-with-resolve-fixed-off",
+        "a-check-with-resolve-fixed",
+        "a-bot-with-the-old-resolve-key",
     ],
 )
 def test_a_reviewer_entry_is_a_bot_or_a_check(request, entry, kind, refused_at, flag):
@@ -462,6 +472,8 @@ def test_a_reviewer_entry_is_a_bot_or_a_check(request, entry, kind, refused_at, 
         assert refused.value.errors()[0]["loc"] == refused_at
         if refused_at == ("bot", "replies"):
             assert "arrives in a later release" in str(refused.value)
+        if refused_at == ("bot",):
+            assert "needs `replies: true`" in str(refused.value)
         return
     (read,) = as_reviewers([entry])
     assert type(read) is kind

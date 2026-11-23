@@ -51,6 +51,9 @@ class BotReviewer(_Reviewer):
     #: Kraft replies in this bot's threads and posts its summary comment
     #: (`executor.replies`). Left out of the schema until it can be turned on.
     replies: SkipJsonSchema[StrictBool] = False
+    #: Kraft resolves a thread only when it is a confirmed fix, at node completion
+    #: (`executor.replies`). Needs `replies`.
+    resolve_fixed: SkipJsonSchema[StrictBool] = False
     check: ClassVar[None] = None
 
     @field_validator("replies")
@@ -62,13 +65,21 @@ class BotReviewer(_Reviewer):
             raise ValueError("`replies` arrives in a later release of Kraft")
         return value
 
+    @model_validator(mode="after")
+    def _resolve_needs_replies(self) -> BotReviewer:
+        if self.resolve_fixed and not self.replies:
+            raise ValueError("`resolve_fixed` needs `replies: true` on the same entry")
+        return self
+
     @model_serializer(mode="wrap")
     def _quiet_default(self, handler):
         # Stored snapshots and saved templates keep writing `{bot: x}`. No return
         # annotation: one would replace the serialization schema with a bare object.
         data = handler(self)
-        if isinstance(data, dict) and not data.get("replies"):
-            data.pop("replies", None)
+        if isinstance(data, dict):
+            for key in ("replies", "resolve_fixed"):
+                if not data.get(key):
+                    data.pop(key, None)
         return data
 
 
@@ -78,6 +89,7 @@ class CheckReviewer(_Reviewer):
     check: StrictStr = Field(min_length=1)
     bot: ClassVar[None] = None
     replies: ClassVar[bool] = False
+    resolve_fixed: ClassVar[bool] = False
 
 
 def _which(value: object) -> str | None:
