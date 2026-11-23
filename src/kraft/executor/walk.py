@@ -2179,10 +2179,10 @@ async def _walk_node_once(
             is None
         ):
             # Once per entry into this node, and only ahead of the very first
-            # cycle: `recover_node` re-measures for real, so a repair that
-            # resolved things costs nothing further here, and one that didn't
-            # falls straight through to the normal fix cycle below with the
-            # failure it actually is.
+            # cycle: `recover_node` re-measures for real, and that measurement is
+            # read below like any other, so a repair that resolved things costs
+            # nothing further and one that didn't reaches the normal fix cycle
+            # with the failure it actually is.
             _repair_tried = True
             r_verdict, r_failed, r_excs = await recover_node(
                 db,
@@ -2235,34 +2235,6 @@ async def _walk_node_once(
                     round=_REPAIR_ROUND,
                     loop_severities=loop_severities,
                 )
-            if r_verdict == "ok":
-                if loop.early:
-                    await db.write(lambda c: store.end_measurement(c, work_item_id))
-                if (
-                    started := await _replies.posting_point(
-                        db,
-                        run_dirs,
-                        work_item_id,
-                        node,
-                        row,
-                        worktree,
-                        launch,
-                        completing=True,
-                        loop_key=key,
-                    )
-                ) is not None:
-                    # A reply round is a fresh measurement: no doubt and no old exception
-                    # carries into it.
-                    round, resume_step, repair_doubted, fix_excs = started.round, 0, [], []
-                    continue
-                await node_runs.completed(
-                    db,
-                    Path(worktree) if worktree else None,
-                    work_item_id,
-                    node.id,
-                    run_dirs=run_dirs,
-                )
-                return "ok"
             if r_verdict == REPAIR_DOUBTED:
                 # The repair says the failure needs a code fix, which is this
                 # loop's work (Kraft-yi005). Nothing was re-measured, so
@@ -2272,11 +2244,13 @@ async def _walk_node_once(
                 # repair's concerns before the first cycle is paid for.
                 repair_doubted = dispatch.repair_doubts(db, work_item_id, node, r_failed)
             else:
-                # Only "failed" and ENDED_EARLY reach here, and that fall-through is
-                # deliberate: the repair ran, didn't resolve things, and the ordinary
-                # paid fix cycle below should now see the failure for what it actually
-                # is. An early end of the re-measure goes to the fix loop at round -1,
-                # as a failure does, and never back to `on_failure`.
+                # "ok", "failed" and ENDED_EARLY reach here, and that fall-through is
+                # deliberate: the re-measure is the node's measurement, read as the
+                # top-of-loop one is. A failure goes to the ordinary paid fix cycle
+                # below; an early end goes to the fix loop at round -1 and never back
+                # to `on_failure`; and a pass can still carry findings the loop takes
+                # (the triage step ends `done` and reports them), so it is recorded
+                # and read before the common exit below completes the node.
                 #
                 # The repair's own re-measure just wrote its findings/session rows
                 # under `_REPAIR_ROUND`, not the `round` this loop was on when it

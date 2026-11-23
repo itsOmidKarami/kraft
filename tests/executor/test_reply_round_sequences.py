@@ -99,7 +99,8 @@ async def test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery(rig, mo
     assert [t.endswith("repair_checks") for t in rig.triaged].count(True) == 1
     [started] = events_of(rig, "reply_round_started")
     assert started["payload"]["round"] == 0
-    assert _round_records(rig)
+    # The re-measure inside the round is the round's record, at the repair's round.
+    assert [e["payload"]["cycle"] for e in _round_records(rig)] == [-1]
 
 
 def _red_in_the_round_until_fixed(fake, rig, fixes):

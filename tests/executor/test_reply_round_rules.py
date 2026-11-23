@@ -18,6 +18,7 @@ from .test_walk_early import (  # noqa: F401 -- the walk's own rig, and its judg
     CLEAN,
     LAUNCH,
     REAL,
+    RED,
     _cycles,
     _found,
     _node,
@@ -180,15 +181,21 @@ async def _round_open(it, *, count=0, threads=()):
     return head
 
 
-@pytest.mark.parametrize("early", [True, False], ids=["loop-early", "no-early"])
+@pytest.mark.parametrize(
+    ("early", "red_first", "cycle"),
+    [(True, False, 0), (False, False, 0), (False, True, walk._REPAIR_ROUND)],
+    ids=["loop-early", "no-early", "re-measure-after-the-repair"],
+)
 async def test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head(
-    item_on, script, tmp_path, early
+    item_on, script, tmp_path, early, red_first, cycle
 ):
     """`a-reply-round-honours-every-decline-on-its-head`: the judge declined "naming nit" on
     this head with `stop_downgrade` (not on an early start); a reply round's triage raising it
-    again does not record it, enter the fix loop or reach the judge, on either node shape."""
+    again does not record it, enter the fix loop or reach the judge, on either node shape, nor
+    on the passing re-measure after the round's CI went red and `on_failure` ran."""
     nit = _found("naming nit", "important")
-    it = await item_on([_node(tmp_path, triage=(nit,), early=early)])
+    shape = {"triage": (nit, nit), "ci": (RED, CLEAN), "on_failure": True} if red_first else {}
+    it = await item_on([_node(tmp_path, **{"triage": (nit,), **shape}, early=early)])
     head = await _round_open(it)
     await it.database.write(
         lambda c: events.append(
@@ -210,6 +217,7 @@ async def test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_hea
 
     [record] = [e["payload"] for e in it.events("findings_measured")]
     assert record["findings"] == [] and record["reply_round"] is True
+    assert record["cycle"] == cycle
     assert "fix" not in script.calls
 
 

@@ -1206,7 +1206,7 @@ enforced-by: tests/executor/test_recovery.py::test_a_step_recovery_reruns_every_
 
 When an execution-node recovery succeeds, the system SHALL retry that node
 from its first step.
-enforced-by: tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step
+enforced-by: tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[no-fix-loop], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[clean-is-recorded], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[findings-enter-the-fix-loop], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[findings-enter-an-early-fix-loop]
 
 ## REQ parallel-step-settles-before-recovery
 

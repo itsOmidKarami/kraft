@@ -863,7 +863,8 @@ class _Point:
         """The threads a finding of this run still names, and whether a record carries
         `dropped`: the last measurement's findings and unmeasured findings (what is below
         the loop's severities), what the judge declined, and what the latest triage's own
-        result file raises (the `on_failure` re-measure's `ok` exit writes no record)."""
+        result file raises: a record keeps a finding's thread only on that thread's file
+        (`findings.on_their_files`), and the file still names it."""
         rows = self.db.read(
             lambda c: [
                 (e["type"], e["payload"])
