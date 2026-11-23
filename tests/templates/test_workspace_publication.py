@@ -278,7 +278,7 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     and default branch, never the root's, though dispatch hands the forge
     node the root's source repository as `orig_repo`. The item's `base_ref`
     is the root's, so the member's move is reported as one instead of being
-    written there -- whatever the root reports after it: a root with changes
+    written there -- past a root still waiting, too: a root with changes
     of its own is read after its members, and its pipeline here is for another
     head, so it is still waiting. Kraft-tx0dz: a node with no base-change
     restart to re-verify the rebased head waits for that head's own CI
@@ -337,6 +337,11 @@ async def test_a_member_dropped_from_its_merge_train_stays_open(
     fake = forge.FakeForge(queue_kind="train", queue_drops=[drop], ci_states=["success"])
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
     only_the_root_has_an_identity(monkeypatch, tmp_path, row)
+    (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
+    git(tmp_path / "pkg", "add", "moved.txt")
+    git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
+    moved = git(tmp_path / "pkg", "rev-parse", "main")
+    base_ref = _base_ref(database, row)
 
     results = [
         await _run(
@@ -348,6 +353,8 @@ async def test_a_member_dropped_from_its_merge_train_stays_open(
     ]
 
     assert results == ["waiting", "merge_rejected"]
+    assert git(worktree / "repos" / "pkg", "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert _base_ref(database, row) == base_ref, "the member's head is not the root's base"
     assert _repos(database, row)["submodule"] == "open"
 
 

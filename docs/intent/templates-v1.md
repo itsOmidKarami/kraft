@@ -1952,7 +1952,8 @@ When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
 and reviewed again before the chain goes on. It SHALL do so as well when that
 node parks or stops after the move, before it completes, and when the move is
-a workspace member's, whatever the root reports after it.
+a workspace member's, whatever the root reports after it, unless that is a
+merge-queue drop, which has its own restart, or a configuration stop.
 enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[completes], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[parks-on-the-review-wait], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[rate-limited], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[stops-for-a-person], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-declared-restart-re-verifies-it-past-a-root-still-waiting-ci_poll], tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
 origin: config/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
 

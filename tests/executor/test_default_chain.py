@@ -211,6 +211,8 @@ async def test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite(
     expected = "merge_request_feedback" if taken else "verification"
     assert it.row()["current_node_id"] == expected
     assert not any("exhausted" in e["payload"]["reason"] for e in it.events("needs_human"))
+    reopened = [e["payload"]["gate"] for e in it.events("gate_reopened")]
+    assert reopened == ([] if taken else ["local_review"])
 
 
 async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback(

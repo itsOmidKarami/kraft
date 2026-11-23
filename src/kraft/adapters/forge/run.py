@@ -1918,14 +1918,14 @@ async def _run_one(
                     f"no open merge request for {branch!r}"
                     + (f": !{existing.number} is {existing.state}" if existing else "")
                 )
-            elif requested and (moved := _moved_head(db, work_item_id, repo, existing)):
+            elif requested and (foreign := _moved_head(db, work_item_id, repo, existing)):
                 # Asked, and since then the forge's head is not the approved one: a
                 # commit reached the merge request, which the forge would merge
                 # when its checks pass. Cancelled while it still can be (a failed
                 # cancel fails the node: the forge may still merge), then held.
                 await forge.cancel_merge(repo=repo, branch=branch, mr=existing)
-                log = f"cancelled the merge of !{existing.number}, now at {moved[1][:12]}\n"
-                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, moved[1])
+                log = f"cancelled the merge of !{existing.number}, now at {foreign[1][:12]}\n"
+                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, foreign[1])
                 status = "unreviewed"
             elif requested:
                 # This wait already asked for the merge; it is only reading
