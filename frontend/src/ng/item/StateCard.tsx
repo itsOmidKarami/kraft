@@ -221,17 +221,18 @@ function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; s
   }
   if (status === "needs_you" && stop?.kind === "mr_closed") {
     const ref = str(facts.ref) ?? (item.mr_ref ? String(item.mr_ref.number) : "");
+    const refText = ref ? mrRefText({ number: Number(ref), url: str(facts.url) ?? item.mr_ref?.url ?? null }) : "!";
     const closed = [...events].reverse().find((e) => e.type === "mr_closed");
     const opened = [...events].reverse().find((e) => e.type === "mr_opened");
     const by = str(closed?.payload.by);
     return {
-      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR !${ref} was closed on the forge`,
+      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR ${refText} was closed on the forge`,
       where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
       node: stop.node,
       text: MR_SYNC_STOPPED,
       facts: [],
       actions: [
-        ...when(admits(item, "reopen_mr", true), { label: `Reopen !${ref}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
+        ...when(admits(item, "reopen_mr", true), { label: `Reopen ${refText}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
         ...when(!!opened?.node_id && admits(item, "retry", true), { label: "Open a new MR", run: () => run(act.retry(item.id, { path: opened!.node_id! })) }),
         ...when(admits(item, "cancel", true), { label: "Cancel item…", run: h.onCancel }),
       ],
