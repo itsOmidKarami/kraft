@@ -14,6 +14,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from kraft import builtins as _builtins
 from kraft import caps as _caps
@@ -2693,7 +2694,15 @@ async def _launch_agent(
                 if note
                 else ""
             )
-            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction)
+            + (
+                (
+                    prompts.TAKEOVER_RESUMED_NOTE
+                    if resumed.taken_over
+                    else prompts.AGENT_RESUMED_NOTE
+                )
+                if resumed is not None
+                else instruction
+            )
             + notes,
             extra_env=extra_env,
             extra_ro=extra_ro,
@@ -2760,24 +2769,34 @@ def _output_decl(t: AgentTask | SubprocessTask, task, launch) -> outputs.Decl:
     )
 
 
-def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
-    """`(session id, provider session id)` of the paused session `task`
-    resumes, or None to restart it. Only a harness that can resume, only the
-    task's latest session and only if an operator paused it, never from before
-    a retry or a restart (7a's rule: a new pass never reuses a pre-retry
-    session), and only when its log names the provider's own session id."""
+class ResumedSession(NamedTuple):
+    session_id: str
+    provider_id: str
+    #: A person worked in the provider session (`kraft item takeover`).
+    taken_over: bool = False
+
+
+def _resumable_session(db, work_item_id: str, node, task, harness) -> ResumedSession | None:
+    """The paused session `task` resumes -- its row id and the provider's own
+    session id -- or None to restart it. Only a harness that can resume, only
+    the task's latest session and only if an operator paused it, never from
+    before a retry or a restart (7a's rule: a new pass never reuses a pre-retry
+    session). The provider id is the one a takeover left on the row, which is
+    the person's fork, else the one its log names."""
     if harness is None or not harness.supports("resume"):
         return None
     paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
     if paused is None:
         return None
+    if paused["cli_session_id"]:
+        return ResumedSession(paused["id"], paused["cli_session_id"], True)
     # The harness's own schema (Kraft-wge0e): a codex thread id is not on a
     # claude `system`/`init` line.
     reader = _agent.log_reader(harness)
     if reader is None:
         return None
     provider = _usage.READERS[reader].session_id(Path(paused["log_path"]))
-    return (paused["id"], provider) if provider else None
+    return ResumedSession(paused["id"], provider) if provider else None
 
 
 async def measure_node(

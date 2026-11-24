@@ -710,3 +710,12 @@ AGENT_RESUMED_NOTE = (
     "An operator paused you mid-task and has now resumed you. Carry on with the "
     "task you were given, from where you stopped, and finish it as instructed."
 )
+
+#: `AGENT_RESUMED_NOTE` for a session a person worked in (`kraft item takeover`):
+#: "carry on as instructed" could undo what they redirected, so it names them
+#: and sends the model to the repository first.
+TAKEOVER_RESUMED_NOTE = (
+    "A person took over this session and worked in it after you stopped. Treat "
+    "their turns as steers. Before anything else, check `git log` and "
+    "`git status`: the task may already be done. Then finish what remains."
+)
