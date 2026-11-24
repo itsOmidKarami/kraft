@@ -21,3 +21,15 @@ id = "item"
 title = "Kraft item"
 placement = "tab"
 command = ["python3", "kraft_herdr.py", "item"]
+
+# Runs once when Herdr starts (and again after a live handoff), and only makes
+# sure the bridge pane is open.
+[[startup]]
+command = ["python3", "kraft_herdr.py", "start"]
+
+# Opens `kraft item takeover` for the Kraft item tab that has focus.
+[[actions]]
+id = "takeover"
+title = "Take over this Kraft item"
+contexts = ["pane"]
+command = ["python3", "kraft_herdr.py", "takeover"]

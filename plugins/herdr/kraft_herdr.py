@@ -18,6 +18,7 @@ import fcntl
 import json
 import os
 import queue
+import shlex
 import subprocess
 import sys
 import threading
@@ -179,6 +180,21 @@ class Herdr:
 
     def panes_by_label(self, workspace: str) -> dict[str, str]:
         return {p["label"]: p["pane_id"] for p in self.panes(workspace) if p.get("label")}
+
+    def open_bridge_tab(self, workspace: str) -> str:
+        opened = self.run(
+            "plugin", "pane", "open", "--plugin", self.plugin, "--entrypoint", "bridge",
+            "--workspace", workspace, "--placement", "tab", "--no-focus",
+        )  # fmt: skip
+        return opened["plugin_pane"]["pane"]["pane_id"]
+
+    def split(self, pane: str) -> str:
+        """A new shell beside `pane`, focused: a person is about to type there."""
+        made = self.run("pane", "split", pane, "--direction", "right", "--focus")
+        return made["pane"]["pane_id"]
+
+    def run_in(self, pane: str, command: str) -> None:
+        self.run("pane", "run", pane, command)
 
     def notify(self, title: str, body: str) -> None:
         self.run(
@@ -458,6 +474,41 @@ def item_main(args: list[str]) -> int:
     return 0
 
 
+#: What names the bridge's own tab, so the next `start` finds it.
+BRIDGE_LABEL = "kraft bridge"
+
+
+def start(herdr: Herdr) -> int:
+    """The startup hook. Herdr runs it once, and again after a live handoff,
+    and does not supervise it: so it only makes sure the bridge has a pane, and
+    leaves the loop to that pane."""
+    workspace = herdr.workspace_id(WORKSPACE)
+    if BRIDGE_LABEL not in herdr.panes_by_label(workspace):
+        herdr.rename(herdr.open_bridge_tab(workspace), BRIDGE_LABEL)
+    return 0
+
+
+def _focused_pane(context: dict) -> str:
+    """Where the person was when they ran the action. The context names it
+    `focused_pane_id`; HERDR_PANE_ID is the same fact from the environment."""
+    return str(context.get("focused_pane_id") or os.environ.get("HERDR_PANE_ID") or "")
+
+
+def takeover(herdr: Herdr, context: dict, *, state_dir: Path | None = None) -> int:
+    """Open `kraft item takeover` for the item whose tab has focus, in a pane
+    beside it. The tab itself keeps following the log."""
+    pane = _focused_pane(context)
+    items = Bridge(herdr, "kraft", state_dir or _dir("HERDR_PLUGIN_STATE_DIR"))._load()["items"]
+    item_id = next((i for i, r in items.items() if pane and r.get("pane") == pane), None)
+    if item_id is None:
+        print("Kraft: the focused pane is not a Kraft item tab.", file=sys.stderr)
+        return 1
+    config = load_config(_dir("HERDR_PLUGIN_CONFIG_DIR"))
+    command = " ".join(shlex.quote(part) for part in (config["kraft"], "item", "takeover", item_id))
+    herdr.run_in(herdr.split(pane), command)
+    return 0
+
+
 def resume_command(item_id: str) -> list[str]:
     """What Herdr runs to bring an item tab back after a restart of its server."""
     return [sys.executable, str(Path(__file__).resolve()), "item", item_id]
@@ -490,15 +541,27 @@ def bridge_main() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if not args or args[0] not in ("start", "bridge", "item", "takeover"):
+    entry = {
+        "start": lambda: start(Herdr()),
+        "bridge": bridge_main,
+        "item": lambda: item_main(args[1:]),
+        "takeover": lambda: takeover(Herdr(), _context()),
+    }.get(args[0] if args else "")
+    if entry is None:
         print(__doc__, file=sys.stderr)
         return 2
-    if args[0] == "bridge":
-        return bridge_main()
-    if args[0] == "item":
-        return item_main(args[1:])
-    print(f"kraft_herdr: {args[0]} is not implemented yet", file=sys.stderr)
-    return 1
+    try:
+        return entry()
+    except CommandFailed as exc:
+        print(f"kraft_herdr: {exc}", file=sys.stderr)
+        return 1
+
+
+def _context() -> dict:
+    try:
+        return json.loads(os.environ.get("HERDR_PLUGIN_CONTEXT_JSON") or "{}")
+    except ValueError:
+        return {}
 
 
 if __name__ == "__main__":
