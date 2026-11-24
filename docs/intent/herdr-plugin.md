@@ -25,7 +25,7 @@ origin: src/kraft/cli/view.py §_cmd_events
 The Herdr plugin SHALL map every Kraft display status to one of the states
 `idle`, `working`, `blocked` and `unknown`, and SHALL map only `needs_you` and
 `failed` to `blocked`.
-enforced-by: plugins/herdr/tests/test_mapping.py::test_every_kraft_display_status_is_mapped, plugins/herdr/tests/test_mapping.py::test_no_state_is_done, plugins/herdr/tests/test_mapping.py::test_state_for
+enforced-by: plugins/herdr/tests/test_mapping.py::test_every_kraft_display_status_is_mapped, plugins/herdr/tests/test_mapping.py::test_no_state_is_done
 origin: plugins/herdr/kraft_herdr.py §STATES
 
 ## REQ herdr-bridge-readopts-tabs-by-label
