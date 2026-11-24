@@ -98,6 +98,7 @@ async def test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none
             and relay in rows["sandbox: docker relay"]["detail"]
         )
     assert ("sandbox: docker relay" in rows) is bool(relay)
+    assert "sandbox: os relay" not in rows  # asked only of a usable backend
     for kind, answer in health.items():
         row = rows[f"sandbox: {kind}"]
         assert row["ok"] and row["skipped"] is (isinstance(answer, Exception) or not answer[0])

@@ -231,24 +231,27 @@ async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls)
     assert [c[0] for c in calls.made] == ["image"]
 
 
-@pytest.mark.parametrize("pulled", [True, False], ids=["pulled", "relay-image-not-pulled"])
+@pytest.mark.parametrize(
+    "pulled", [True, False, None], ids=["pulled", "relay-image-not-pulled", "no-answer"]
+)
 @pytest.mark.parametrize("sock", [SOCK, None], ids=["unix", "tls"])
 async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock, pulled):
     """A relay image that is not pulled is never pulled (`--pull=never`):
     the refusal names the pull to run, as doctor does, inside what the
-    board keeps of it."""
+    board keeps of it. A runtime that does not answer is not said to lack
+    it."""
     run_dirs = docker._run_dirs()
     run_dirs.ca.mkdir(parents=True)
     (run_dirs.ca / "tls-port").write_text("40123\n")
     calls.answers["run"] = (125, "")
     relay = config.SandboxHost.model_fields["relay_image"].default
     if not pulled:
-        calls.answers[relay] = (1, "")
+        calls.answers[relay] = None if pulled is None else (1, "")
     with pytest.raises(SandboxNotReady) as refused:
         await docker.DockerBackend().open_session("s1", POLICED, sock, work_item_id="w1")
     said = f"kraft: {refused.value}"[: walk._STOP_CAUSE_MAX - 1]
-    assert ("could not start the sandbox's egress relay" in said) is pulled
-    assert (f"pull {relay}" in said) is not pulled
+    assert ("could not start the sandbox's egress relay" in said) is (pulled is not False)
+    assert (f"pull {relay}" in said) is (pulled is False)
     assert calls.made[-3:-1] == [
         ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
         ("volume", "rm", "-f", "kraft-egress-w1-s1"),
