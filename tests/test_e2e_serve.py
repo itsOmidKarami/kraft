@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import select
 import signal
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,3 +212,35 @@ def test_a_second_sigterm_during_teardown_does_not_abort_it(serve, monkeypatch):
     finally:
         signal.signal(signal.SIGTERM, before)
     assert not interrupted, "the second SIGTERM interrupted the teardown"
+
+
+def test_a_child_that_never_got_healthy_leaves_its_stack_and_no_group(serve):
+    """The 30s health-deadline path. SIGABRT has the child's faulthandler say
+    where it stalled, and the group kill still reaches the child's own children
+    after the child is reaped, when `os.getpgid(child)` no longer works."""
+    stalled = (
+        "import subprocess, sys, time\n"
+        "def stalled_here():\n"
+        "    print(subprocess.Popen(['sleep', '60']).pid, flush=True)\n"
+        "    time.sleep(60)\n"
+        "stalled_here()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-X", "faulthandler", "-c", stalled],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    grandchild = int(proc.stdout.readline())
+    before = signal.getsignal(signal.SIGTERM)
+    try:
+        serve._dump_and_terminate(proc)
+    finally:
+        signal.signal(signal.SIGTERM, before)
+    # The grandchild holds the same stdout: EOF means it has gone too.
+    if not select.select([proc.stdout], [], [], 10)[0]:
+        os.kill(grandchild, signal.SIGKILL)
+        pytest.fail("the grandchild outlived the teardown")
+    assert proc.stdout.read() == ""
+    assert "in stalled_here" in proc.stderr.read()

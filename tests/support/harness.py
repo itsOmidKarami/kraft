@@ -229,13 +229,10 @@ def _bd_template(real: bool) -> Path:
         git(tpl, "config", "maintenance.auto", "false")
         git(tpl, "config", "gc.auto", "0")
         if real:
-            subprocess.run(
-                ["bd", "init", "--prefix", "TEST"],
-                cwd=tpl,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            # Output not captured: it lands in pytest's report or serve.py's
+            # log as it is written, so a hang or a failure shows what bd said.
+            # The timeout is ~25x a normal init and under pytest's 120s.
+            subprocess.run(["bd", "init", "--prefix", "TEST"], cwd=tpl, check=True, timeout=90)
         else:
             (tpl / ".beads").mkdir()
         atexit.register(shutil.rmtree, tpl, ignore_errors=True)

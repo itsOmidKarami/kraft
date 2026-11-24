@@ -131,22 +131,40 @@ def _raise_interrupt(_signum, _frame) -> None:
 
 
 def _terminate(proc: subprocess.Popen) -> None:
-    """Signal the whole process group so detached agent/git children die too."""
+    """Signal the whole process group so detached agent/git children die too.
+
+    The child was started with `start_new_session=True`, so its pid is the
+    group's id: that still names the group once the child itself is reaped,
+    where `os.getpgid(proc.pid)` would fail and orphan the rest of it."""
     # Kraft's kill resends SIGTERM to the group 0.2s after the first; the
     # handler would raise again out of `proc.wait` and skip the SIGKILL below.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             proc.kill()
         proc.wait()
+
+
+def _dump_and_terminate(proc: subprocess.Popen) -> None:
+    """Make a stalled child print every thread's stack, then end its group.
+
+    The child runs with `-X faulthandler`, which dumps on SIGABRT before the
+    process aborts. Wait for that before the group SIGTERM, which could
+    otherwise kill the child halfway through its dump."""
+    proc.send_signal(signal.SIGABRT)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    _terminate(proc)
 
 
 def main() -> int:
@@ -206,7 +224,12 @@ def main() -> int:
     # Own process group: the orchestrator spawns detached agent/git children,
     # and terminating only the direct child orphans them (Kraft-2ih).
     proc = subprocess.Popen(
-        [sys.executable, "-m", "kraft"], cwd=REPO, env=env, start_new_session=True
+        # -X faulthandler: SIGABRT dumps its stack (`_dump_and_terminate`).
+        # -u: what it printed reaches the log even when it is killed.
+        [sys.executable, "-X", "faulthandler", "-u", "-m", "kraft"],
+        cwd=REPO,
+        env=env,
+        start_new_session=True,
     )
 
     health = f"http://127.0.0.1:{PORT}/api/health"
@@ -226,7 +249,8 @@ def main() -> int:
         except OSError:
             time.sleep(0.3)
     else:
-        _terminate(proc)
+        print("the orchestrator is not healthy after 30s; its stack:", file=sys.stderr, flush=True)
+        _dump_and_terminate(proc)
         sys.exit("server did not become healthy in 30s")
 
     # The poll above proves something answered, not that it was ours. If the
