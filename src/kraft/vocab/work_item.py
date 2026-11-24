@@ -54,6 +54,7 @@ class Verb(StrEnum):
     ABANDON = "abandon"
     ARCHIVE = "archive"
     UNBLOCK = "unblock"
+    TAKEOVER = "takeover"
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,16 @@ TRAITS = total(
             stopped=True,
             mr_watched=True,
             admits_status=frozenset(
-                {V.RESUME, V.STEER, V.RETRY, V.RAISE_BUDGET, V.SKIP, V.ESCALATE, V.ABANDON}
+                {
+                    V.RESUME,
+                    V.STEER,
+                    V.RETRY,
+                    V.RAISE_BUDGET,
+                    V.SKIP,
+                    V.ESCALATE,
+                    V.ABANDON,
+                    V.TAKEOVER,
+                }
             ),
         ),
         S.COMPLETED: StatusTraits(
@@ -107,7 +117,9 @@ TRAITS = total(
         S.PAUSED: StatusTraits(
             DisplayStatus.PAUSED,
             commands_may_start=True,
-            admits_status=frozenset({V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON, V.UNBLOCK}),
+            admits_status=frozenset(
+                {V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON, V.UNBLOCK, V.TAKEOVER}
+            ),
         ),
         S.ABANDONED: StatusTraits(
             DisplayStatus.CANCELLED, ended=True, admits_status=frozenset({V.ARCHIVE, V.ABANDON})
@@ -186,6 +198,7 @@ class ItemAction(StrEnum):
     RESTORE = "restore"
     ARCHIVE = "archive"
     ABANDON = "abandon"
+    TAKEOVER = "takeover"
 
 
 @dataclass(frozen=True)
@@ -302,5 +315,9 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         # archive_work_item answers an archived item 200 and changes nothing.
         ItemAction.ARCHIVE: a(V.ARCHIVE) and not f.archived,
         ItemAction.ABANDON: a(V.ABANDON),
+        # `kraft item takeover` is a terminal's door, not a button: what decides it
+        # (an agent session on the node, a local worktree, no sandbox) is read per
+        # item, which the list does not do, so no surface is told to offer it.
+        ItemAction.TAKEOVER: False,
     }
     return tuple(action for action in ItemAction if open_[action])

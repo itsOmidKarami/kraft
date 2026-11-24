@@ -324,6 +324,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     _gate_or_404(gate_nodes(st, row), gate)
     if held := held_refusal(row):
@@ -461,6 +462,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     nodes = gate_nodes(st, row)
     _gate_or_404(nodes, gate)

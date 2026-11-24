@@ -194,40 +194,6 @@ def test_a_setter_writes_its_column(conn, setter, column, value):
     assert conn.execute(f"SELECT {column} FROM work_items WHERE id='w1'").fetchone()[0] == value
 
 
-def test_a_takeover_lock_round_trips_and_its_session_lands_on_the_worker_row(conn):
-    _mk_item(conn, status="paused")
-    schema.insert_session(conn, status="paused")
-    assert store.takeover_lock(conn, "w1") is None
-    store.take_takeover_lock(
-        conn,
-        "w1",
-        pid=42,
-        pid_start=1.5,
-        session_id="U",
-        resumed_from="s1",
-        branch="kraft/x",
-        tip="abc",
-    )
-    lock = store.takeover_lock(conn, "w1")
-    assert (lock["takeover_pid"], lock["takeover_pid_start"], lock["takeover_session_id"]) == (
-        42,
-        1.5,
-        "U",
-    )
-    assert (lock["takeover_resumed_from"], lock["takeover_branch"], lock["takeover_tip"]) == (
-        "s1",
-        "kraft/x",
-        "abc",
-    )
-    assert lock["takeover_started_at"]
-    store.clear_takeover_lock(conn, "w1")
-    assert store.takeover_lock(conn, "w1") is None
-    assert conn.execute("SELECT takeover_session_id FROM work_items").fetchone()[0] is None
-
-    store.set_cli_session_id(conn, "w1", "s1", "U")
-    assert conn.execute("SELECT cli_session_id FROM worker_sessions").fetchone()[0] == "U"
-
-
 def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
     """Every branch this produces has to survive `git check-ref-format`, over
     the shapes a Kraft title actually takes: punctuation, non-ASCII, git's

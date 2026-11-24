@@ -855,6 +855,13 @@
      "nodes_total": "_",
      "step": "_"
     },
+    "takeover_branch": "_",
+    "takeover_pid": "_",
+    "takeover_pid_start": "_",
+    "takeover_resumed_from": "_",
+    "takeover_session_id": "_",
+    "takeover_started_at": "_",
+    "takeover_tip": "_",
     "test_result": "_",
     "title": "_",
     "updated_at": "_",
@@ -867,6 +874,7 @@
     "worker_sessions": [
      {
       "attempt": "_",
+      "cli_session_id": "_",
       "command": "_",
       "cost_estimated": "_",
       "cost_usd": "_",

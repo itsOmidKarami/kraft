@@ -160,11 +160,11 @@ CREATE TABLE work_items (
   -- measurement: the open measurement of a node whose fix loop starts early, JSON
   -- {node_id, round, since} (`store.stored_measurement`), NULL when no measurement is open
   measurement      TEXT,
-  -- a person's takeover of the item's agent session (`kraft item takeover`),
-  -- all NULL when none is open: the CLI's pid and start time hold the lock
-  -- (live while `proc_identity` still knows them), then the session id minted
-  -- for it, the worker session it forked from (NULL: a fresh one), and the
-  -- branch and tip it started on, for the warnings printed at exit
+  -- takeover: a person has the item's agent session open (`kraft item takeover`),
+  -- takeover: all NULL when none is. The CLI's pid and start time hold the lock,
+  -- takeover: live while `proc_identity` still knows them. Then come the session
+  -- takeover: id minted for it, the worker session it forked from (NULL: a fresh
+  -- takeover: one), and the branch and tip it started on, for the exit warnings
   takeover_pid         INTEGER,
   takeover_pid_start   REAL,
   takeover_session_id  TEXT,
@@ -257,9 +257,8 @@ CREATE TABLE worker_sessions (
   -- the machine a remote step ran on (`kraft.remote`), NULL for a local one and
   -- every row older than this column
   runner         TEXT,
-  -- the CLI's own id for the session a takeover left on this paused row, which
-  -- the next resume continues (`takeover.release`). NULL: none, and every row
-  -- older than this column
+  -- cli_session_id: the CLI's own id for the session a takeover left on this paused
+  -- row, which the next resume continues (`takeover.release`). NULL: none
   cli_session_id TEXT,
   -- a session's id is unique only within its work item (`store.new_session_id`),
   -- and a row from before that keeps its 32-character id, unique on its own

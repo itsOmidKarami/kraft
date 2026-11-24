@@ -631,8 +631,9 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
             events.append(c, wid, "mr_opened", {"number": 7, "url": "u"}, node_id=state["node"])
-    if state.get("worktree"):
-        # Its worktree on its branch, as a started item has one.
+    if state.get("worktree") and not body.get("in_place"):
+        # Its worktree on its branch, as a started item has one. An in-place item
+        # has none: its branch is forced below, in the checkout.
         from support.harness import git
 
         branch = client.get(f"/api/work-items/{wid}").json()["branch"]
@@ -645,8 +646,9 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c,
         ):
             events.append(c, wid, "escalation_message", {"session_id": f"esc-{wid}"})
-    if state.get("paused_agent"):
-        # Paused at the node's first agent task, as a pause leaves it.
+    if agent := state.get("agent_session") or ("paused" if state.get("paused_agent") else None):
+        # A session of the node's first agent task, paused as a pause leaves it
+        # (`paused_agent`) or ended as `agent_session` says.
         with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c:
             c.row_factory = sqlite3.Row
             row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -654,7 +656,7 @@ def _in_state(client, repo, state: dict, **body) -> str:
         node = next(n for n in chain.nodes if n.id == state["node"])
         task = next(t for s in node.steps for t in s.tasks if isinstance(t.task, AgentTask))
         _create_escalation_session(
-            wid, f"agent-{wid}", state["node"], hook_point=task.path, status="paused"
+            wid, f"agent-{wid}", state["node"], hook_point=task.path, status=agent
         )
     if body.get("in_place") and state["node"]:
         # Started in place: its branch is there, as taking the checkout leaves it.

@@ -25,7 +25,8 @@
     "paused_agent": {
       "status": "paused",
       "node": "implementation",
-      "paused_agent": true
+      "paused_agent": true,
+      "worktree": true
     },
     "paused_after_abandoned": {
       "status": "paused",
@@ -105,6 +106,14 @@
       "node": "implementation",
       "stop": "failed",
       "reason": "the forge refused"
+    },
+    "failed_agent": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "failed",
+      "reason": "the forge refused",
+      "agent_session": "failed",
+      "worktree": true
     },
     "failed_on_pipeline": {
       "status": "needs_human",
@@ -266,6 +275,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -295,6 +305,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -323,6 +334,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -386,6 +398,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -428,6 +441,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -514,6 +528,7 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_agent",
         "failed_on_pipeline",
         "infra",
         "infra_on_pipeline",
@@ -545,6 +560,17 @@
         "not_started",
         "blocked",
         "slices_paused"
+      ]
+    },
+    "takeover": {
+      "path": "takeover",
+      "body": {
+        "pid": 1,
+        "pid_start_time": 0
+      },
+      "takes": [
+        "paused_agent",
+        "failed_agent"
       ]
     }
   }

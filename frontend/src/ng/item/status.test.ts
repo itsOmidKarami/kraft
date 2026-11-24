@@ -24,7 +24,9 @@ const LIFECYCLE: { states: Record<string, { depends_on?: string }>; doors: Recor
 const serverActions = (state: string): ItemAction[] =>
   ITEM_ACTIONS.filter((a) => Object.entries(LIFECYCLE.doors).some(([door, spec]) =>
     (door === "budget_raise" ? "raise_budget" : door) === a && spec.takes.includes(state)
-    && !(state === "archived" && door === "archive") && !(door === "unblock" && !LIFECYCLE.states[state].depends_on)));
+    && !(state === "archived" && door === "archive") && !(door === "unblock" && !LIFECYCLE.states[state].depends_on)
+    // `kraft item takeover` is a terminal's door: what decides it is read per item, so `actions` never lists it.
+    && door !== "takeover"));
 const without = (state: string, ...gone: ItemAction[]) => serverActions(state).filter((a) => !gone.includes(a));
 
 type Scope = WorkItemStop["scope"];

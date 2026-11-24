@@ -1328,6 +1328,22 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         deps.forbid_self_action(st, request, wid, escalation_may=not spending)
     # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
     row = deps._live_work_item_row(st, wid)
+    if (
+        any(
+            f is not None
+            for f in (
+                body.chain_template,
+                body.one_off_chain,
+                body.agent_overrides,
+                body.node_overrides,
+                body.policy,
+                body.attachments,
+            )
+        )
+        or "budget_usd" in body.model_fields_set
+    ):
+        # The chain, overrides and policy a person's session would be running under.
+        await deps.refuse_if_taken_over(st, wid)
     fields_set = body.model_fields_set
     if (
         body.title is None

@@ -1131,6 +1131,10 @@ async def auto_escalate_stuck(
         return status
     if status != "needs_human":
         return status
+    from kraft import takeover  # a person in the session is the escalation
+
+    if await takeover.held(db, run_dirs, work_item_id) is not None:
+        return status
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     if pending_gate(db, work_item_id, evts=evts) is not None:
         return status  # the gate flow owns this stop, unrelated to this feature

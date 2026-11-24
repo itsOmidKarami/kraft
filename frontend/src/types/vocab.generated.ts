@@ -55,7 +55,7 @@ export const WORK_ITEM_TRAITS: Record<WorkItemStatus, { display: DisplayStatus |
   "blocked": { display: "blocked", implied_stop_kind: null, ended: false, stopped: false, holds_slot: false, running: false, commands_may_start: false, mr_watched: false },
 };
 
-export const ITEM_ACTIONS = ["approve", "reject", "resume", "steer", "retry", "raise_budget", "reopen_mr", "rerun_ci", "unblock", "skip", "pause", "escalate", "complete", "cancel", "restore", "archive", "abandon"] as const;
+export const ITEM_ACTIONS = ["approve", "reject", "resume", "steer", "retry", "raise_budget", "reopen_mr", "rerun_ci", "unblock", "skip", "pause", "escalate", "complete", "cancel", "restore", "archive", "abandon", "takeover"] as const;
 export type ItemAction = (typeof ITEM_ACTIONS)[number];
 
 export const SESSION_STATUSES = ["pending", "running", "done", "failed", "capped_out", "paused", "unknown", "done_with_concerns", "needs_context", "rate_limited", "config_error", "waiting", "conflict", "infra", "infra_stop", "merge_rejected"] as const;

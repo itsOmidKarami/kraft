@@ -96,7 +96,7 @@ def _latest_agent_session(db, row, node):
     return session, {t.path: t for t in node.tasks()}
 
 
-def _since(lock) -> str:
+def since(lock) -> str:
     started = lock["takeover_started_at"] or ""
     return started[11:16] or "earlier"
 
@@ -182,7 +182,7 @@ async def prepare(
         )
 
     if (lock := await live(db, run_dirs, wid, harnesses)) is not None:
-        raise TakeoverRefused(f"a person has this item's session open (since {_since(lock)})")
+        raise TakeoverRefused(f"a person has this item's session open (since {since(lock)})")
     still_stopping = "the item's last session is still stopping; try again in a moment"
     if walk_running or wid in starting:
         raise TakeoverRefused(still_stopping)
@@ -210,7 +210,7 @@ async def prepare(
                 "takeover needs paused or needs_human"
             )
         if (held := store.takeover_lock(conn, wid)) is not None:
-            raise TakeoverRefused(f"a person has this item's session open (since {_since(held)})")
+            raise TakeoverRefused(f"a person has this item's session open (since {since(held)})")
         if _live_worker(conn, wid):
             raise TakeoverRefused(still_stopping)
         store.take_takeover_lock(
@@ -245,6 +245,14 @@ async def live(db, run_dirs, work_item_id: str, harnesses: _harness.HarnessSet):
         return lock
     await release(db, run_dirs, work_item_id, harnesses)
     return None
+
+
+async def held(db, run_dirs, work_item_id: str):
+    """`live`, for a caller with no harnesses at hand: the lock a running CLI
+    holds, or None. Reads the harness files only when a lock is there."""
+    if db.read(lambda c: store.takeover_lock(c, work_item_id)) is None:
+        return None
+    return await live(db, run_dirs, work_item_id, _harness.load(None))
 
 
 def _warnings(cwd: Path, lock) -> list[str]:

@@ -216,6 +216,43 @@ async def test_prepare_refuses(item_on, monkeypatch, setup, kwargs, chain, statu
     assert not it.events("takeover_started")
 
 
+async def test_a_takeover_lock_round_trips_and_its_session_lands_on_the_worker_row(item_on):
+    it = await _item(item_on)
+    db = it.database
+    assert _lock(it) is None
+
+    await db.write(
+        lambda c: store.take_takeover_lock(
+            c,
+            it.id,
+            pid=42,
+            pid_start=1.5,
+            session_id="U",
+            resumed_from="s0",
+            branch="kraft/x",
+            tip="abc",
+        )
+    )
+
+    lock = _lock(it)
+    assert (lock["takeover_pid"], lock["takeover_pid_start"], lock["takeover_session_id"]) == (
+        42,
+        1.5,
+        "U",
+    )
+    assert (lock["takeover_resumed_from"], lock["takeover_branch"], lock["takeover_tip"]) == (
+        "s0",
+        "kraft/x",
+        "abc",
+    )
+    assert lock["takeover_started_at"]
+    await db.write(lambda c: store.clear_takeover_lock(c, it.id))
+    assert _lock(it) is None
+
+    await db.write(lambda c: store.set_cli_session_id(c, it.id, "s0", "U"))
+    assert it.sessions()[0]["cli_session_id"] == "U"
+
+
 async def test_prepare_forks_the_paused_session(item_on):
     it = await _item(item_on)
     _log_init(it, "s0", "X")
