@@ -36,7 +36,7 @@ from kraft.adapters.forge.models import (
     ReviewResult,
 )
 from kraft.adapters.forge.replies import facts
-from kraft.adapters.forge.transport import CliTransport, Transport
+from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
 
 #: The system notes GitLab writes when someone approves or withdraws approval.
@@ -252,8 +252,58 @@ _ENQUEUE_NOTES = (
 )
 
 
+#: Every note on a merge request, oldest first, with the description text a
+#: "changed the description" note links. Free tiers included; REST has no route.
+_DESCRIPTION_NOTES_QUERY = """
+query($id: MergeRequestID!, $after: String) {
+  mergeRequest(id: $id) {
+    notes(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        system createdAt author { bot }
+        systemNoteMetadata { action descriptionVersion { id description } }
+      }
+    }
+  }
+}
+"""
+
+
+def _description_saves(notes: list) -> tuple[DescriptionRevision, ...]:
+    """Each save of the description, newest first, from a merge request's notes:
+    a `description` note's linked text, and a `task` note (a checkbox tick, which
+    links none) as a save of unknown text. Empty on any shape it cannot vouch for,
+    so the description stays as it is. Raises on a missing field."""
+    saves: list[DescriptionRevision] = []
+    last = None
+    for note in notes:
+        at = mr_ops.forge_time(note["createdAt"])
+        if at is None or (last is not None and at < last):
+            return ()
+        last = at
+        if not note["system"]:
+            continue
+        meta = note["systemNoteMetadata"]
+        if not meta or not isinstance(meta["action"], str):
+            return ()  # a system note that cannot say what it changed
+        if meta["action"] not in ("description", "task"):
+            continue
+        text = None
+        if meta["action"] == "description":
+            text = (meta["descriptionVersion"] or {}).get("description")
+            if not isinstance(text, str) or not text:
+                return ()
+        saves.append(DescriptionRevision(text, (note["author"] or {}).get("bot") is True))
+    return tuple(reversed(saves))
+
+
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
+
+    #: What `open_mr` creates a merge request with, before it writes the body as an
+    #: edit: GitLab keeps a creation text in a version no note links, so Kraft's own
+    #: text would never be found in the history a bot's later save is read from.
+    open_seed = "Kraft is writing this description."
 
     def __init__(self, transport: Transport | None = None):
         self._injected = transport
@@ -299,7 +349,7 @@ class GlabCli(mr_ops.CliWaits):
             # `mark_ready` un-drafts it after the gate. GitLab has no draft
             # field: the title prefix is the draft (glab mr create, :668-669).
             "title": _DRAFT + mr_ops.mr_title(title),
-            "description": body,
+            "description": self.open_seed,
         }
         if meta.labels:
             fields["labels"] = ",".join(meta.labels)  # GitLab creates unknown labels
@@ -310,7 +360,14 @@ class GlabCli(mr_ops.CliWaits):
             "POST", "projects/:id/merge_requests", fields=fields
         )
         data = resp.json()
-        return MR(number=int(data["iid"]), url=str(data["web_url"]))
+        mr = MR(number=int(data["iid"]), url=str(data["web_url"]))
+        await self._api(
+            repo,
+            f"projects/:id/merge_requests/{mr.number}",
+            method="PUT",
+            fields={"description": body},
+        )
+        return mr
 
     async def _user_id(self, repo: Path, username: str) -> str:
         if username == "@me":  # glab's spelling for the authenticated user (user.go:16-19)
@@ -450,10 +507,31 @@ class GlabCli(mr_ops.CliWaits):
     async def mr_description_history(
         self, *, repo: Path, branch: str
     ) -> tuple[DescriptionRevision, ...]:
-        """None to give: GitLab's merge request names only its last editor, which
-        proves nothing about the edits before it, and description versions are
-        not on every tier. So a changed description stays a person's here."""
-        return ()
+        """From the merge request's notes over GraphQL (`_description_saves`). Empty,
+        so a person's, when the notes run past `BOT_PAGES` pages or come back in a
+        shape it does not know."""
+        mr = await self._mr(repo, branch)
+        notes: list = []
+        try:
+            variables: dict[str, Field] = {"id": f"gid://gitlab/MergeRequest/{int(mr['id'])}"}
+            for _ in range(mr_ops.BOT_PAGES):
+                data = await self._transport(repo).graphql(_DESCRIPTION_NOTES_QUERY, variables)
+                page = data["mergeRequest"]["notes"]
+                notes += page["nodes"]
+                info = page["pageInfo"]
+                if info["hasNextPage"] is False:
+                    return _description_saves(notes)
+                cursor = info["endCursor"]
+                if (
+                    info["hasNextPage"] is not True
+                    or not cursor
+                    or cursor == variables.get("after")
+                ):
+                    return ()
+                variables = {**variables, "after": cursor}
+            return ()
+        except (KeyError, TypeError, AttributeError, ValueError):
+            return ()
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge (`_merge_view`)."""

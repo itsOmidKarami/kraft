@@ -12,10 +12,12 @@ import pytest
 from kraft.adapters import forge
 
 from . import outputs
+from .api_outputs import gql
 from .nodes import Api
 from .parity import BR, Row, assert_alike, feedback, methods_without_a_row, review
 from .test_forge_cli_contract import GLAB_API, HEAD, _contract_token  # noqa: F401
 from .test_github_parity import ROWS as GITHUB_ROWS
+from .test_run_description import _BOT, _OURS, gl_page
 from .test_thread_io import _GLAB_NOTE_ANSWER, _GLAB_REPLY, _glab_thread
 
 MR54 = forge.MR(54, "u")
@@ -96,6 +98,14 @@ ROWS: dict[str, Row] = {
         "mr_body",
         lambda f, r: f.mr_body(repo=r, branch=BR),
         outputs.glab_mr(outputs.GLAB_MR_DETAILS),
+    ),
+    "mr_description_history": Row(
+        "mr_description_history",
+        lambda f, r: f.mr_description_history(repo=r, branch=BR),
+        {
+            **outputs.glab_mr(json.dumps({"iid": 54, "id": 901})),
+            "api graphql*MergeRequest/901*": gql(gl_page(_OURS, _BOT)),
+        },
     ),
     "ci_status": Row("ci_status", _ci, {**VIEW, outputs.PIPELINES: outputs.GLAB_CI_SUCCESS}),
     "ci_status-merged-results": Row(
@@ -317,12 +327,7 @@ async def test_every_forge_method_answers_alike(cli, tmp_path, name):
     await assert_alike(cli, tmp_path, ROWS[name], GLAB_API)
 
 
-@pytest.mark.parametrize(
-    "rows, no_call",
-    # GitLab answers this one without a request, so there is no call to compare.
-    [(ROWS, {"mr_description_history"}), (GITHUB_ROWS, set())],
-    ids=["glab", "gh"],
-)
-def test_every_forge_method_has_a_parity_row(rows, no_call):
+@pytest.mark.parametrize("rows", [ROWS, GITHUB_ROWS], ids=["glab", "gh"])
+def test_every_forge_method_has_a_parity_row(rows):
     """A method added to `Forge` without a row fails: the twin proof must not go stale."""
-    assert methods_without_a_row(rows) == no_call
+    assert methods_without_a_row(rows) == set()

@@ -135,7 +135,8 @@ async def test_glab_merge_request_writes_are_these_requests(cli, tmp_path, act, 
 async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta, lookups, fields):
     """glab's own create (`mr create`, :668-683, :793-801): `Draft: ` on the
     title, the labels one comma list, people as user ids, and no
-    remove_source_branch or squash, which Kraft never asks for."""
+    remove_source_branch or squash, which Kraft never asks for. The body goes in
+    as an edit of the seed, so GitLab links Kraft's text to a note."""
     cli.stub("git", "")
     cli.stub(
         "glab",
@@ -155,7 +156,9 @@ async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta,
     assert cli.calls("glab") == [
         *lookups,
         "api projects/:id/merge_requests -X POST -i -f source_branch=kraft/abc "
-        "-f target_branch=release -f title=Draft: Teach it -f description=why" + fields,
+        "-f target_branch=release -f title=Draft: Teach it "
+        f"-f description={forge.GlabCli.open_seed}" + fields,
+        f"{PUT} -f description=why",
     ]
 
 
@@ -559,7 +562,7 @@ async def test_glab_open_mr_resolves_a_user_as_glab_does(cli, tmp_path, routes, 
 
     if expect.startswith("assignee_ids"):
         await opening
-        assert expect in cli.calls("glab")[-1]
+        assert expect in cli.calls("glab")[-2]
     else:
         with pytest.raises(forge.ForgeError, match=expect):
             await opening

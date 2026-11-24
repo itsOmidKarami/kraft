@@ -219,13 +219,17 @@ def only_bots_since(
     live: str, revisions: Iterable[DescriptionRevision], ours: Collection[str]
 ) -> bool:
     """Whether every save since Kraft's own text (a hash in `ours`) was a bot's.
-    Newest first, and the newest must be `live`: anything else, an unknown editor
-    or a history that never reaches Kraft's text, may be a person's."""
+    Newest first, and the newest must be `live` unless its text is unknown: anything
+    else, an unknown editor or a history that never reaches Kraft's text, may be a
+    person's. A save of unknown text is never Kraft's, so only a bot's passes."""
     revisions = list(revisions)
-    if not revisions or body_hash(revisions[0].text) != body_hash(live):
+    if not revisions:
+        return False
+    newest = revisions[0].text
+    if newest is not None and body_hash(newest) != body_hash(live):
         return False
     for revision in revisions:
-        if body_hash(revision.text) in ours:
+        if revision.text is not None and body_hash(revision.text) in ours:
             return True
         if not revision.bot:
             return False

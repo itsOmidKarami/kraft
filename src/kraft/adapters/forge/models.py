@@ -477,9 +477,10 @@ class MRDetails:
 @dataclass(frozen=True)
 class DescriptionRevision:
     """One saved version of a merge request's description, and whether a bot
-    account saved it. An unknown or deleted editor is not a bot."""
+    account saved it. An unknown or deleted editor is not a bot. `text` is None
+    for a save the forge names without its text (a GitLab checkbox tick)."""
 
-    text: str
+    text: str | None
     bot: bool
 
 
@@ -782,6 +783,9 @@ class FakeForge:
     opened_check_clean: dict[int, bool] = field(default_factory=dict)
     #: The branch each opened merge request targets, by number.
     opened_base: dict[int, str] = field(default_factory=dict)
+    #: What a merge request is created with before `open_mr` writes the body as an
+    #: edit (`GlabCli.open_seed`); None writes the body at creation, as GitHub does.
+    open_seed: str | None = None
     #: What `mr_description_history` answers, newest first, or the error it raises.
     description_history: tuple[DescriptionRevision, ...] | ForgeError = ()
     #: How many times that history was read.
