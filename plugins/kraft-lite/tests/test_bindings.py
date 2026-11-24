@@ -457,8 +457,7 @@ def test_every_kraft_ref_and_target_has_a_default():
     # Kraft's forge adapter reads the MR's title, body and labels from it.
     for target in ("mr.open_draft", "mr.sync"):
         assert "`produced.mr_meta`" in kl_bindings.FORGE_DEFAULTS[target]["prompt"], target
-    assert kl_bindings.MR_FOOTER in kl_bindings.FORGE_DEFAULTS["mr.open_draft"]["prompt"]
-    assert "Opened by Kraft Lite" in kl_bindings.FORGE_DEFAULTS["mr.sync"]["prompt"]
+        assert kl_bindings.MR_FOOTER in kl_bindings.FORGE_DEFAULTS[target]["prompt"], target
     for entry in (
         *kl_bindings.BUILTIN_DEFAULTS.values(),
         *kl_bindings.FORGE_DEFAULTS.values(),

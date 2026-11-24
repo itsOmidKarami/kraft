@@ -56,8 +56,12 @@ FORGE_DEFAULTS: dict[str, dict] = {
         "prompt": (
             "Open a draft merge request for the working branch on this repo's forge, or report "
             "the one already open. Take its title, description and labels from the run's "
-            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one. End the "
-            "description with this footer, after a `---` line, `<chain_id>` filled in: " + MR_FOOTER
+            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one. If one is "
+            "already open and its description lacks the footer below, add it. The footer comes "
+            "last, after any template section or attribution line: a blank line, a line of "
+            "`---`, then this line with `<chain_id>` replaced by `state`'s `chain_id` (in a child "
+            "walking a slice, the controller's chain id from its starting instructions): "
+            + MR_FOOTER
         ),
     },
     "mr.sync": {
@@ -65,8 +69,9 @@ FORGE_DEFAULTS: dict[str, dict] = {
         "prompt": (
             "Push the working branch so the merge request matches it, and report anything the "
             "forge rejected. Keep its title, description and labels as the run's `mr_meta` "
-            "document (`state`'s `produced.mr_meta`) has them, when there is one, and keep the "
-            "description's closing `Opened by Kraft Lite` footer."
+            "document (`state`'s `produced.mr_meta`) has them, when there is one, and end the "
+            "description with the same blank line, `---` line and footer `mr.open_draft` gave "
+            "it: " + MR_FOOTER
         ),
     },
     "mr.ci": {
