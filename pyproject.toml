@@ -120,7 +120,7 @@ where = ["src"]
 kraft = ["_bundled/**/*", "_bundled/kraft-default/.kraft/*", "skills/**/*", "harnesses/**/*", "prices.json", "detectors.yaml", "templates/lucide_icons.txt", "worker/bin/kraft", "console/*.tcss"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "plugins/kraft-lite/tests"]
+testpaths = ["tests", "plugins/kraft-lite/tests", "plugins/herdr/tests"]
 # A per-test ceiling, so a hang fails with a name and a traceback instead of
 # stalling the job. Generous on purpose -- the slowest honest tests here drive a
 # real uvicorn or a real `bd` -- so anything that trips this is wedged, not slow.
