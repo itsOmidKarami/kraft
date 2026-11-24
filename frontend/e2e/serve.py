@@ -46,6 +46,11 @@ from support.harness import (  # noqa: E402
     make_repo_with_engineering,
 )
 
+#: The server child's interpreter flags. -X faulthandler: SIGABRT dumps its
+#: stack (`_dump_and_terminate`, and CI's failure step). -u: what it printed
+#: reaches the log even when it is killed.
+CHILD_FLAGS = ("-X", "faulthandler", "-u")
+
 
 def _listeners_on(port: int | str) -> list[str]:
     """PIDs holding the port, best effort — purely for the error message."""
@@ -224,9 +229,7 @@ def main() -> int:
     # Own process group: the orchestrator spawns detached agent/git children,
     # and terminating only the direct child orphans them (Kraft-2ih).
     proc = subprocess.Popen(
-        # -X faulthandler: SIGABRT dumps its stack (`_dump_and_terminate`).
-        # -u: what it printed reaches the log even when it is killed.
-        [sys.executable, "-X", "faulthandler", "-u", "-m", "kraft"],
+        [sys.executable, *CHILD_FLAGS, "-m", "kraft"],
         cwd=REPO,
         env=env,
         start_new_session=True,

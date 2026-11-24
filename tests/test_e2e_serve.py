@@ -221,11 +221,12 @@ def test_a_child_that_never_got_healthy_leaves_its_stack_and_no_group(serve):
         "import subprocess, sys, time\n"
         "def stalled_here():\n"
         "    print(subprocess.Popen(['sleep', '60']).pid, flush=True)\n"
+        "    print('said before it stalled')\n"
         "    time.sleep(60)\n"
         "stalled_here()\n"
     )
     proc = subprocess.Popen(
-        [sys.executable, "-X", "faulthandler", "-c", stalled],
+        [sys.executable, *serve.CHILD_FLAGS, "-c", stalled],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -241,5 +242,5 @@ def test_a_child_that_never_got_healthy_leaves_its_stack_and_no_group(serve):
     if not select.select([proc.stdout], [], [], 10)[0]:
         os.kill(grandchild, signal.SIGKILL)
         pytest.fail("the grandchild outlived the teardown")
-    assert proc.stdout.read() == ""
+    assert proc.stdout.read() == "said before it stalled\n"
     assert "in stalled_here" in proc.stderr.read()
