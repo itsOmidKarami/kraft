@@ -194,6 +194,8 @@ async def prepare(
     if h.interactive.resume is not None:
         resumed = dispatch._resumable_session(db, wid, node, task, h)
     cwd = cwd_of(db, run_dirs, row)
+    if not cwd.is_dir():
+        raise TakeoverRefused(f"this work item's worktree is not on disk ({cwd})")
     branch = store.branch_for(row)
     tip = await asyncio.to_thread(_tip_of, cwd, branch)
     minted = str(uuid.uuid4())

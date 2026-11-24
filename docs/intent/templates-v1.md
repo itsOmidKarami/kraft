@@ -812,7 +812,7 @@ enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_
 When resuming a paused agent task, the system SHALL resume its durable session
 when available, and otherwise restart that task with its original instruction
 and any supplied steer.
-enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
+enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session[the-log-names-it], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
 
 ## REQ steer-reaches-only-stopped-agentic-work
 

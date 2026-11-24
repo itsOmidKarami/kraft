@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -94,6 +95,10 @@ async def _gemini(it, monkeypatch):
     await it.database.write(lambda c: c.execute("UPDATE worker_sessions SET harness = 'gemini'"))
 
 
+async def _no_worktree(it, monkeypatch):
+    shutil.rmtree(it.worktree)
+
+
 async def _taken(it, monkeypatch):
     await it.database.write(
         lambda c: store.take_takeover_lock(
@@ -167,6 +172,14 @@ async def _escalating(it, monkeypatch):
             "paused",
             r"this step has several tasks \(work.main.impl, work.main.docs\)",
             id="several-tasks",
+        ),
+        pytest.param(
+            _no_worktree,
+            {},
+            CHAIN,
+            "paused",
+            "worktree is not on disk",
+            id="no-worktree",
         ),
         pytest.param(
             _taken, {}, CHAIN, "paused", "a person has this item's session open", id="already-live"
