@@ -114,6 +114,40 @@ def test_events_follow_filters_by_item_and_stops_on_completion(
     assert out.count("SEQ") == 1
 
 
+def test_events_all_follows_every_item_from_the_board_cursor(
+    app, monkeypatch, capsys, make_item, repo
+):
+    """`--all` is the instance-wide stream: it starts at the board's cursor (seq 0
+    would replay every event ever committed) and one item completing does not
+    end it, which is what the single-item follow above does."""
+    a = make_item(repo)
+    b = make_item(repo, "another chain")
+    seen_after = []
+
+    async def fake_stream(after_seq=0):
+        seen_after.append(after_seq)
+        yield {"type": "node_started", "seq": 10, "work_item_id": a}
+        yield {"type": "work_item_completed", "seq": 11, "work_item_id": a}
+        yield {"type": "node_started", "seq": 12, "work_item_id": b}
+
+    async def fake_board(*args, **kwargs):
+        return [], 9
+
+    monkeypatch.setattr(client, "stream_events", fake_stream)
+    monkeypatch.setattr(client, "board", fake_board)
+    cli.main(["view", "events", "--all", "-f", "--json"])
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [line["seq"] for line in lines] == [10, 11, 12]  # did not stop at a's completion
+    assert seen_after == [9]  # started at the board cursor, not 0
+
+
+def test_events_all_needs_follow(app, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["view", "events", "--all"])
+    assert exc.value.code != 0
+    assert "--all needs -f" in capsys.readouterr().err
+
+
 def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     app, monkeypatch, capsys, make_item, repo
 ):
