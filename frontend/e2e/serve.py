@@ -34,6 +34,11 @@ import urllib.request
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 
+# CI waits 60s for the lines `main` prints, however late this process started:
+# repeat, so a hang in these imports or in setup leaves its stack in the log.
+if __name__ == "__main__":
+    faulthandler.dump_traceback_later(15, repeat=True)
+
 from support.harness import (  # noqa: E402
     fake_templates_dir,
     isolated_bd,
@@ -145,8 +150,6 @@ def _terminate(proc: subprocess.Popen) -> None:
 
 
 def main() -> int:
-    # CI waits 60s for the lines printed below: a hung setup leaves its stack in the log.
-    faulthandler.dump_traceback_later(40)
     dist = REPO / "frontend" / "dist"
     if not (dist / "index.html").exists():
         sys.exit(f"missing {dist}/index.html — run `cd frontend && npm run build` first")
@@ -210,6 +213,11 @@ def main() -> int:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
+            print(
+                f"the orchestrator exited (code {proc.returncode}) before it was healthy",
+                file=sys.stderr,
+                flush=True,
+            )
             return proc.returncode or 1
         try:
             with urllib.request.urlopen(health, timeout=1) as r:

@@ -699,7 +699,7 @@ jobs:
         run: |
           [ -n "$KRAFT_E2E_REPO" ] && [ -n "$KRAFT_E2E_BASE" ] && exit 0
           cat e2e-server.log
-          # From /proc: the job installs nothing, so `ps` may not be there.
+          # From /proc: the job installs no apt packages, so `ps` may not be there.
           echo "--- processes still running"
           for p in /proc/[0-9]*; do
             printf '%s: ' "${p#/proc/}"
