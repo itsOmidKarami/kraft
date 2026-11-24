@@ -257,6 +257,11 @@ async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock, pu
         ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]
     assert not ca.session_dir(run_dirs, "w1-s1").exists()
+    if pulled is False:  # a long image, behind a remote machine's longest name
+        image = "registry.example.com/" + "x" * 60 + "/socat@sha256:" + "0" * 64
+        calls.answers[image] = (1, "")
+        said = f"kraft: {'m' * 39}: {await docker.relay_not_pulled(docker.Runtime(), image)}"
+        assert f"docker pull {image}" in said[: walk._STOP_CAUSE_MAX - 1]
 
 
 @pytest.mark.parametrize(

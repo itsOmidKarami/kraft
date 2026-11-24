@@ -776,7 +776,8 @@ async def relay_not_pulled(host: Runtime, relay_image: str) -> str | None:
     if pulled is None or pulled[0] == 0:
         return None
     return (
-        f"the egress relay image {relay_image!r} is not pulled -- "
+        # The image once, in the command: the board keeps a stop's first 300 characters.
+        f"the egress relay image is not pulled -- "
         f"run: {host.cli} pull {relay_image}{_relay_mirror_hint(host, relay_image)}"
     )
 
