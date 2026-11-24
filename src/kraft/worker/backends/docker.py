@@ -803,8 +803,8 @@ def channel_refusal(
         # The board keeps a stop's first 300 characters: the command comes first.
         "the egress relay check did not run: check `kraft admin doctor`, or pull its "
         f"image: {host.cli} pull {relay_image}{_relay_mirror_hint(host, relay_image)}. "
-        f"Without it Kraft could not tell whether {host.describe()} lets a container reach "
-        "a host unix socket"
+        f"Until that check runs, Kraft can't tell whether {host.describe()} lets a container "
+        "reach a host unix socket"
     )
 
 

@@ -155,7 +155,7 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
         (True, "", "unix"),
         (False, "OperatingSystem: Docker Desktop", "tls"),
         (False, "", "does not say it runs in a VM"),
-        (None, "", "could not tell"),
+        (None, "", "relay check did not run"),
     ],
     ids=["linux-native", "vm", "socket-refused-off-a-vm", "inconclusive"],
 )
