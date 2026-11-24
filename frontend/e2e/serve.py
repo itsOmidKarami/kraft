@@ -19,6 +19,7 @@ Ctrl-C to tear the server down. The temp dir is left behind for inspection.
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import pathlib
@@ -144,6 +145,8 @@ def _terminate(proc: subprocess.Popen) -> None:
 
 
 def main() -> int:
+    # CI waits 60s for the lines printed below: a hung setup leaves its stack in the log.
+    faulthandler.dump_traceback_later(40)
     dist = REPO / "frontend" / "dist"
     if not (dist / "index.html").exists():
         sys.exit(f"missing {dist}/index.html — run `cd frontend && npm run build` first")
@@ -240,6 +243,7 @@ def main() -> int:
     )
     urllib.request.urlopen(req, timeout=10).close()
 
+    faulthandler.cancel_dump_traceback_later()
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
     print(f"  KRAFT_E2E_REPO={repo}")
     print(f"  KRAFT_E2E_BASE=http://127.0.0.1:{PORT}\n", flush=True)

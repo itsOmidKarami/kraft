@@ -688,7 +688,8 @@ jobs:
         run: echo '{"mcpServers":{"kraft":{"command":"kraft","args":["admin","mcp"]}}}' > ~/.claude.json
       - name: start the harness server
         run: |
-          uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
+          # -v: a stalled `uv run` otherwise writes nothing to this log.
+          uv run -v python frontend/e2e/serve.py > e2e-server.log 2>&1 &
           for i in $(seq 1 60); do grep -q KRAFT_E2E_REPO e2e-server.log && break; sleep 1; done
           {
             echo "KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' e2e-server.log)"
@@ -696,8 +697,16 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: the harness actually came up
         run: |
-          test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
-          test -n "$KRAFT_E2E_BASE" || { cat e2e-server.log; exit 1; }
+          [ -n "$KRAFT_E2E_REPO" ] && [ -n "$KRAFT_E2E_BASE" ] && exit 0
+          cat e2e-server.log
+          # From /proc: the job installs nothing, so `ps` may not be there.
+          echo "--- processes still running"
+          for p in /proc/[0-9]*; do
+            printf '%s: ' "${p#/proc/}"
+            tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true
+            echo
+          done
+          exit 1
       # Bail after 3 failures instead of paying the full 120s timeout serially
       # for every spec: a systemic break turns a ~1min green run into over an
       # hour of dead runner time otherwise.
