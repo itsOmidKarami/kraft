@@ -8,7 +8,6 @@ import pytest
 from kraft import events, store
 from kraft.adapters import forge
 from kraft.adapters.forge.github_api import GitHubApi
-from kraft.adapters.forge.gitlab_api import GitLabApi
 from kraft.executor import prompts
 
 
@@ -484,9 +483,6 @@ _BOT = gl_note("description", True, EDITED, 4)
 
 
 @pytest.mark.parametrize(
-    "client", [lambda: forge.GlabCli(), lambda: GitLabApi("corp", None)], ids=["cli", "api"]
-)
-@pytest.mark.parametrize(
     "pages, live, regenerated",
     [
         ([gl_page(_OURS, _BOT)], EDITED, True),
@@ -532,11 +528,12 @@ _BOT = gl_note("description", True, EDITED, 4)
     ],
 )
 async def test_gitlab_reads_who_saved_each_description(
-    monkeypatch, tmp_path, client, pages, live, regenerated
+    monkeypatch, tmp_path, pages, live, regenerated
 ):
     """From GraphQL notes, newest first; anything it cannot vouch for reads as a
-    person's save, so the description is kept."""
-    gl = client()
+    person's save, so the description is kept. Both clients send the same request
+    (test_forge_parity.py), so the CLI's stands for both here."""
+    gl = forge.GlabCli()
     sent: list[dict] = []
 
     async def _mr(repo, branch=""):
