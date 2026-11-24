@@ -146,6 +146,8 @@
           "stuck_escalation_started",
           "sweep_failed",
           "sweep_left_out",
+          "takeover_ended",
+          "takeover_started",
           "task_marked",
           "test_scopes_selected",
           "thread_updated",

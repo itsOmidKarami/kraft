@@ -284,6 +284,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         skip_stmts = (*skip_stmts, "idx_work_items_slice")
     if version < 61:
         drop_lines = (*drop_lines, "measurement")
+    if version < 62:
+        drop_lines = (*drop_lines, "takeover", "cli_session_id", "-- all NULL when none")
+        drop_lines = (*drop_lines, "-- (live while", "-- for it, the worker", "-- branch and tip")
+        drop_lines = (
+            *drop_lines,
+            "-- the CLI's own id",
+            "-- next resume continues",
+            "-- older than this column",
+        )
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
@@ -603,6 +612,11 @@ ADDED_COLUMNS = [
     (59, "work_items", ("docs_commit", "pinned_head"), None),
     (59, "work_items", ("paused_by_parent",), 0),
     (60, "work_items", ("measurement",), None),  # NULL: no measurement open
+    # NULL: a row written before takeovers holds no lock and left no CLI session
+    (61, "work_items", ("takeover_pid", "takeover_pid_start", "takeover_session_id"), None),
+    (61, "work_items", ("takeover_resumed_from", "takeover_branch", "takeover_tip"), None),
+    (61, "work_items", ("takeover_started_at",), None),
+    (61, "worker_sessions", ("cli_session_id",), None),
 ]
 
 

@@ -45,6 +45,8 @@ class WorkItemEvent(StrEnum):
     JOIN_LEFTOVERS_REMOVED = "join_leftovers_removed"
     JOIN_HANDLER_RESUMED = "join_handler_resumed"
     SLICE_PAUSED = "slice_paused"
+    TAKEOVER_STARTED = "takeover_started"
+    TAKEOVER_ENDED = "takeover_ended"
 
 
 _PLAIN = EventTraits()
@@ -86,6 +88,8 @@ WORK_ITEM_EVENT_TRAITS = total(
         WorkItemEvent.JOIN_LEFTOVERS_REMOVED: _PLAIN,
         WorkItemEvent.JOIN_HANDLER_RESUMED: _PLAIN,
         WorkItemEvent.SLICE_PAUSED: _PLAIN,
+        WorkItemEvent.TAKEOVER_STARTED: _PLAIN,
+        WorkItemEvent.TAKEOVER_ENDED: _PLAIN,
     },
     name="WORK_ITEM_EVENT_TRAITS",
 )

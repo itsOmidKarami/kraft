@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 61
+SCHEMA_VERSION = 62
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -160,6 +160,18 @@ CREATE TABLE work_items (
   -- measurement: the open measurement of a node whose fix loop starts early, JSON
   -- {node_id, round, since} (`store.stored_measurement`), NULL when no measurement is open
   measurement      TEXT,
+  -- a person's takeover of the item's agent session (`kraft item takeover`),
+  -- all NULL when none is open: the CLI's pid and start time hold the lock
+  -- (live while `proc_identity` still knows them), then the session id minted
+  -- for it, the worker session it forked from (NULL: a fresh one), and the
+  -- branch and tip it started on, for the warnings printed at exit
+  takeover_pid         INTEGER,
+  takeover_pid_start   REAL,
+  takeover_session_id  TEXT,
+  takeover_resumed_from TEXT,
+  takeover_branch      TEXT,
+  takeover_tip         TEXT,
+  takeover_started_at  TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -245,6 +257,10 @@ CREATE TABLE worker_sessions (
   -- the machine a remote step ran on (`kraft.remote`), NULL for a local one and
   -- every row older than this column
   runner         TEXT,
+  -- the CLI's own id for the session a takeover left on this paused row, which
+  -- the next resume continues (`takeover.release`). NULL: none, and every row
+  -- older than this column
+  cli_session_id TEXT,
   -- a session's id is unique only within its work item (`store.new_session_id`),
   -- and a row from before that keeps its 32-character id, unique on its own
   PRIMARY KEY (work_item_id, id)
@@ -1475,6 +1491,18 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
     ],
     # The open measurement of a node whose fix loop starts early: JSON, NULL = none open.
     60: ["ALTER TABLE work_items ADD COLUMN measurement TEXT"],
+    # A person's takeover of an item's agent session: the lock on the item, and the
+    # CLI session a takeover left on the paused worker row.
+    61: [
+        "ALTER TABLE work_items ADD COLUMN takeover_pid INTEGER",
+        "ALTER TABLE work_items ADD COLUMN takeover_pid_start REAL",
+        "ALTER TABLE work_items ADD COLUMN takeover_session_id TEXT",
+        "ALTER TABLE work_items ADD COLUMN takeover_resumed_from TEXT",
+        "ALTER TABLE work_items ADD COLUMN takeover_branch TEXT",
+        "ALTER TABLE work_items ADD COLUMN takeover_tip TEXT",
+        "ALTER TABLE work_items ADD COLUMN takeover_started_at TEXT",
+        "ALTER TABLE worker_sessions ADD COLUMN cli_session_id TEXT",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
