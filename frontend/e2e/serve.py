@@ -19,6 +19,7 @@ Ctrl-C to tear the server down. The temp dir is left behind for inspection.
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import pathlib
@@ -32,6 +33,11 @@ import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
+
+# CI waits 60s for the lines `main` prints, however late this process started:
+# repeat, so a hang in these imports or in setup leaves its stack in the log.
+if __name__ == "__main__":
+    faulthandler.dump_traceback_later(15, repeat=True)
 
 from support.harness import (  # noqa: E402
     fake_templates_dir,
@@ -207,6 +213,11 @@ def main() -> int:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
+            print(
+                f"the orchestrator exited (code {proc.returncode}) before it was healthy",
+                file=sys.stderr,
+                flush=True,
+            )
             return proc.returncode or 1
         try:
             with urllib.request.urlopen(health, timeout=1) as r:
@@ -240,6 +251,7 @@ def main() -> int:
     )
     urllib.request.urlopen(req, timeout=10).close()
 
+    faulthandler.cancel_dump_traceback_later()
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
     print(f"  KRAFT_E2E_REPO={repo}")
     print(f"  KRAFT_E2E_BASE=http://127.0.0.1:{PORT}\n", flush=True)
