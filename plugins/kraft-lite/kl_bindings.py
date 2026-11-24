@@ -45,13 +45,23 @@ FULL_SUITE = {
     "prompt": "Run the repo's full test suite, plus its fast checks, and report the result.",
 }
 
+#: What a merge request Lite opens is signed with, as Kraft signs its own (`mr_body`).
+MR_FOOTER = (
+    "_Opened by [Kraft Lite](https://kraft-sdlc.dev/guides/kraft-lite) for chain `<chain_id>`._"
+)
+
 FORGE_DEFAULTS: dict[str, dict] = {
     "mr.open_draft": {
         "kind": "prompt",
         "prompt": (
             "Open a draft merge request for the working branch on this repo's forge, or report "
             "the one already open. Take its title, description and labels from the run's "
-            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one."
+            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one. If one is "
+            "already open and its description lacks the footer below, add it. The footer comes "
+            "last, after any template section or attribution line: a blank line, a line of "
+            "`---`, then this line with `<chain_id>` replaced by `state`'s `chain_id` (in a child "
+            "walking a slice, the controller's chain id from its starting instructions): "
+            + MR_FOOTER
         ),
     },
     "mr.sync": {
@@ -59,7 +69,9 @@ FORGE_DEFAULTS: dict[str, dict] = {
         "prompt": (
             "Push the working branch so the merge request matches it, and report anything the "
             "forge rejected. Keep its title, description and labels as the run's `mr_meta` "
-            "document (`state`'s `produced.mr_meta`) has them, when there is one."
+            "document (`state`'s `produced.mr_meta`) has them, when there is one, and end the "
+            "description with the same blank line, `---` line and footer `mr.open_draft` gave "
+            "it: " + MR_FOOTER
         ),
     },
     "mr.ci": {

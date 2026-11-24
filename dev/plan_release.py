@@ -56,8 +56,10 @@ _KRAFT_COMMITS = re.compile(
     r"^<details>\s*<summary>Commits on this branch</summary>.*?</details>[ \t]*$",
     re.MULTILINE | re.DOTALL,
 )
-#: The footer Kraft signs every merge request with now.
-_KRAFT_FOOTER = re.compile(r"^---[ \t]*\n(?:[ \t]*\n)*_Opened by \[Kraft\]\(.*$", re.MULTILINE)
+#: The footer Kraft, or Kraft Lite, signs every merge request with now.
+_KRAFT_FOOTER = re.compile(
+    r"^---[ \t]*\n(?:[ \t]*\n)*_Opened by \[Kraft(?: Lite)?\]\(.*$", re.MULTILINE
+)
 _KRAFT_BRANCH = re.compile(
     r"^Branch `[^`\n]+`\. Review the diff and the pipeline before merging\.[ \t]*$", re.MULTILINE
 )
