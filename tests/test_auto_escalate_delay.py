@@ -132,15 +132,17 @@ async def test_tick_spends_no_slot_on_a_gate_no_agent_may_review(
 
 
 @pytest.mark.parametrize(
-    ("taken_over", "dispatched"),
+    ("taken_over", "spawned", "dispatched"),
     [
-        pytest.param(False, 1, id="free"),
+        pytest.param(False, 1, 1, id="free"),
         # A person's session is open in its worktree: no agent goes in beside them.
-        pytest.param(True, 0, id="taken-over"),
+        # `tick` itself spawns nothing (not only `auto_escalate_stuck` declining a
+        # step later), so no task holds the item's slot.
+        pytest.param(True, 0, 0, id="taken-over"),
     ],
 )
 async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
-    tmp_path, monkeypatch, repo, stub_app, taken_over, dispatched
+    tmp_path, monkeypatch, repo, stub_app, taken_over, spawned, dispatched
 ):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     calls = []
@@ -184,6 +186,7 @@ async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
             )
         )
     await auto_escalate_delay.tick(app)
+    assert len(app.state.tasks) == spawned
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
     assert len(calls) == dispatched
 

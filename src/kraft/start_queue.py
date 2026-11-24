@@ -37,7 +37,7 @@ import logging
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from kraft import events, storage, store, takeover, when_free
+from kraft import events, storage, store, when_free
 from kraft.store._common import joined
 from kraft.vocab import WorkItemEvent, WorkItemStatus
 
@@ -92,8 +92,6 @@ async def tick(app) -> list[str]:
             continue
         if _held_by_siblings(st, wid):
             continue
-        if await takeover.held(st.db, st.run_dirs, wid) is not None:
-            continue  # a person has its session open
         if storage.holds(st, wid):
             # Keeps its place, and is not asked again each tick (its door would
             # write another `work_item_storage_held`). A start behind it that
