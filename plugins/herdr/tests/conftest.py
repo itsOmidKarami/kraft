@@ -7,5 +7,7 @@ import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1]
-if str(PLUGIN) not in sys.path:
-    sys.path.insert(0, str(PLUGIN))
+# The plugin's module, and this directory's `herdr_fakes`.
+for directory in (PLUGIN, Path(__file__).resolve().parent):
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))

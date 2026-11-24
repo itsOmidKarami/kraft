@@ -4,3 +4,12 @@ version = "2.6.0"
 min_herdr_version = "0.9.2"
 description = "Every live Kraft work item as its own tab, with its log and a sidebar state"
 platforms = ["linux", "macos"]
+
+# The loop that keeps the tabs and states current. The startup hook opens it
+# (a hook is one-shot and nothing supervises it), and it holds a lock so a
+# second copy after a live handoff exits at once.
+[[panes]]
+id = "bridge"
+title = "Kraft bridge"
+placement = "tab"
+command = ["python3", "kraft_herdr.py", "bridge"]
