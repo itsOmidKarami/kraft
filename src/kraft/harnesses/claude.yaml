@@ -65,6 +65,18 @@ capabilities:
   usage:            { source: envelope, reader: claude-stream-json }
   rate_limit_signal: { reader: claude-stream-json }
 
+# How a person runs this CLI themselves, for `kraft item takeover`: none of
+# the headless flags above (no -p, no approval channel, no tool lists, no
+# context), because the person is the policy. `--fork-session` leaves the
+# worker's own transcript untouched; `--session-id` names the fork so Kraft
+# knows it without parsing anything (checked with claude 2.1.328, which
+# writes it as ~/.claude/projects/<folder>/<id>.jsonl).
+interactive:
+  command: [claude]
+  resume: { cli: ["--resume", "{value}", "--fork-session"] }
+  session_id: { cli: ["--session-id", "{value}"] }
+  session_file: "~/.claude/projects/*/{value}.jsonl"
+
 # Kraft-9ldw2: for the same reason as the Monitor deny, no background tasks.
 # A `claude -p` stops what is still running 10 min after the last turn, so a
 # sub-agent left in the background loses its uncommitted work. This removes

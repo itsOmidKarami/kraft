@@ -3,7 +3,9 @@ dispatched onto a `needs_human` stop nobody has looked at, and the self-retry
 that agent may leave behind."""
 
 import json
+import os
 
+import psutil
 import pytest
 from support.harness import git
 from support.item_walk import (
@@ -113,6 +115,22 @@ async def _running_escalation(it):
     await it.session("s1", "escalation")
 
 
+async def _taken_over(it):
+    # A person holds the item's session open, as this test's own live process.
+    await it.database.write(
+        lambda c: store.take_takeover_lock(
+            c,
+            it.id,
+            pid=os.getpid(),
+            pid_start=psutil.Process().create_time(),
+            session_id="U",
+            resumed_from=None,
+            branch="b",
+            tip="t",
+        )
+    )
+
+
 async def _over_budget(it):
     await it.session("s1", "implementation.main.run")
     await it.database.write(
@@ -140,6 +158,8 @@ async def _over_budget(it):
         ("needs_human", _escalation("needs_context", retried=True), {}, 1, []),
         ("needs_human", _escalation("done"), {}, 1, []),
         ("needs_human", _running_escalation, {}, 0, []),
+        # A person has its session open: no agent goes into its worktree beside them.
+        ("needs_human", _taken_over, {}, 0, []),
         ("needs_human", None, {"auto_escalate_stuck": False}, 0, []),
         ("needs_human", None, {"auto_escalate_delay_s": 600}, 0, []),
         # A delay of 0 behaves exactly like no delay at all.
@@ -163,6 +183,7 @@ async def _over_budget(it):
         "question-from-a-prior-run",
         "escalation-finished-clean",
         "escalation-already-running",
+        "taken-over",
         "disabled-by-policy",
         "before-its-delay",
         "delay-elapsed",

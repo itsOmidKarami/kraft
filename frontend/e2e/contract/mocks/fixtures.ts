@@ -923,13 +923,14 @@ export function serverKeys(b: ItemBundle): ItemBundle {
     submodules: null, suggested_action: null, test_result: null, worktree_exists: true, in_place: false,
     children: null, slices: null, parent_id: null, slice_key: null, slice_generation: null, docs_commit: null, pinned_head: null,
     group: null, group_state: null, paused_by_parent: 0,
+    takeover_pid: null, takeover_pid_start: null, takeover_session_id: null, takeover_resumed_from: null, takeover_branch: null, takeover_tip: null, takeover_started_at: null,
   });
   // Not through `fill`: a transition's new event has to show, and `settle` sets it again after each transition.
   it.gate_rounds = gateRoundsOf(b.events, b.threads ?? [], b.reviews ?? []);
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {
-    harness: isAgentSession(it.materialized_chain, s.hook_point, !!s.model) ? "claude" : null, command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
+    harness: isAgentSession(it.materialized_chain, s.hook_point, !!s.model) ? "claude" : null, command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, cli_session_id: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
     tokens_cache_read: 0, tokens_cache_write: 0, log_path: `${run}/${s.id}/session.log`, result_path: `${run}/${s.id}/out/result.json`,
   });
   return b;

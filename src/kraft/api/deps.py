@@ -397,6 +397,24 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
             )
 
 
+async def refuse_if_taken_over(st, wid: str) -> None:
+    """409 while a person has the item's agent session open (`kraft item
+    takeover`): two drivers in one worktree. Every door that acts on a stopped
+    item calls it, `pause` aside. A lock whose CLI is gone is released here, so
+    a killed terminal never wedges the item."""
+    from kraft import takeover
+
+    if st.db.read(lambda c: store.takeover_lock(c, wid)) is None:
+        return  # nearly always: nothing below is read for an item nobody has taken
+    lock = await takeover.held(st.db, st.run_dirs, wid)
+    if lock is not None:
+        raise HTTPException(
+            409,
+            f"a person has this item's session open (since {takeover.since(lock)}); "
+            f"exit it first, or `kraft item takeover {wid} --release`",
+        )
+
+
 def _begin_reload(st) -> bool:
     """On the loop, before the read: say why addons.yaml and addons.lock do
     not read, and record what is about to be loaded (recorded first, so a file

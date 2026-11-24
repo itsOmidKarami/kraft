@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from kraft import events, store, when_free
+from kraft import events, store, takeover, when_free
 from kraft.executor import gates
 from kraft.vocab import HOLDS_SLOT, WorkItemStatus
 from kraft.vocab.sql import in_list
@@ -123,6 +123,8 @@ async def tick(app) -> list[str]:
         wid = row["id"]
         if wid in st.tasks:
             continue
+        if await takeover.held(st.db, st.run_dirs, wid) is not None:
+            continue  # a person has its session open: no agent goes into its worktree
         # Only rows that actually opted into a delay (code review finding). At
         # the default 0 the inline call from `run()`/`resume()` already fired
         # immediately and there is nothing left for a backstop to back-stop --

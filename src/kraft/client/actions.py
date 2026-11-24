@@ -361,6 +361,26 @@ async def pause(work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{transport.segment(target)}/pause")
 
 
+async def takeover_begin(work_item_id: str | None, *, pid: int, pid_start: float) -> dict:
+    """Take the lock a person's own agent session holds on a stopped item, for
+    the process `pid` (the `kraft item takeover` CLI, never the agent). Answers
+    the command to run, `{argv, cwd, session_id, resumed_from}`. No MCP tool: a
+    takeover is a terminal's."""
+    target = await context._forbid_self_action(work_item_id)
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/takeover",
+        {"pid": pid, "pid_start_time": pid_start},
+    )
+
+
+async def takeover_end(work_item_id: str | None = None) -> dict:
+    """End the item's takeover, whoever holds it: `{status, recorded, warnings}`.
+    Also the way out of a lock a crashed CLI left."""
+    target = await context._forbid_self_action(work_item_id)
+    answer = await transport._delete(f"/work-items/{transport.segment(target)}/takeover")
+    return answer if isinstance(answer, dict) else {}
+
+
 async def unblock(work_item_id: str | None = None, dependency: str | None = None) -> dict:
     """Drop what a blocked or paused item still comes after, or the one
     dependency named, so it no longer waits for it."""

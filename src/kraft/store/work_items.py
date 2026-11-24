@@ -1281,6 +1281,64 @@ def set_escalation_session(
     )
 
 
+_TAKEOVER_COLUMNS = (
+    "takeover_pid, takeover_pid_start, takeover_session_id, takeover_resumed_from, "
+    "takeover_branch, takeover_tip, takeover_started_at"
+)
+
+
+def take_takeover_lock(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    *,
+    pid: int,
+    pid_start: float,
+    session_id: str,
+    resumed_from: str | None,
+    branch: str,
+    tip: str,
+) -> None:
+    """Record that a person has the item's agent session open (`kraft item
+    takeover`). The CLI's own `pid` holds it, never the agent's: closing the
+    terminal hangs up both. The caller has already refused a second one, in the
+    same write."""
+    conn.execute(
+        "UPDATE work_items SET takeover_pid = ?, takeover_pid_start = ?, "
+        "takeover_session_id = ?, takeover_resumed_from = ?, takeover_branch = ?, "
+        "takeover_tip = ?, takeover_started_at = ? WHERE id = ?",
+        (pid, pid_start, session_id, resumed_from, branch, tip, _now(), work_item_id),
+    )
+
+
+def takeover_lock(conn: sqlite3.Connection, work_item_id: str) -> sqlite3.Row | None:
+    """The item's `takeover_*` columns, or None when no takeover holds it.
+    Raw: whether the pid behind it is alive is `takeover.live`'s call."""
+    row = conn.execute(
+        f"SELECT {_TAKEOVER_COLUMNS} FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    return row if row is not None and row["takeover_pid"] is not None else None
+
+
+def clear_takeover_lock(conn: sqlite3.Connection, work_item_id: str) -> None:
+    conn.execute(
+        "UPDATE work_items SET takeover_pid = NULL, takeover_pid_start = NULL, "
+        "takeover_session_id = NULL, takeover_resumed_from = NULL, takeover_branch = NULL, "
+        "takeover_tip = NULL, takeover_started_at = NULL WHERE id = ?",
+        (work_item_id,),
+    )
+
+
+def set_cli_session_id(
+    conn: sqlite3.Connection, work_item_id: str, session_row_id: str, cli_session_id: str
+) -> None:
+    """Leave a takeover's CLI session on the paused worker row it forked from,
+    so the next resume continues it (`dispatch._resumable_session`)."""
+    conn.execute(
+        "UPDATE worker_sessions SET cli_session_id = ? WHERE work_item_id = ? AND id = ?",
+        (cli_session_id, work_item_id, session_row_id),
+    )
+
+
 def take_steer(conn: sqlite3.Connection, work_item_id: str) -> str | None:
     """Read and clear the pending steer — it belongs to one relaunch, not to every
     later one."""

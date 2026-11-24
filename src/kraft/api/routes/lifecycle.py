@@ -28,12 +28,14 @@ from kraft import (
     start_queue,
     storage,
     store,
+    takeover,
     when_free,
 )
+from kraft import harness as harness_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
-from kraft.api import api_router, deps, item_ids
+from kraft.api import api_router, deps, item_ids, perimeter
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
@@ -115,6 +117,12 @@ class MrLabels(BaseModel):
 class CiRerun(BaseModel):
     #: What the repair saw: a job that died before any check of the code ran.
     reason: str
+
+
+class Takeover(BaseModel):
+    #: The `kraft item takeover` CLI's own process, which holds the lock.
+    pid: int
+    pid_start_time: float
 
 
 class Steer(BaseModel):
@@ -612,6 +620,7 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._work_item_row(st, wid)
     reason = (body.reason if body else "").strip() or None
     if row["status"] not in admitting(Verb.ABANDON):
@@ -915,6 +924,62 @@ async def pause_work_item(wid: str, request: Request):
     return {"id": wid, "paused_sessions": ids}
 
 
+def _takeover_caller(st, request: Request, wid: str) -> None:
+    """A takeover is a person's terminal on this machine: never a worker
+    session, never a remote peer."""
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "takeover runs on the machine Kraft runs on")
+    deps.forbid_self_action(st, request, wid, escalation_may=False)
+
+
+@api_router.post("/work-items/{wid}/takeover")
+async def takeover_work_item(wid: str, body: Takeover, request: Request):
+    """Take the lock a person's own agent session holds on a stopped item, and
+    answer with the command to run. The CLI runs it on its terminal and ends the
+    takeover with `DELETE`. The item's status does not change; no secret crosses:
+    the answer is a command line, a folder and two ids."""
+    st = request.app.state
+    _takeover_caller(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    try:
+        prepared = await takeover.prepare(
+            st.db,
+            st.run_dirs,
+            row,
+            harness_mod.load(None),
+            launch=deps.launch(st, row["repo"]),
+            pid=body.pid,
+            pid_start=body.pid_start_time,
+            starting=start_queue.starting(request.app),
+            walk_running=deps.task_is_live(request.app, wid),
+        )
+    except takeover.TakeoverRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "argv": prepared.argv,
+        "cwd": prepared.cwd,
+        "session_id": prepared.session_id,
+        "resumed_from": prepared.resumed_from,
+    }
+
+
+@api_router.delete("/work-items/{wid}/takeover")
+async def end_takeover(wid: str, request: Request):
+    """End the item's takeover: free it, and leave the person's session for the
+    next `resume` to continue when one was written. Also the way out of a lock a
+    crashed CLI left (`kraft item takeover ID --release`). Answers 200 with
+    nothing recorded when no takeover holds the item."""
+    st = request.app.state
+    _takeover_caller(st, request, wid)
+    deps._work_item_row(st, wid)
+    released = await takeover.release(st.db, st.run_dirs, wid, harness_mod.load(None))
+    return {
+        "status": released.status,
+        "recorded": released.recorded,
+        "warnings": released.warnings,
+    }
+
+
 @api_router.post("/work-items/{wid}/unblock")
 async def unblock_work_item(wid: str, request: Request, body: Unblock | None = None):
     """Stop the item coming after what it still waits on, or after the one
@@ -922,6 +987,7 @@ async def unblock_work_item(wid: str, request: Request, body: Unblock | None = N
     wait for is released by the scheduler's next pass (`kraft.start_queue`)."""
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.UNBLOCK):
         raise HTTPException(
@@ -1360,6 +1426,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     """Send a note to the agent of a paused item or one that needs context, so its next run
     reads it."""
     st = request.app.state
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.STEER) or (
         row["status"] == WorkItemStatus.NEEDS_HUMAN and not board._needs_context_stop(st, wid)
@@ -1381,6 +1448,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] is None:
         # #1198: an agent does not start a person's item on a disabled repo.
@@ -1844,6 +1912,7 @@ async def _retry(wid: str, body: Retry, request: Request):
 
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     asked = body  # as the caller sent it: a queued retry is made again from this
     if held := held_refusal(row):
@@ -2342,6 +2411,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if store.is_child(row):
         raise HTTPException(
@@ -2454,6 +2524,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     refuse_unjoined(st, deps._work_item_row(st, wid), "skip")
     # /skip has no live task to gate a race the way spawn does for every other
     # door: paused/needs_human have none yet, and claim_for_run's to_status
@@ -2800,6 +2871,7 @@ async def reopen_mr(wid: str, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["stop_kind"] != StopKind.MR_CLOSED:
         raise HTTPException(
@@ -2862,6 +2934,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     and leaves the item where no door leads back onto its chain."""
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._work_item_row(st, wid)
     reason = reason.strip()
     if not reason:
@@ -2905,6 +2978,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.ESCALATE):
         raise HTTPException(409, held_refusal(row) or "work item is not needs_human or paused")
@@ -3204,6 +3278,7 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
     if not reason:
         raise HTTPException(422, "a re-run needs a reason")
     row = deps._work_item_row(st, wid)
+    await deps.refuse_if_taken_over(st, wid)
     node_id = row["current_node_id"]
     node = ci_reruns.node_of(store.materialized_chain_of(row), node_id)
     if not ci_reruns.waits_on_mr_ci(node) and ci_reruns.pipeline_waits(node):

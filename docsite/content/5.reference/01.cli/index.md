@@ -90,6 +90,7 @@ Each command links to its entry.
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#item-resume) |
 | Pause a running item | [`kraft item pause`](/reference/cli/item#item-pause) |
 | Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#item-escalate) |
+| Work in the stopped agent's session myself | [`kraft item takeover`](/reference/cli/item#item-takeover) _Added in next_ |
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#item-skip) |
 | Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#item-set-overrides), or [`kraft item set-node-override`](/reference/cli/item#item-set-node-override) |
 | End it as done, or as cancelled | [`kraft item complete`](/reference/cli/item#item-complete), [`kraft item cancel`](/reference/cli/item#item-cancel) |
@@ -131,6 +132,7 @@ Each verb prints this without `--json`, and this with it:
 |---|---|---|
 | `console` | A terminal UI. | Not accepted. |
 | `view watch` | A board it redraws rather than returning a value. | Not accepted. Use `kraft view events --json`. |
+| `item takeover` | Your agent's own terminal screen, then the next steps. | Accepted with `--release` only. |
 | `repo path` | One plain line meant for `cd`. | Not accepted. Use `kraft view show --json`. |
 | `admin start`, `stop`, `restart`, `update` | Status lines. | Not accepted. |
 | `admin install-service`, `uninstall-service` | Status lines. | Not accepted. |

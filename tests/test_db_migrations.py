@@ -46,16 +46,10 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
 
     # columns and tables introduced after `version` were not there yet — decided
     # before the schema is built, or the drop never reaches it
-    if version < 2:
-        skip_stmts = (*skip_stmts, "retry_counters")
     if version < 3:
         drop_lines = (*drop_lines, "session_summary_ref")
     if version < 4:
         drop_lines = (*drop_lines, *V4_COLS)
-    if version < 6:
-        skip_stmts = (*skip_stmts, "auth_sessions")
-    if version < 18:
-        skip_stmts = (*skip_stmts, "work_item_repos")
     if version < 7:
         drop_lines = (*drop_lines, "submodules", "root_merge_policy", "-- cross-repo")
     if version < 8:
@@ -284,10 +278,13 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         skip_stmts = (*skip_stmts, "idx_work_items_slice")
     if version < 61:
         drop_lines = (*drop_lines, "measurement")
+    if version < 62:
+        drop_lines = (*drop_lines, "takeover", "cli_session_id")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
-    added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
+    added = {2: "retry_counters", 6: "auth_sessions", 18: "work_item_repos", 47: "review_viewed"}
+    added |= {48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
@@ -603,6 +600,8 @@ ADDED_COLUMNS = [
     (59, "work_items", ("docs_commit", "pinned_head"), None),
     (59, "work_items", ("paused_by_parent",), 0),
     (60, "work_items", ("measurement",), None),  # NULL: no measurement open
+    (61, "work_items", ("takeover_pid", "takeover_pid_start", "takeover_started_at"), None),
+    (61, "worker_sessions", ("cli_session_id",), None),  # NULL: no takeover left a session
 ]
 
 

@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
+import psutil
 import yaml
 
 from kraft import answers, client, render
@@ -173,6 +177,77 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
         common.item_action("paused {id}", small=answers.paused),
         ns.json,
     )
+
+
+#: What the child agent must not inherit: it would make the person's own
+#: `kraft item ...` calls from inside the session read as a worker acting on its
+#: own item.
+_WORKER_ENV = ("KRAFT_WORK_ITEM_ID", "KRAFT_SESSION_ID")
+
+
+def _after_takeover(wid: str, ended: dict) -> str:
+    """What to do now: the exit's warnings, then the verbs that hand the item
+    back, by the status it was left in."""
+    lines = [f"warning: {w}" for w in ended.get("warnings", [])]
+    if ended.get("status") == WorkItemStatus.PAUSED:
+        carried = (
+            "continues your conversation"
+            if ended.get("recorded")
+            else "continues the worker's own conversation, where it has one"
+        )
+        lines += [
+            f'kraft item resume {wid} [--steer "..."]   runs the step again with your '
+            f"commits and {carried}.",
+            f"kraft item skip {wid}   if you finished the step yourself.",
+        ]
+    else:
+        lines += [
+            f"kraft item skip {wid}   if you finished the step yourself.",
+            f'kraft item retry {wid} --steer "..."   runs it again with your commits. Your '
+            "conversation won't carry over (retry always starts fresh), so put what matters "
+            "in --steer.",
+        ]
+    return "\n".join(lines)
+
+
+def _cmd_takeover(ns: argparse.Namespace) -> None:
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise ValueError("a worker does not take over an item")
+    wid = asyncio.run(client.resolve_work_item(ns.id))
+    if ns.release:
+        common.emit(
+            asyncio.run(client.takeover_end(wid)),
+            lambda ended: f"released {wid}\n{_after_takeover(wid, ended)}",
+            ns.json,
+        )
+        return
+    began = asyncio.run(
+        client.takeover_begin(wid, pid=os.getpid(), pid_start=psutil.Process().create_time())
+    )
+    print(
+        f"forking your session from {began['resumed_from']}"
+        if began["resumed_from"]
+        else "starting a fresh session (nothing to resume)"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in _WORKER_ENV}
+    # Ctrl-C belongs to the agent in front of the person, not to this wrapper.
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        subprocess.run(began["argv"], cwd=began["cwd"], env=env, check=False)
+    except OSError as exc:
+        raise ValueError(f"could not start {began['argv'][0]}: {exc}") from exc
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        try:
+            ended = asyncio.run(client.takeover_end(wid))
+        except Exception as exc:  # noqa: BLE001 -- say so, and keep the error that got us here
+            print(
+                f"kraft: could not release {wid}: {exc}; "
+                f"free it with `kraft item takeover {wid} --release`",
+                file=sys.stderr,
+            )
+        else:
+            print(_after_takeover(wid, ended))
 
 
 def _cmd_unblock(ns: argparse.Namespace) -> None:
@@ -727,6 +802,19 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     pause = subs.add_parser("pause", parents=[common], help="stop the running attempt")
     pause.add_argument("id", nargs="?")
     pause.set_defaults(func=_cmd_pause)
+
+    takeover = subs.add_parser(
+        "takeover",
+        parents=[common],
+        help="open a stopped item's agent session yourself, in its worktree",
+    )
+    takeover.add_argument("id", nargs="?")
+    takeover.add_argument(
+        "--release",
+        action="store_true",
+        help="free the item from a takeover a killed terminal left behind",
+    )
+    takeover.set_defaults(func=_cmd_takeover)
 
     unblock = subs.add_parser(
         "unblock", parents=[common], help="drop what a blocked or paused item still comes after"
