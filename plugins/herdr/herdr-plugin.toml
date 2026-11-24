@@ -13,3 +13,11 @@ id = "bridge"
 title = "Kraft bridge"
 placement = "tab"
 command = ["python3", "kraft_herdr.py", "bridge"]
+
+# One work item's tab. The bridge opens it with KRAFT_ITEM set, and reports a
+# resume command so Herdr starts it again after its own server restarts.
+[[panes]]
+id = "item"
+title = "Kraft item"
+placement = "tab"
+command = ["python3", "kraft_herdr.py", "item"]

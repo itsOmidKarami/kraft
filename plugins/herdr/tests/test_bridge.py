@@ -101,6 +101,8 @@ def test_every_report_carries_the_source_agent_and_an_increasing_seq(fakes, stat
     calls = fakes.calls("herdr", "pane report-agent")
     assert all(a[a.index("--source") + 1] == "custom:kraft" for a in calls)
     assert all(a[a.index("--agent") + 1] == "kraft" for a in calls)
+    # Herdr restarts the tab's process itself from the command reported after `--`.
+    assert all(a[a.index("--") + 3 :] == ["item", "aaaaaaaa1"] for a in calls)
     seqs = [int(a[a.index("--seq") + 1]) for a in calls]
     assert seqs == sorted(seqs) and seqs[0] > 1_700_000_000_000  # milliseconds, not seconds
 

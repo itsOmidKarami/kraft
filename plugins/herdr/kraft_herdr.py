@@ -376,6 +376,88 @@ class Bridge:
             stream.wait()
 
 
+def _show(kraft: str, item_id: str) -> dict | None:
+    """The whole item, or None (after saying why) when Kraft cannot be asked."""
+    done = subprocess.run(
+        [kraft, "view", "show", item_id, "--json"], capture_output=True, text=True
+    )
+    try:
+        if done.returncode:
+            raise ValueError(done.stderr.strip() or f"exit {done.returncode}")
+        return json.loads(done.stdout)
+    except ValueError as exc:
+        print(f"kraft view show: {exc}", file=sys.stderr, flush=True)
+        return None
+
+
+def _follow(kraft: str, item_id: str, session_id: str) -> tuple[int, str]:
+    """Show one session's log until it ends: the log goes straight to the pane,
+    and stderr is passed on as it comes and kept so the caller can read it."""
+    proc = subprocess.Popen(
+        [kraft, "view", "logs", item_id, "--session", session_id, "-f"],
+        stderr=subprocess.PIPE, text=True,
+    )  # fmt: skip
+    kept = []
+    for line in proc.stderr:
+        kept.append(line)
+        sys.stderr.write(line)
+        sys.stderr.flush()
+    return proc.wait(), "".join(kept)
+
+
+def item_tab(kraft: str, item_id: str, *, poll: float = 5.0, max_rounds: int | None = None) -> None:
+    """One item's tab: its newest session's log, then the next one's, for ever.
+
+    It never returns on its own. If this process ended, the pane would fall back
+    to a shell and Herdr would drop the agent it was told about, so an item with
+    no session yet, a finished one and a stopped one all wait here instead.
+    `max_rounds` is for tests only.
+    """
+    followed = announced = None
+    rounds = 0
+    while max_rounds is None or rounds < max_rounds:
+        rounds += 1
+        item = _show(kraft, item_id)
+        if item is None:
+            time.sleep(poll)
+            continue
+        sessions = item.get("worker_sessions") or []
+        newest = sessions[-1]["id"] if sessions else None
+        if newest and newest != followed:
+            code, err = _follow(kraft, item_id, newest)
+            if code == 0:
+                followed = newest
+            else:
+                # Not a session yet, or Kraft went away mid-stream: ask again.
+                time.sleep(poll)
+            continue
+        status = item.get("display_status") or item.get("status") or ""
+        if status in FINISHED or item.get("status") in ("completed", "abandoned"):
+            if announced != status:
+                print(f"finished: {status}", flush=True)
+                announced = status
+        else:
+            if newest is None and announced != "waiting":
+                print("waiting for a worker session to start...", flush=True)
+                announced = "waiting"
+            elif newest is not None:
+                announced = None
+        time.sleep(poll)
+
+
+def item_main(args: list[str]) -> int:
+    item_id = args[0] if args else os.environ.get("KRAFT_ITEM", "")
+    if not item_id:
+        print("kraft_herdr item: no work item (set KRAFT_ITEM)", file=sys.stderr)
+        return 2
+    config = load_config(_dir("HERDR_PLUGIN_CONFIG_DIR"))
+    try:
+        item_tab(config["kraft"], item_id)
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
 def resume_command(item_id: str) -> list[str]:
     """What Herdr runs to bring an item tab back after a restart of its server."""
     return [sys.executable, str(Path(__file__).resolve()), "item", item_id]
@@ -413,6 +495,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args[0] == "bridge":
         return bridge_main()
+    if args[0] == "item":
+        return item_main(args[1:])
     print(f"kraft_herdr: {args[0]} is not implemented yet", file=sys.stderr)
     return 1
 
