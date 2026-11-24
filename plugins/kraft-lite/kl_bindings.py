@@ -45,13 +45,19 @@ FULL_SUITE = {
     "prompt": "Run the repo's full test suite, plus its fast checks, and report the result.",
 }
 
+#: What a merge request Lite opens is signed with, as Kraft signs its own (`mr_body`).
+MR_FOOTER = (
+    "_Opened by [Kraft Lite](https://kraft-sdlc.dev/guides/kraft-lite) for chain `<chain_id>`._"
+)
+
 FORGE_DEFAULTS: dict[str, dict] = {
     "mr.open_draft": {
         "kind": "prompt",
         "prompt": (
             "Open a draft merge request for the working branch on this repo's forge, or report "
             "the one already open. Take its title, description and labels from the run's "
-            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one."
+            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one. End the "
+            "description with this footer, after a `---` line, `<chain_id>` filled in: " + MR_FOOTER
         ),
     },
     "mr.sync": {
@@ -59,7 +65,8 @@ FORGE_DEFAULTS: dict[str, dict] = {
         "prompt": (
             "Push the working branch so the merge request matches it, and report anything the "
             "forge rejected. Keep its title, description and labels as the run's `mr_meta` "
-            "document (`state`'s `produced.mr_meta`) has them, when there is one."
+            "document (`state`'s `produced.mr_meta`) has them, when there is one, and keep the "
+            "description's closing `Opened by Kraft Lite` footer."
         ),
     },
     "mr.ci": {
