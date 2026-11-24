@@ -229,17 +229,11 @@ def _bd_template(real: bool) -> Path:
         git(tpl, "config", "maintenance.auto", "false")
         git(tpl, "config", "gc.auto", "0")
         if real:
-            # Output not captured: it lands in pytest's report or serve.py's
-            # log as it is written, so a hang or a failure shows what bd said.
-            # The timeout is ~25x a normal init and under pytest's 120s. No
-            # stdin: bd prompts, and waits, when stdin is a terminal.
-            subprocess.run(
-                ["bd", "init", "--prefix", "TEST"],
-                cwd=tpl,
-                stdin=subprocess.DEVNULL,
-                check=True,
-                timeout=90,
-            )
+            # Uncaptured, so a hang or failure shows bd's output in pytest's report
+            # or serve.py's log. No stdin: bd prompts when stdin is a terminal.
+            # 90s is ~25x a normal init, and under pytest's 120s.
+            bd_init = ["bd", "init", "--prefix", "TEST"]
+            subprocess.run(bd_init, cwd=tpl, stdin=subprocess.DEVNULL, check=True, timeout=90)
         else:
             (tpl / ".beads").mkdir()
         atexit.register(shutil.rmtree, tpl, ignore_errors=True)
