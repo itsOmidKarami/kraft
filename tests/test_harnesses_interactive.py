@@ -1,6 +1,13 @@
 """`interactive:` in a harness file: how a person runs the CLI themselves
 (`kraft item takeover`), and the argv built from it."""
 
+import glob
+import json
+import os
+import subprocess
+import uuid
+from pathlib import Path
+
 import pytest
 
 from kraft import harness
@@ -78,3 +85,45 @@ def test_interactive_resume_via_command_resume_replaces_the_prefix():
     )
     assert harness.build_interactive_argv(h, session_id="U", resume="X") == ["x", "resume", "X"]
     assert harness.build_interactive_argv(h, session_id="U", resume=None) == ["x"]
+
+
+@pytest.mark.e2e("claude")
+def test_claude_forks_into_the_minted_session_id(tmp_path):
+    """The contract `kraft item takeover` relies on, against the real CLI (claude
+    2.1.328): `--resume X --fork-session --session-id U` makes a session `U`, written as
+    the harness's `session_file` says, and leaves X's transcript as it was."""
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")):
+        pytest.skip("export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)")
+    h = harness.load(None).valid["claude"]
+    home = tmp_path / "home"
+    work = tmp_path / "work"
+    work.mkdir()
+    env = {**os.environ, "HOME": str(home)}
+
+    def claude(*argv: str) -> dict:
+        done = subprocess.run(
+            ["claude", *argv, "--output-format", "json", "--model", "haiku"],
+            cwd=work,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    def written(session_id: str) -> list[Path]:
+        pattern = h.interactive.session_file.replace("{value}", session_id)
+        return [Path(p) for p in glob.glob(str(home / pattern.removeprefix("~/")))]
+
+    first = claude("-p", "say hi")["session_id"]
+    [original] = written(first)
+    before = (original.stat().st_mtime_ns, original.read_bytes())
+    minted = str(uuid.uuid4())
+    argv = harness.build_interactive_argv(h, session_id=minted, resume=first)
+
+    forked = claude(*argv[1:], "-p", "say bye")
+
+    assert forked["session_id"] == minted
+    assert len(written(minted)) == 1
+    assert (original.stat().st_mtime_ns, original.read_bytes()) == before
