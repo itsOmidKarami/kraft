@@ -766,6 +766,22 @@ def _relay_mirror_hint(host: Runtime, relay_image: str) -> str:
     )
 
 
+async def relay_not_pulled(host: Runtime, relay_image: str) -> str | None:
+    """Why a sandbox with `network:` cannot start here when its relay image
+    is not pulled, or None when it is or the runtime did not answer. Nothing
+    pulls it: the probe and the relays run `--pull=never`, since a pull could
+    outlast the launch's timeout and its refusal would be lost. Doctor, a
+    launch and a machine's check say the same."""
+    pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay_image)
+    if pulled is None or pulled[0] == 0:
+        return None
+    return (
+        # The image once, in the command: the board keeps a stop's first 300 characters.
+        f"the egress relay image is not pulled -- "
+        f"run: {host.cli} pull {relay_image}{_relay_mirror_hint(host, relay_image)}"
+    )
+
+
 def channel_refusal(
     host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
 ) -> str | None:
@@ -788,8 +804,8 @@ def channel_refusal(
         # The board keeps a stop's first 300 characters: the command comes first.
         "the egress relay check did not run: check `kraft admin doctor`, or pull its "
         f"image: {host.cli} pull {relay_image}{_relay_mirror_hint(host, relay_image)}. "
-        f"Without it Kraft could not tell whether {host.describe()} lets a container reach "
-        "a host unix socket"
+        f"Until that check runs, Kraft can't tell whether {host.describe()} lets a container "
+        "reach a host unix socket"
     )
 
 
@@ -797,7 +813,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
     """`docker run -d` for a relay running `socat` with `socat` arguments: as
     locked down as a worker, read-only, small, labelled as a relay, and
     named (no `--rm`: `close_session` removes it; `sweep_orphans` whatever a
-    crash left)."""
+    crash left). Never pulled: `relay_not_pulled`."""
     host = cached_runtime()
     if problem := host.refusal():
         raise SandboxRefused(problem)
@@ -808,6 +824,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
         "-d",
         "--name",
         name,
+        "--pull=never",
         *network,
         "--label",
         home_label(),
@@ -1680,6 +1697,16 @@ class DockerBackend:
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
 
+    async def relay_missing(self) -> str | None:
+        """For a machine's check, which knows no item's sandbox: why one with
+        `network:` could not start here (its relay image is not pulled, or
+        `sandbox.yaml` cannot be read), or None."""
+        try:
+            image, host = await self._relay_image()
+        except SandboxNotReady as exc:
+            return str(exc)
+        return await relay_not_pulled(host, image)
+
     async def egress_transport(self) -> str:
         """ "unix" where a container can connect to a host unix socket, "tls"
         where it cannot and the runtime says it runs in a VM (spike 4.5a);
@@ -1719,7 +1746,7 @@ class DockerBackend:
         except SandboxRefused as exc:
             await self._close_session(name)
             raise SandboxNotReady(str(exc)) from exc
-        await self._run_or_remove(name, argv, f"the sandbox's egress relay from {image!r}")
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay from {image!r}", image)
         return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
 
     async def _open_relay_b(self, name: str, image: str, host: Runtime) -> None:
@@ -1748,12 +1775,18 @@ class DockerBackend:
             "the sandbox's egress volume",
         )
         argv = relay_b_argv(name, image, port, _ca.session_dir(run_dirs, name))
-        await self._run_or_remove(name, argv, f"the sandbox's egress relay B from {image!r}")
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay B from {image!r}", image)
 
-    async def _run_or_remove(self, name: str, argv: list[str], what: str) -> None:
+    async def _run_or_remove(
+        self, name: str, argv: list[str], what: str, relay_image: str | None = None
+    ) -> None:
+        """Run `argv`, or remove the session's parts and refuse: for a relay
+        whose `relay_image` is not pulled, with the pull to run."""
         done = await docker_call(*argv[1:])
         if done is None or done[0] != 0:
             await self._close_session(name)
+            if relay_image and (missing := await relay_not_pulled(cached_runtime(), relay_image)):
+                raise SandboxNotReady(missing)
             raise SandboxNotReady(
                 f"could not start {what}: `{argv[0]} {argv[1]}` "
                 f"{'did not answer' if done is None else 'failed'}"
@@ -1830,24 +1863,24 @@ class DockerBackend:
         if not image:  # a machine's check: the runtime, before any item's image is known
             return True, f"{host.describe()} {daemon[1].strip()}, {host.describe_limits()}"
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
+        missing = []
         if pulled is None or pulled[0] != 0:
-            return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+            missing.append(f"image {image!r} is not pulled -- run: {host.cli} pull {image}")
+        if sandbox.get("network"):
+            try:
+                relay = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            except ConfigError as exc:
+                return False, "; ".join([*missing, str(exc)])
+            # Asked with the item's own: one run names every pull to make.
+            if problem := await relay_not_pulled(host, relay):
+                missing.append(problem)
+        if missing:
+            return False, "; ".join(missing)
         if problem := host.refusal():
             return False, problem
         egress = ""
         if sandbox.get("network"):
-            # A launch never pulls it (`--pull=never` in the probe), and the
-            # refreshed runtime above forgot the probe's last answer.
-            try:
-                relay = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
-            except ConfigError as exc:
-                return False, str(exc)
-            pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay)
-            if pulled is None or pulled[0] != 0:
-                return False, (
-                    f"the egress relay image {relay!r} is not pulled -- "
-                    f"run: {host.cli} pull {relay}{_relay_mirror_hint(host, relay)}"
-                )
+            # The refreshed runtime above forgot the probe's last answer.
             reachable = await asyncio.to_thread(socket_channel, relay)
             said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
             if problem := channel_refusal(host, relay, reachable, said):

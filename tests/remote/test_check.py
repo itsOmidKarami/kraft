@@ -16,14 +16,17 @@ def _by_name(rows):
 
 
 class _Backend:
-    def __init__(self, kind, health):
-        self.kind, self._health = kind, health
+    def __init__(self, kind, health, relay=None):
+        self.kind, self._health, self._relay = kind, health, relay
 
     async def health(self, sandbox, *, refresh=True):
         assert sandbox == {"kind": self.kind}
         if isinstance(self._health, Exception):
             raise self._health
         return self._health
+
+    async def relay_missing(self):
+        return self._relay
 
 
 @pytest.fixture(autouse=True)
@@ -71,21 +74,31 @@ async def test_a_server_that_refuses_the_token_fails_the_server_row():
 
 
 @pytest.mark.parametrize(
-    ("health", "usable"),
+    ("health", "usable", "relay"),
     [
-        ({"docker": (True, "docker 27, image-less check"), "os": (False, "no bwrap")}, True),
-        ({"docker": (False, "daemon down"), "os": (False, "no bwrap")}, False),
-        ({"docker": RuntimeError("boom")}, False),
+        ({"docker": (True, "docker 27, image-less check"), "os": (False, "no bwrap")}, True, None),
+        ({"docker": (True, "docker 27"), "os": (False, "no bwrap")}, True, "relay not pulled"),
+        ({"docker": (False, "daemon down"), "os": (False, "no bwrap")}, False, None),
+        ({"docker": RuntimeError("boom")}, False, None),
     ],
-    ids=["one-usable", "none-usable", "check-crashes"],
+    ids=["one-usable", "relay-image-not-pulled", "none-usable", "check-crashes"],
 )
 async def test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none_is_usable(
-    monkeypatch, health, usable
+    monkeypatch, health, usable, relay
 ):
+    """A `network:` sandbox's relay image missing is only a warning: a
+    machine may take sandboxes without `network:`."""
     monkeypatch.setattr(
-        check.backends, "every", lambda: tuple(_Backend(k, v) for k, v in health.items())
+        check.backends, "every", lambda: tuple(_Backend(k, v, relay) for k, v in health.items())
     )
     rows = _by_name(await check.run(kraft_version="2.3.0"))
+    if relay:
+        assert (
+            rows["sandbox: docker relay"]["warn"]
+            and relay in rows["sandbox: docker relay"]["detail"]
+        )
+    assert ("sandbox: docker relay" in rows) is bool(relay)
+    assert "sandbox: os relay" not in rows  # asked only of a usable backend
     for kind, answer in health.items():
         row = rows[f"sandbox: {kind}"]
         assert row["ok"] and row["skipped"] is (isinstance(answer, Exception) or not answer[0])
