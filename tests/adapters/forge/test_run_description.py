@@ -251,28 +251,32 @@ async def test_a_failed_first_write_on_an_older_item_does_not_freeze_it(run_forg
     assert run_forge.events("mr_description_kept") == []
 
 
-async def test_a_seeded_open_whose_body_never_landed_is_rewritten(run_forge, tmp_path):
-    """GitLab creates with `open_seed` and then writes the body: a retry after the
-    second write failed finds the seed, which is Kraft's, not a person's."""
+class _Marked(forge.FakeForge):
+    """A forge that marks its open as an edit, as `GlabCli.open_marker` does."""
 
-    class _BodyLost(forge.FakeForge):
-        async def open_mr(self, **kw):
-            await super().open_mr(**{**kw, "body": self.open_seed})
-            raise forge.ForgeError("connection reset before the body was written")
+    open_marker = forge.mr.OPEN_MARKER
 
-    new = _authored(tmp_path, "A door.")
-    fake = _BodyLost(open_seed="Kraft is writing this.")
+
+async def test_a_bot_edit_right_after_a_marked_open_is_regenerated(run_forge, tmp_path):
+    _authored(tmp_path, "A door.")
+    fake = _Marked()
     await run_forge(fake, "open_mr", "x1")
+    marked = fake.opened_bodies[1] + forge.mr.OPEN_MARKER
+    fake.bodies["kraft/w1"] = f"{marked}\n\nA bot's summary."
+    fake.description_history = (
+        forge.DescriptionRevision(fake.bodies["kraft/w1"], True),
+        forge.DescriptionRevision(marked, False),
+    )
+    new = _authored(tmp_path, "A window.")
 
-    await run_forge(fake, "open_mr", "x2")
+    await run_forge(fake, "sync_mr", "x2")
 
     assert fake.bodies["kraft/w1"].startswith(new)
-    assert run_forge.events("mr_description_kept") == []
 
 
-@pytest.mark.parametrize("seed", [None, "Kraft is writing this."], ids=["github", "gitlab"])
+@pytest.mark.parametrize("cls", [forge.FakeForge, _Marked], ids=["github", "gitlab"])
 async def test_a_root_pointer_bump_records_the_description_it_opens_with(
-    run_forge, tmp_path, monkeypatch, seed
+    run_forge, tmp_path, monkeypatch, cls
 ):
     async def refused(*_, **__):
         raise forge.ForgeError("protected branch")
@@ -280,7 +284,7 @@ async def test_a_root_pointer_bump_records_the_description_it_opens_with(
     async def moved(*_):
         return ["member"]
 
-    fake = forge.FakeForge(open_seed=seed)
+    fake = cls()
     await fake.open_mr(repo=tmp_path, branch="other", base="main", title="t", body="b")
     await run_forge(fake, "mark_ready", "x1")
     row = await run_forge.database.write(
@@ -304,7 +308,8 @@ async def test_a_root_pointer_bump_records_the_description_it_opens_with(
     )
 
     assert [e["sha256"] for e in run_forge.events("mr_description_written")] == [
-        forge.mr.body_hash(t) for t in (seed, fake.opened_bodies[2]) if t is not None
+        forge.mr.body_hash(fake.opened_bodies[2] + m)
+        for m in dict.fromkeys(("", getattr(fake, "open_marker", "")))
     ]
 
 
@@ -487,8 +492,9 @@ _BOT = gl_note("description", True, EDITED, 4)
     [
         ([gl_page(_OURS, _BOT)], EDITED, True),
         ([gl_page(_OURS, gl_note("description", False, EDITED, 2))], EDITED, False),
-        ([gl_page(_OURS, gl_note("task", True, at=2))], EDITED, True),
-        ([gl_page(_OURS, gl_note("task", False, at=2))], EDITED, False),
+        ([gl_page(_OURS, gl_note("task", True, at=2), _BOT)], EDITED, True),
+        ([gl_page(_OURS, gl_note("task", False, at=2), _BOT)], EDITED, False),
+        ([gl_page(_OURS, _BOT, gl_note("task", True, at=5))], EDITED, False),
         (
             [
                 gl_page(_OURS, gl_note(None, at=2), gl_note("commit", at=3), after="c1"),
@@ -514,8 +520,9 @@ _BOT = gl_note("description", True, EDITED, 4)
     ids=[
         "bot-save",
         "person-save",
-        "bot-ticks-a-box",
-        "person-ticks-a-box",
+        "bot-ticks-a-box-then-a-bot-saves",
+        "person-ticks-a-box-then-a-bot-saves",
+        "bot-tick-newest-may-hide-a-later-save",
         "second-page-past-comments-and-other-notes",
         "notes-out-of-order",
         "version-gone",

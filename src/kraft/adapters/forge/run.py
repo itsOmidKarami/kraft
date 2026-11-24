@@ -486,11 +486,11 @@ def _record_description(c, work_item_id: str, node_id: str | None, repo: Path, s
 async def _record_opening(
     db, forge: Forge, work_item_id: str, node_id: str | None, repo: Path, body: str
 ) -> None:
-    """Record the description `forge.open_mr` writes, before it does: a forge that
-    creates with a seed and writes the body as an edit (`GlabCli.open_seed`) writes
-    both, and a create whose edit failed must still read as Kraft's."""
+    """Record the description `forge.open_mr` writes, before it does: on GitLab the
+    body, then the body with `open_marker` it writes as an edit of it."""
     # getattr: a test's bare forge may define nothing beyond the calls it answers.
-    texts = [t for t in (getattr(forge, "open_seed", None), body) if t is not None]
+    marker = getattr(forge, "open_marker", "")
+    texts = [body, body + marker] if marker else [body]
 
     def _write(c) -> None:
         for text in texts:
@@ -2044,7 +2044,8 @@ async def _run_one(
             # run again. Only when Kraft changed the body AND the current
             # head's checks are red: a sync after new commits sees a pending
             # pipeline.
-            if replaced is not None and replaced.strip() != body.strip():
+            unmarked = (replaced or "").strip().removesuffix(mr_ops.OPEN_MARKER.strip())
+            if replaced is not None and unmarked.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
                         repo=repo, mr=MR(number=0, url=""), branch=branch

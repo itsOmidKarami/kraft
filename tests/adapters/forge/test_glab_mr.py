@@ -135,8 +135,7 @@ async def test_glab_merge_request_writes_are_these_requests(cli, tmp_path, act, 
 async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta, lookups, fields):
     """glab's own create (`mr create`, :668-683, :793-801): `Draft: ` on the
     title, the labels one comma list, people as user ids, and no
-    remove_source_branch or squash, which Kraft never asks for. The body goes in
-    as an edit of the seed, so GitLab links Kraft's text to a note."""
+    remove_source_branch or squash, which Kraft never asks for."""
     cli.stub("git", "")
     cli.stub(
         "glab",
@@ -156,10 +155,42 @@ async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta,
     assert cli.calls("glab") == [
         *lookups,
         "api projects/:id/merge_requests -X POST -i -f source_branch=kraft/abc "
-        "-f target_branch=release -f title=Draft: Teach it "
-        f"-f description={forge.GlabCli.open_seed}" + fields,
-        f"{PUT} -f description=why",
+        "-f target_branch=release -f title=Draft: Teach it -f description=why" + fields,
+        GET,
     ]
+
+
+#: The marked body: the call log is one line per line, so its blank line shows.
+_MARK = [f"{PUT} -f description=why", "", "<!-- kraft -->"]
+
+
+@pytest.mark.parametrize(
+    "live, put, sent",
+    [
+        ("why\r\n", "{}", [GET, *_MARK]),
+        ("why, and a person's line", "{}", [GET]),
+        (FAIL, "{}", [GET]),
+        ("why", FAIL, [GET, *_MARK]),
+    ],
+    ids=["kraft-s-text-marked", "person-edited-kept", "read-failed", "mark-failed"],
+)
+async def test_glab_open_mr_marks_its_own_text_as_an_edit(cli, tmp_path, live, put, sent):
+    """GitLab links no note to a creation text, so Kraft writes its body again with
+    a marker: only over its own text, and a failure still leaves the merge request
+    opened."""
+    cli.stub("git", "")
+    view = FAIL if live is FAIL else json.dumps({"iid": 54, "description": live})
+    cli.stub(
+        "glab",
+        routes={"api*merge_requests -X POST*": GLAB_MR_VIEW, f"{GET}*": view, f"{PUT}*": put},
+    )
+
+    mr = await forge.GlabCli().open_mr(
+        repo=tmp_path, branch="kraft/abc", base="main", title="t", body="why"
+    )
+
+    assert mr.number == 54
+    assert cli.calls("glab")[1:] == sent
 
 
 async def test_glab_open_mr_refuses_a_user_gitlab_does_not_know(cli, tmp_path):

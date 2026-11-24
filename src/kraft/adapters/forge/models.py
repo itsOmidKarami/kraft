@@ -783,9 +783,6 @@ class FakeForge:
     opened_check_clean: dict[int, bool] = field(default_factory=dict)
     #: The branch each opened merge request targets, by number.
     opened_base: dict[int, str] = field(default_factory=dict)
-    #: What a merge request is created with before `open_mr` writes the body as an
-    #: edit (`GlabCli.open_seed`); None writes the body at creation, as GitHub does.
-    open_seed: str | None = None
     #: What `mr_description_history` answers, newest first, or the error it raises.
     description_history: tuple[DescriptionRevision, ...] | ForgeError = ()
     #: How many times that history was read.

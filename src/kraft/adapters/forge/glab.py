@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import replace
@@ -38,6 +39,8 @@ from kraft.adapters.forge.models import (
 from kraft.adapters.forge.replies import facts
 from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
+
+logger = logging.getLogger(__name__)
 
 #: The system notes GitLab writes when someone approves or withdraws approval.
 _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request")
@@ -300,10 +303,10 @@ def _description_saves(notes: list) -> tuple[DescriptionRevision, ...]:
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
-    #: What `open_mr` creates a merge request with, before it writes the body as an
-    #: edit: GitLab keeps a creation text in a version no note links, so Kraft's own
-    #: text would never be found in the history a bot's later save is read from.
-    open_seed = "Kraft is writing this description."
+    #: What `open_mr` appends to the body it created with: GitLab keeps a creation
+    #: text in a version no note links, so Kraft's own text would never be found in
+    #: the history a bot's later save is read from (`_mark_open`).
+    open_marker = mr_ops.OPEN_MARKER
 
     def __init__(self, transport: Transport | None = None):
         self._injected = transport
@@ -349,7 +352,7 @@ class GlabCli(mr_ops.CliWaits):
             # `mark_ready` un-drafts it after the gate. GitLab has no draft
             # field: the title prefix is the draft (glab mr create, :668-669).
             "title": _DRAFT + mr_ops.mr_title(title),
-            "description": self.open_seed,
+            "description": body,
         }
         if meta.labels:
             fields["labels"] = ",".join(meta.labels)  # GitLab creates unknown labels
@@ -361,13 +364,21 @@ class GlabCli(mr_ops.CliWaits):
         )
         data = resp.json()
         mr = MR(number=int(data["iid"]), url=str(data["web_url"]))
-        await self._api(
-            repo,
-            f"projects/:id/merge_requests/{mr.number}",
-            method="PUT",
-            fields={"description": body},
-        )
+        await self._mark_open(repo, mr.number, body)
         return mr
+
+    async def _mark_open(self, repo: Path, iid: int, body: str) -> None:
+        """Write `body` again with `open_marker`, so it is a version a note links.
+        Only over Kraft's own text, never a person's edit made since the create, and
+        best-effort: the body is live either way, and Kraft's next rewrite links it."""
+        path = f"projects/:id/merge_requests/{iid}"
+        try:
+            live = str((await self._api(repo, path) or {}).get("description") or "")
+            if mr_ops.body_hash(live) == mr_ops.body_hash(body):
+                marked = {"description": body + self.open_marker}
+                await self._api(repo, path, method="PUT", fields=marked)
+        except ForgeError as exc:
+            logger.warning("!%s: left the description unmarked: %s", iid, exc)
 
     async def _user_id(self, repo: Path, username: str) -> str:
         if username == "@me":  # glab's spelling for the authenticated user (user.go:16-19)
@@ -530,7 +541,8 @@ class GlabCli(mr_ops.CliWaits):
                     return ()
                 variables = {**variables, "after": cursor}
             return ()
-        except (KeyError, TypeError, AttributeError, ValueError):
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            logger.debug("description history: an answer it cannot read: %r", exc)
             return ()
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:

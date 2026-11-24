@@ -9,6 +9,12 @@ from kraft.adapters import forge
 RED = (forge.FailedJob("test", "failed", "script_failure"),)
 
 
+class _Marked(forge.FakeForge):
+    """A forge that marks its open as an edit, as `GlabCli.open_marker` does."""
+
+    open_marker = forge.mr.OPEN_MARKER
+
+
 async def _opened_then_repaired(run_forge, fake, worktree) -> None:
     """A description Kraft wrote, and a repair that changed what it would write."""
     await run_forge(fake, "open_mr", "x8", repo=worktree)
@@ -18,30 +24,37 @@ async def _opened_then_repaired(run_forge, fake, worktree) -> None:
 
 
 @pytest.mark.parametrize(
-    "state, person_edited, retried",
+    "state, live, retried",
     [
         # A repair edited the description under a red check: the jobs that read
         # the old one run again (editing a body triggers no workflow).
-        ("failed", False, 1),
+        ("failed", None, 1),
         # A sync after new commits sees a pending pipeline, never a red one.
-        ("pending", False, 0),
-        ("success", False, 0),
+        ("pending", None, 0),
+        ("success", None, 0),
         # Kraft kept a person's description, so it changed nothing to re-check.
-        ("failed", True, 0),
+        ("failed", "person", 0),
+        # No repair: only a GitLab open's marker goes, which no check could read.
+        ("failed", "marked", 0),
     ],
     ids=[
         "red-check-body-changed",
         "pending-body-changed",
         "green-body-changed",
         "red-check-body-kept",
+        "red-check-only-the-open-marker",
     ],
 )
 async def test_sync_mr_reruns_failed_jobs_only_when_the_description_changed(
-    run_forge, tmp_path, state, person_edited, retried
+    run_forge, tmp_path, state, live, retried
 ):
-    fake = forge.FakeForge(ci_states=[state], ci_failed_jobs=[RED])
-    await _opened_then_repaired(run_forge, fake, tmp_path)
-    if person_edited:
+    fake = _Marked(ci_states=[state], ci_failed_jobs=[RED])
+    if live == "marked":
+        await run_forge(fake, "open_mr", "x8", repo=tmp_path)
+        fake.bodies["kraft/w1"] = fake.opened_bodies[1] + forge.mr.OPEN_MARKER
+    else:
+        await _opened_then_repaired(run_forge, fake, tmp_path)
+    if live == "person":
         fake.bodies["kraft/w1"] = "A person's description."
 
     await run_forge(fake, "sync_mr", "x9")
