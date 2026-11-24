@@ -142,7 +142,7 @@ async def test_a_failed_first_read_does_not_turn_a_reused_merge_request_into_kra
     await run_forge(fake, "open_mr", "x1")
     await run_forge(fake, "sync_mr", "x2")
 
-    assert ("kraft/w1" in fake.bodies) is regenerated
+    assert (await fake.mr_body(repo=tmp_path, branch="kraft/w1") != live) is regenerated
 
 
 @pytest.mark.parametrize(
