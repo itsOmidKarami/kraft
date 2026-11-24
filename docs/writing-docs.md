@@ -127,7 +127,7 @@ A change to one of these sources updates its page in the same pull request.
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/09.mcp-tools.md` |
 | A Kraft add-on's or collection's format, `addons.yaml`, `addons.lock`, or how an add-on loads, updates or is restored (`src/kraft/addons/`, `src/kraft/cli/addon.py`) | `docsite/content/5.reference/03.configuration/12.addons.md` (the facts), `docsite/content/3.guides/2.customize/4.share-chains-with-addons.md` (the steps), `docsite/content/5.reference/01.cli/6.addon.md` (a `kraft admin addon` verb), `docsite/content/4.troubleshooting/10.addon-problems.md` (a message a `kraft admin addon` verb prints, quoted as it prints it) and `docsite/content/4.troubleshooting/11.addon-validate-messages.md` (one `validate` prints), and `docsite/content/6.project/1.security.md` or `1.security-in-depth.md` when it changes what an add-on may carry |
 | A repo library, the `.kraft/` folder a connected repo shares (`src/kraft/addons/repo_library.py`, `kraft repo library`) | `docsite/content/5.reference/03.configuration/13.repo-libraries.md` (the facts), `docsite/content/3.guides/2.customize/4.share-chains-with-addons.md` (the steps), `docsite/content/5.reference/01.cli/4.repo.md` (the verb), and `docsite/content/6.project/1.security.md` or `1.security-in-depth.md` when it changes what accepting trusts |
-| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/4.agent-integration.md` |
+| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/04.agent-integration.md` |
 | A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/11.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | the topic page under `docsite/content/4.troubleshooting/` whose rows stand with it: `01.failed-tasks-and-fix-loops.md`, `02.launch-and-setup-stops.md`, `03.caps-budgets-and-waits.md`, `04.forge-stops.md`, `05.worktree-and-git-stops.md` (a git state of the worktree; an in-place checkout reason goes on `docsite/content/3.guides/4.run/12.run-items-in-place.md`), `06.sandbox-and-kit-stops.md` (a sandbox, Kit or workspace-member reason, and a doctor sandbox row) or `07.os-sandbox-refusals.md`; a stop with numbered steps gets an entry under its table on the same page, and its words go in the first column. A doctor check goes on `08.doctor-failures.md`, under the heading named as doctor prints the row |
@@ -141,9 +141,9 @@ A screen change updates the pages that show or name it:
 - `docsite/content/1.get-started/2.first-work-item.md`: the board.
 - `docsite/content/5.reference/00.web-ui/`: each screen (the board, an item's
   page, the review page, Templates and Settings, Analytics).
-- `docsite/content/3.guides/1.day-to-day/`: `2.first-run.md` (the setup
-  wizard), `3.file-a-work-item.md` (the composer), `5.review-a-change.md` (the
-  review page) and `8.kraft-on-a-phone.md` (reaching the board from a phone; the phone
+- `docsite/content/3.guides/1.day-to-day/`: `02.first-run.md` (the setup
+  wizard), `03.file-a-work-item.md` (the composer), `05.review-a-change.md` (the
+  review page) and `08.kraft-on-a-phone.md` (reaching the board from a phone; the phone
   layout is `docsite/content/5.reference/00.web-ui/9.on-a-phone.md`).
 - `docsite/content/3.guides/4.run/01.remote-access.md` and
   `02.put-a-proxy-in-front-of-kraft.md`: Access.

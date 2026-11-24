@@ -53,9 +53,9 @@ item title (or description) containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its o
 ### The `kraft` command
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
-non-MCP agent gets the same surface; `item abandon`, `item archive` and
-`item restore` are the `item` verbs with no tool. `--json` prints the raw API
-payload on every verb except `console`, `view watch`, `repo path`, and the `admin` ones
+non-MCP agent gets the same surface; `item abandon`, `item archive`,
+`item restore` and `item takeover` are the `item` verbs with no tool. `--json` prints the raw API
+payload on every verb except `console`, `view watch`, `repo path`, `item takeover` (interactive; `--release` accepts it), and the `admin` ones
 that manage the server process (`start`, `stop`, `restart`, the service verbs,
 `update`, `mcp`, `permission-hook`), `admin addon enable` and `disable`, and
 `admin init` (it accepts `--json` and
@@ -74,6 +74,7 @@ kraft item retry [ID] [--steer "..."] [--sandbox-from-config [--yes]]  # the onl
 kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped it (its own or its policy's), and retry
 kraft item skip [ID] [--head H] [--note "..."]  # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
+kraft item takeover [ID] [--release]      # open a stopped item's Claude Code session yourself, in its worktree; --release frees a lock a killed terminal left
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --reason "..." --yes  # drop an item, deleting its worktree and branch; the reason is kept and closes its bead
 kraft item archive [ID ...] [--reclaimable] [--yes]  # archive finished items, deleting their worktrees; previews, then needs --yes

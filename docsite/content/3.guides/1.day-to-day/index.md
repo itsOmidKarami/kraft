@@ -18,3 +18,4 @@ _Added in 2.1_
 - [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
 - [Reach the board from your phone](/guides/day-to-day/kraft-on-a-phone): make the server reachable, sign in and see the phone layout.
 - [Get notified when an item needs you](/guides/day-to-day/notifications): send a webhook or show a browser alert when an item waits at a gate or stops, and test it.
+- [Take over a stopped item](/guides/day-to-day/take-over-an-item): open a stopped item's agent session yourself, in its worktree, and hand the item back when you exit.
