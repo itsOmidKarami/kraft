@@ -30,14 +30,14 @@ OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 @pytest.fixture
 def calls(monkeypatch):
     """Every `docker_call` a test makes, answered `(0, "")` unless the test
-    says otherwise by name (`answers["run"] = (125, "")`); the image's
-    `Config.Env` holds `PATH=/img/bin`."""
+    says otherwise by name (`answers["run"] = (125, "")`) or by its last
+    argument (an image); the image's `Config.Env` holds `PATH=/img/bin`."""
     made: list[tuple[str, ...]] = []
     answers: dict[str, tuple[int, str] | None] = {"image": (0, '["PATH=/img/bin"]\n')}
 
     async def call(*args, timeout=None):
         made.append(args)
-        return answers.get(args[0], (0, ""))
+        return answers.get(args[-1], answers.get(args[0], (0, "")))
 
     monkeypatch.setattr(docker, "docker_call", call)
     return SimpleNamespace(made=made, answers=answers)
@@ -104,6 +104,7 @@ def test_the_relay_has_no_network_and_mounts_the_sockets_directory(monkeypatch):
 
     for flag in (
         "--network=none",
+        "--pull=never",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--read-only",
@@ -230,15 +231,25 @@ async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls)
     assert [c[0] for c in calls.made] == ["image"]
 
 
+@pytest.mark.parametrize("pulled", [True, False], ids=["pulled", "relay-image-not-pulled"])
 @pytest.mark.parametrize("sock", [SOCK, None], ids=["unix", "tls"])
-async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock):
+async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock, pulled):
+    """A relay image that is not pulled is never pulled (`--pull=never`):
+    the refusal names the pull to run, as doctor does, inside what the
+    board keeps of it."""
     run_dirs = docker._run_dirs()
     run_dirs.ca.mkdir(parents=True)
     (run_dirs.ca / "tls-port").write_text("40123\n")
     calls.answers["run"] = (125, "")
-    with pytest.raises(SandboxNotReady, match="could not start the sandbox's egress relay"):
+    relay = config.SandboxHost.model_fields["relay_image"].default
+    if not pulled:
+        calls.answers[relay] = (1, "")
+    with pytest.raises(SandboxNotReady) as refused:
         await docker.DockerBackend().open_session("s1", POLICED, sock, work_item_id="w1")
-    assert calls.made[-2:] == [
+    said = f"kraft: {refused.value}"[: walk._STOP_CAUSE_MAX - 1]
+    assert ("could not start the sandbox's egress relay" in said) is pulled
+    assert (f"pull {relay}" in said) is not pulled
+    assert calls.made[-3:-1] == [
         ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
         ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]

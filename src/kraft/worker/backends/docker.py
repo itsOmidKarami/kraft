@@ -768,12 +768,12 @@ def _relay_mirror_hint(host: Runtime, relay_image: str) -> str:
 
 async def relay_not_pulled(host: Runtime, relay_image: str) -> str | None:
     """Why a sandbox with `network:` cannot start here when its relay image
-    is not pulled, or None when it is. Nothing pulls it: the probe and the
-    relays run `--pull=never`, since a pull could outlast the launch's
-    timeout and its refusal would be lost. Doctor, a launch and a machine's
-    check say the same."""
+    is not pulled, or None when it is or the runtime did not answer. Nothing
+    pulls it: the probe and the relays run `--pull=never`, since a pull could
+    outlast the launch's timeout and its refusal would be lost. Doctor, a
+    launch and a machine's check say the same."""
     pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay_image)
-    if pulled is not None and pulled[0] == 0:
+    if pulled is None or pulled[0] == 0:
         return None
     return (
         f"the egress relay image {relay_image!r} is not pulled -- "
@@ -812,7 +812,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
     """`docker run -d` for a relay running `socat` with `socat` arguments: as
     locked down as a worker, read-only, small, labelled as a relay, and
     named (no `--rm`: `close_session` removes it; `sweep_orphans` whatever a
-    crash left)."""
+    crash left). Never pulled: `relay_not_pulled`."""
     host = cached_runtime()
     if problem := host.refusal():
         raise SandboxRefused(problem)
@@ -823,6 +823,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
         "-d",
         "--name",
         name,
+        "--pull=never",
         *network,
         "--label",
         home_label(),
@@ -1734,7 +1735,7 @@ class DockerBackend:
         except SandboxRefused as exc:
             await self._close_session(name)
             raise SandboxNotReady(str(exc)) from exc
-        await self._run_or_remove(name, argv, f"the sandbox's egress relay from {image!r}")
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay from {image!r}", image)
         return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
 
     async def _open_relay_b(self, name: str, image: str, host: Runtime) -> None:
@@ -1763,12 +1764,18 @@ class DockerBackend:
             "the sandbox's egress volume",
         )
         argv = relay_b_argv(name, image, port, _ca.session_dir(run_dirs, name))
-        await self._run_or_remove(name, argv, f"the sandbox's egress relay B from {image!r}")
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay B from {image!r}", image)
 
-    async def _run_or_remove(self, name: str, argv: list[str], what: str) -> None:
+    async def _run_or_remove(
+        self, name: str, argv: list[str], what: str, relay_image: str | None = None
+    ) -> None:
+        """Run `argv`, or remove the session's parts and refuse: for a relay
+        whose `relay_image` is not pulled, with the pull to run."""
         done = await docker_call(*argv[1:])
         if done is None or done[0] != 0:
             await self._close_session(name)
+            if relay_image and (missing := await relay_not_pulled(cached_runtime(), relay_image)):
+                raise SandboxNotReady(missing)
             raise SandboxNotReady(
                 f"could not start {what}: `{argv[0]} {argv[1]}` "
                 f"{'did not answer' if done is None else 'failed'}"
