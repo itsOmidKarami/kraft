@@ -1696,6 +1696,16 @@ class DockerBackend:
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
 
+    async def relay_missing(self) -> str | None:
+        """For a machine's check, which knows no item's sandbox: why one with
+        `network:` could not start here (its relay image is not pulled, or
+        `sandbox.yaml` cannot be read), or None."""
+        try:
+            image, host = await self._relay_image()
+        except SandboxNotReady as exc:
+            return str(exc)
+        return await relay_not_pulled(host, image)
+
     async def egress_transport(self) -> str:
         """ "unix" where a container can connect to a host unix socket, "tls"
         where it cannot and the runtime says it runs in a VM (spike 4.5a);

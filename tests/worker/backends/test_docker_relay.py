@@ -369,11 +369,14 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(
     backend = docker.DockerBackend()
     ok, detail = await backend.health(POLICED)
     assert ok and f"egress relay {healthy_but_relay.relay}" in detail
+    assert await backend.relay_missing() is None
 
     healthy_but_relay.pulled.update(relay=False, img=image_pulled)
     ok, detail = await backend.health(POLICED)
     assert not ok and f"docker pull {healthy_but_relay.relay}" in detail
     assert ("docker pull img" in detail) is not image_pulled
+    # What `kraft admin worker check` says, knowing no item's image.
+    assert (await backend.relay_missing()) in detail
     mirror = healthy_but_relay.relay.replace("docker.io/", "mirror.gcr.io/")
     assert f"`relay_image: {mirror}` in {docker.config_dir() / 'sandbox.yaml'}" in detail
 

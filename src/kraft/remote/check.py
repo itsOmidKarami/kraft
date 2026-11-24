@@ -113,11 +113,24 @@ async def _sandboxes() -> list[dict]:
             ok, detail = False, f"could not check: {exc}"
         usable += ok
         rows.append(_row(f"sandbox: {backend.kind}", True, detail, skipped=not ok))
+        if ok and (missing := await _relay_missing(backend)):
+            rows.append(_row(f"sandbox: {backend.kind} relay", True, missing, warn=True))
     if not usable:
         rows.append(
             _row("sandbox runtime", True, "none usable: sandboxed items cannot run here", warn=True)
         )
     return rows
+
+
+async def _relay_missing(backend) -> str | None:
+    """Why this machine could not start a `network:` sandbox's relay (docker's
+    image is not pulled), for a backend that has one. Only a warning: a
+    sandbox without `network:` needs no relay."""
+    relay = getattr(backend, "relay_missing", None)
+    try:
+        return await relay() if relay is not None else None
+    except Exception as exc:  # noqa: BLE001 -- a check reports, it does not crash
+        return f"could not check the egress relay image: {exc}"
 
 
 async def _server(server: str, token: str, kraft_version: str) -> dict:
