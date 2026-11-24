@@ -96,9 +96,21 @@ async def test_a_merge_request_with_no_record_is_kept_unless_kraft_opened_it(
     assert bool(run_forge.events("mr_description_kept")) is not regenerated
 
 
+@pytest.mark.parametrize(
+    "row_number, regenerated",
+    [(None, False), (0, False), (1, True), (2, False)],
+    ids=[
+        "single-repo",
+        "workspace-no-proof",
+        "workspace-row-vouches",
+        "workspace-row-names-another",
+    ],
+)
 async def test_a_failed_first_read_does_not_turn_a_reused_merge_request_into_kraft_s(
-    run_forge, tmp_path
+    run_forge, tmp_path, row_number, regenerated
 ):
+    """Nor does it take away a workspace row's proof that an earlier Kraft wrote it."""
+
     class _FailsOnce(forge.FakeForge):
         failed = False
 
@@ -111,11 +123,26 @@ async def test_a_failed_first_read_does_not_turn_a_reused_merge_request_into_kra
     live = "Opened by hand."
     fake = _FailsOnce()
     await fake.open_mr(repo=tmp_path, branch="kraft/w1", base="main", title="t", body=live)
+    if row_number is not None:
+        await run_forge(fake, "mark_ready", "x0")  # files the item the row belongs to
+
+        def _seed(c) -> None:
+            # A member, with a root that has no source change of its own.
+            row = store.add_repo(
+                c, work_item_id="w1", repo_path=str(tmp_path), role="submodule", merge_rank=0
+            )
+            root = str(tmp_path / "root")
+            store.add_repo(c, work_item_id="w1", repo_path=root, role="root", merge_rank=1)
+            if row_number:
+                ref = {"number": row_number, "url": "u"}
+                store.update_repo_state(c, row, merge_state="open", mr_ref=ref)
+
+        await run_forge.database.write(_seed)
 
     await run_forge(fake, "open_mr", "x1")
     await run_forge(fake, "sync_mr", "x2")
 
-    assert await fake.mr_body(repo=tmp_path, branch="kraft/w1") == live
+    assert (await fake.mr_body(repo=tmp_path, branch="kraft/w1") != live) is regenerated
 
 
 @pytest.mark.parametrize(

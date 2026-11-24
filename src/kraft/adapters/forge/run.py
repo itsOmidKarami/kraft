@@ -1698,6 +1698,11 @@ async def _run_one(
                 ref = {"number": n, "url": u, **({"description_unread": True} if unread else {})}
                 events.append(c, work_item_id, ForgeEvent.MR_OPENED, ref, node_id=node_id)
                 if repo_row_id is not None:
+                    # A row that already vouches for this number keeps vouching: it
+                    # is a workspace member's only proof that an earlier Kraft wrote
+                    # the description, and a failed read proves nothing (Kraft-0pizx).
+                    if unread and _wrote_before_records(c, work_item_id, orig_repo, repo_row_id, n):
+                        ref = {"number": n, "url": u}
                     store.update_repo_state(c, repo_row_id, merge_state="open", mr_ref=ref)
 
             await db.write(_record)
