@@ -698,14 +698,29 @@ jobs:
       - name: the harness actually came up
         run: |
           [ -n "$KRAFT_E2E_REPO" ] && [ -n "$KRAFT_E2E_BASE" ] && exit 0
-          cat e2e-server.log
           # From /proc: the job installs no apt packages, so `ps` may not be there.
-          echo "--- processes still running"
+          echo "--- processes still running: pid ppid state age command"
+          up=$(cut -d' ' -f1 /proc/uptime)
+          hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
           for p in /proc/[0-9]*; do
-            printf '%s: ' "${p#/proc/}"
-            tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true
-            echo
+            stat=$(cat "$p/stat" 2>/dev/null) || continue
+            # The fields after the ")" closing the name: state, ppid, ...; starttime is the 20th.
+            set -- ${stat##*)}
+            age=$(awk -v u="$up" -v s="${20}" -v h="$hz" 'BEGIN { printf "%d", u - s / h }') || age="?"
+            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
+            # A zombie has no command line: name it from comm instead.
+            [ -n "$cmd" ] || cmd="[$(cat "$p/comm" 2>/dev/null || true)]"
+            echo "${p#/proc/} $2 $1 ${age}s $cmd"
           done
+          # A server still running, after a slow start or past its health check, has
+          # not been asked for its stack yet: its -X faulthandler writes it on SIGABRT.
+          for p in /proc/[0-9]*; do
+            case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)" in
+              *" -m kraft "*) kill -ABRT "${p#/proc/}" 2>/dev/null || true ;;
+            esac
+          done
+          sleep 1
+          cat e2e-server.log
           exit 1
       # Bail after 3 failures instead of paying the full 120s timeout serially
       # for every spec: a systemic break turns a ~1min green run into over an
