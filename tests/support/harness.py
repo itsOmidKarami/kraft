@@ -231,8 +231,15 @@ def _bd_template(real: bool) -> Path:
         if real:
             # Output not captured: it lands in pytest's report or serve.py's
             # log as it is written, so a hang or a failure shows what bd said.
-            # The timeout is ~25x a normal init and under pytest's 120s.
-            subprocess.run(["bd", "init", "--prefix", "TEST"], cwd=tpl, check=True, timeout=90)
+            # The timeout is ~25x a normal init and under pytest's 120s. No
+            # stdin: bd prompts, and waits, when stdin is a terminal.
+            subprocess.run(
+                ["bd", "init", "--prefix", "TEST"],
+                cwd=tpl,
+                stdin=subprocess.DEVNULL,
+                check=True,
+                timeout=90,
+            )
         else:
             (tpl / ".beads").mkdir()
         atexit.register(shutil.rmtree, tpl, ignore_errors=True)
