@@ -19,3 +19,4 @@ _Added in 2.1_
 - [Reach the board from your phone](/guides/day-to-day/kraft-on-a-phone): make the server reachable, sign in and see the phone layout.
 - [Get notified when an item needs you](/guides/day-to-day/notifications): send a webhook or show a browser alert when an item waits at a gate or stops, and test it.
 - [Take over a stopped item](/guides/day-to-day/take-over-an-item): open a stopped item's agent session yourself, in its worktree, and hand the item back when you exit.
+- [Use Kraft from Herdr](/guides/day-to-day/herdr): see every live work item as a tab and a sidebar state in Herdr, and take one over from its tab.

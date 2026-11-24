@@ -1,0 +1,35 @@
+id = "kraft"
+name = "Kraft"
+version = "2.6.0"
+min_herdr_version = "0.9.2"
+description = "Every live Kraft work item as its own tab, with its log and a sidebar state"
+platforms = ["linux", "macos"]
+
+# The loop that keeps the tabs and states current. The startup hook opens it
+# (a hook is one-shot and nothing supervises it), and it holds a lock so a
+# second copy after a live handoff exits at once.
+[[panes]]
+id = "bridge"
+title = "Kraft bridge"
+placement = "tab"
+command = ["python3", "kraft_herdr.py", "bridge"]
+
+# One work item's tab. The bridge opens it with KRAFT_ITEM set, and reports a
+# resume command so Herdr starts it again after its own server restarts.
+[[panes]]
+id = "item"
+title = "Kraft item"
+placement = "tab"
+command = ["python3", "kraft_herdr.py", "item"]
+
+# Runs once when Herdr starts (and again after a live handoff), and only makes
+# sure the bridge pane is open.
+[[startup]]
+command = ["python3", "kraft_herdr.py", "start"]
+
+# Opens `kraft item takeover` for the Kraft item tab that has focus.
+[[actions]]
+id = "takeover"
+title = "Take over this Kraft item"
+contexts = ["pane"]
+command = ["python3", "kraft_herdr.py", "takeover"]

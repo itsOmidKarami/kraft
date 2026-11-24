@@ -32,9 +32,12 @@ MANIFESTS = (
     # The MCP registry entry: `mcp-publisher publish` reads it, and its package
     # version must name a release that is on PyPI.
     _ROOT / "server.json",
+    # Herdr's plugin manifest is TOML and requires a `version`.
+    _ROOT / "plugins" / "herdr" / "herdr-plugin.toml",
 )
 
 _VERSION = re.compile(r"\d+\.\d+\.\d+")
+_TOML_VERSION = re.compile(r'^version = "[^"]*"', re.MULTILINE)
 
 
 def stamp(version: str, manifests=MANIFESTS) -> None:
@@ -46,6 +49,14 @@ def stamp(version: str, manifests=MANIFESTS) -> None:
     if not _VERSION.fullmatch(version):
         raise ValueError(f"{version!r} is not a bare X.Y.Z version (strip the leading v)")
     for path in manifests:
+        if path.suffix == ".toml":
+            # Not parsed and rewritten: only the one top-level line moves, so
+            # comments and key order survive. `[[tables]]` come after it.
+            text, count = _TOML_VERSION.subn(f'version = "{version}"', path.read_text(), count=1)
+            if not count:
+                raise ValueError(f'{path} has no top-level `version = "..."` line')
+            path.write_text(text)
+            continue
         blob = json.loads(path.read_text())
         blob["version"] = version
         # A package-lock.json says it twice: at the top, and for the root

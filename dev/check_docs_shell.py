@@ -33,6 +33,7 @@ READMES = [
         "vscode/README.md",
         "plugins/kraft/README.md",
         "plugins/kraft-lite/README.md",
+        "plugins/herdr/README.md",
         "addons/kraft-superpowers/README.md",
     )
 ]

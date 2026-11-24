@@ -96,7 +96,7 @@ kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N] [--agent ID|main]  # a worker session's log; --json is NDJSON
 kraft view storage                          # worktree disk use against the quota and limit, item by item
-kraft view events [ID] [--after N] [--type T]
+kraft view events [ID] [--after N] [--type T] [--all -f]  # --all: every item's events from now, NDJSON with --json
 kraft view watch                            # live board, needs a terminal
 kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown (in place: commits only, no untracked)
 kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
