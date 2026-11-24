@@ -332,31 +332,37 @@ def test_the_probe_believes_only_the_relays_own_answer(monkeypatch, returncode, 
 
 @pytest.fixture
 def healthy_but_relay(monkeypatch):
-    """`health` on a machine whose daemon answers and whose repository image
-    is pulled; `pulled["relay"]` says whether the relay image is."""
-    pulled = {"relay": True}
+    """`health` on a machine whose daemon answers; `pulled["relay"]` and
+    `pulled["img"]` say whether the relay image and the repository's are."""
+    pulled = {"relay": True, "img": True}
     relay = docker._forward._sandbox_host(os.environ).relay_image
 
     async def call(*args, timeout=None):
         if args[0] == "version":
             return 0, "29.3.1"
-        return (0, "sha") if args[-1] != relay or pulled["relay"] else (1, "")
+        named = "relay" if args[-1] == relay else args[-1]
+        return (0, "sha") if pulled.get(named, True) else (1, "")
 
     monkeypatch.setattr(docker, "docker_call", call)
     monkeypatch.setattr(docker, "detect_runtime", docker.Runtime)
     return SimpleNamespace(pulled=pulled, relay=relay)
 
 
-async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay, monkeypatch):
-    """A launch never pulls it: the probe runs `--pull=never`."""
+@pytest.mark.parametrize("image_pulled", [True, False], ids=["image-pulled", "image-not-pulled"])
+async def test_doctor_fails_when_the_relay_image_is_not_pulled(
+    healthy_but_relay, monkeypatch, image_pulled
+):
+    """A launch never pulls it: the probe runs `--pull=never`. With the
+    repository's image missing too, one run names both pulls."""
     monkeypatch.setattr(docker, "socket_channel", lambda image: True)
     backend = docker.DockerBackend()
     ok, detail = await backend.health(POLICED)
     assert ok and f"egress relay {healthy_but_relay.relay}" in detail
 
-    healthy_but_relay.pulled["relay"] = False
+    healthy_but_relay.pulled.update(relay=False, img=image_pulled)
     ok, detail = await backend.health(POLICED)
     assert not ok and f"docker pull {healthy_but_relay.relay}" in detail
+    assert ("docker pull img" in detail) is not image_pulled
     mirror = healthy_but_relay.relay.replace("docker.io/", "mirror.gcr.io/")
     assert f"`relay_image: {mirror}` in {docker.config_dir() / 'sandbox.yaml'}" in detail
 
