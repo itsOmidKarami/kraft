@@ -793,3 +793,5 @@ async def test_a_merge_github_is_already_making_is_waited_for(cli, tmp_path, ans
     await forge.GhCli().merge(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=7, url=""), head=_HEAD
     )
+
+    assert _mutations(cli.argv("gh")) == [("mergePullRequest", _MERGE_INPUT)]
