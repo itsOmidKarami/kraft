@@ -445,6 +445,8 @@ async def _re_enter_one(app, row) -> bool:
     st = app.state
     wid = row["id"]
     node_id = row["current_node_id"]
+    if deps.task_is_live(app, wid):
+        return False  # the walk that parked it is still returning: next tick
 
     # Bracketed from *before* the claim to the hand-off. The claim makes this
     # item read `active`, and `tick`'s own SELECT filters `status = 'waiting'`,

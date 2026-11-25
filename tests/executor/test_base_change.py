@@ -88,6 +88,36 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     assert "rebased onto a newer main before opening its MR" in undelivered["payload"]["steer"]
 
 
+async def test_a_restart_cut_short_writes_none_of_itself(item_on, script, monkeypatch):
+    """A crash partway through a restart leaves the item as the move found it: on the node,
+    its wait still open, its counters and the restart's own counter untouched. Never with the
+    wait closed and the cursor not yet moved, where the next entry would lose the move."""
+    it = await item_on(_chain(**RESTART, fix_loop={"tasks": [_sub("rebase_fix")]}))
+    script.effects = {"sync": _moves_base(it)}
+    await it.session("parked", "rebase.sync.sync", "waiting")
+    stale = _policy.Cap(attempts=3, wall_clock_s=3600)
+    await it.database.write(lambda c: store.bump_counter(c, it.id, "verify.fix_loop", stale))
+
+    class Crash(BaseException):
+        pass
+
+    def crashes(*_args):
+        raise Crash
+
+    monkeypatch.setattr(store, "stand_at", crashes)
+
+    with pytest.raises(Crash):
+        await walk_once(it)
+    assert it.row()["current_node_id"] == "rebase"
+    assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["waiting"]
+    counters = [
+        it.database.read(lambda c, key=key: store.read_counter(c, it.id, key))
+        for key in ("verify.fix_loop", "rebase.on_base_changed")
+    ]
+    assert [c is None for c in counters] == [False, True]
+    assert not it.events("base_change_restart")
+
+
 @pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
 async def test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart(
     item_on, script, fix_loop

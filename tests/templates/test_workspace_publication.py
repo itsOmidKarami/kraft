@@ -254,13 +254,21 @@ def _base_ref(database, row) -> str | None:
 @pytest.mark.parametrize(
     ("handler", "bounce", "root_source", "root_fails", "expected"),
     [
-        ("ci_poll", True, False, False, "base_moved"),
-        ("merge", True, False, False, "base_moved"),
-        ("ci_poll", False, False, False, "waiting"),
-        ("merge", False, False, False, "waiting"),
+        ("ci_poll", True, False, None, "base_moved"),
+        ("merge", True, False, None, "base_moved"),
+        ("ci_poll", False, False, None, "waiting"),
+        ("merge", False, False, None, "waiting"),
         # `merge` stops at the rebased member, so only a CI wait reads a root after it.
-        ("ci_poll", True, True, False, "base_moved"),
-        ("ci_poll", True, True, True, "config_error"),
+        ("ci_poll", True, True, None, "base_moved"),
+        ("ci_poll", True, True, CliUnavailable("gh is gone"), "config_error"),
+        (
+            "ci_poll",
+            True,
+            True,
+            forge.ForgeError("slow down", status=429, reason="rate_limited", retry_after=60),
+            "rate_limited",
+        ),
+        ("ci_poll", True, True, forge.ForgeError("bad gateway", status=502), "failed"),
     ],
     ids=[
         "a-declared-restart-re-verifies-it-ci_poll",
@@ -269,6 +277,8 @@ def _base_ref(database, row) -> str | None:
         "undeclared-it-waits-for-the-rebased-heads-ci-merge",
         "a-declared-restart-re-verifies-it-past-a-root-still-waiting-ci_poll",
         "a-stop-for-a-person-on-the-root-is-not-hidden-ci_poll",
+        "a-rate-limit-on-the-root-parks-it-ci_poll",
+        "a-failure-on-the-root-is-its-own-ci_poll",
     ],
 )
 async def test_a_members_conflict_is_rebased_onto_its_own_origin(
@@ -280,7 +290,9 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     is the root's, so the member's move is reported as one instead of being
     written there -- past a root still waiting, too: a root with changes
     of its own is read after its members, and its pipeline here is for another
-    head, so it is still waiting. Kraft-tx0dz: a node with no base-change
+    head, so it is still waiting. A root that stopped, parked or failed keeps
+    its own outcome, and the member's move is held for the node to restart on.
+    Kraft-tx0dz: a node with no base-change
     restart to re-verify the rebased head waits for that head's own CI
     instead -- the pipeline here still answers for the head before the rebase."""
     row, worktree, _ = await _publishable(
@@ -304,12 +316,12 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     if root_fails:
         read = fake.ci_status
 
-        async def unavailable_on_the_root(*, repo, **kw):
+        async def fails_on_the_root(*, repo, **kw):
             if Path(repo) == worktree:
-                raise CliUnavailable("gh is gone")
+                raise root_fails
             return await read(repo=repo, **kw)
 
-        monkeypatch.setattr(fake, "ci_status", unavailable_on_the_root)
+        monkeypatch.setattr(fake, "ci_status", fails_on_the_root)
 
     result = await _run(
         *(database, run_dirs, row, worktree, fake, monkeypatch, handler),
@@ -321,6 +333,10 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     assert git(member, "log", "-1", "--format=%ce") == ROOT_EMAIL
     assert (result, fake.merged) == (expected, [])
     assert _base_ref(database, row) == base_ref
+    held = database.read(lambda c: events.read_after(c, 0, row["id"]))
+    assert [e["payload"] for e in held if e["type"] == "base_move_held"] == (
+        [{"node_id": handler, "before": ""}] if root_fails else []
+    )
 
 
 @pytest.mark.parametrize("bounce", [False, True], ids=["undeclared", "declares-a-base-restart"])
