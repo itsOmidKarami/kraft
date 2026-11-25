@@ -229,6 +229,9 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
     walked = await _walk(it, default_chain, "merge_request_feedback")
+    # No later walk observes that wait, or reuses its row for the rebased head.
+    closed = [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
+    assert closed == (moves != "member" or not parks), "a held member move closes it later"
     for park in parks:
         assert walked == park
         # A member's move does not re-verify into the rate limit it parked on.
@@ -236,7 +239,6 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
         await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
         walked = await walk_once(it, POLICY)
     assert walked == "awaiting_gate"
-    # No later walk observes that wait, or reuses its row for the rebased head.
     assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     assert script.calls == [
         *before,

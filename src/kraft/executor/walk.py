@@ -3637,17 +3637,16 @@ async def run_once(
                 parked = result in (RATE_LIMITED, WAITING)
                 seen: list[str] = []
 
-                def ours(c, parked=parked, result=result, at=node.id, seen=seen) -> bool:
-                    # Read in the writing transaction, and keyed on the cursor, which
-                    # a poller re-entering the park leaves where it is: it only flips
-                    # the status to `active`. A pause or an end moves it elsewhere.
-                    r = c.execute(
-                        "SELECT status, current_node_id FROM work_items WHERE id = ?",
-                        (work_item_id,),
-                    ).fetchone()
-                    seen.append(r["status"])
-                    still = (result, WorkItemStatus.ACTIVE) if parked else (result,)
-                    return r["current_node_id"] == at and r["status"] in still
+                def ours(c, parked=parked, result=result, seen=seen) -> bool:
+                    # Read in the writing transaction. A poller re-entering the park
+                    # writes `active` and nothing else, and no other door can start
+                    # a walk while this one runs, so that is still this walk's item;
+                    # a pause or an end is not.
+                    status = c.execute(
+                        "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+                    ).fetchone()["status"]
+                    seen.append(status)
+                    return status in ((result, WorkItemStatus.ACTIVE) if parked else (result,))
 
                 if parked:
                     key = f"{node.id}.on_base_changed"
