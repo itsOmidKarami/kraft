@@ -458,9 +458,10 @@ def _threads_hint(db, work_item_id: str, node: ResolvedNode, tasks: list, status
     """ " <open-threads line>" for each of `tasks` whose `status` log names a merge's
     open bot threads, or "". A reason ends with it: the line quotes file names, so
     the escalation prompt cuts a reason at it (`escalate._reason_line`), and any
-    advice after it would be cut too (Kraft-6c4js)."""
+    advice after it would be cut too (Kraft-6c4js). Only Kraft's own forge tasks
+    write it: an agent's or a subprocess's log is its own output, never the card's."""
     hints = []
-    for t in tasks:
+    for t in filter(_in_process, tasks):
         lines = [ln.strip() for ln in _task_log(db, work_item_id, node, t, status).splitlines()]
         lines = [ln for ln in lines if ln]
         threads = [ln for ln in lines[1:] if ln.startswith(forge_mod.OPEN_THREADS_LINE)]
@@ -855,6 +856,8 @@ async def _escalate_stuck(
             {"node_id": node.id, "task": task.path, "reason": stuck.reason, "attempt": used + 1},
         )
     )
+    # The agent can commit and push: the threads' file names never reach it.
+    told = stuck.reason + (f" {forge_mod.OPEN_THREADS_NOTE}" if stuck.threads else "")
     watched = _rejects_merges(node) and worktree is not None
     tips = _branch_tips(db, work_item_id, row, worktree) if watched else None
     status = await dispatch.dispatch_node(
@@ -864,7 +867,7 @@ async def _escalate_stuck(
         node,
         row,
         worktree,
-        instruction_override=prompts.stuck_escalation_instruction(task, node, stuck.reason),
+        instruction_override=prompts.stuck_escalation_instruction(task, node, told),
         round=_STUCK_ESCALATION_ROUND,
         launch=launch,
         budget=budget,

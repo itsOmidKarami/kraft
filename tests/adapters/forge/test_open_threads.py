@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -15,6 +15,7 @@ from kraft.adapters.forge import git, open_threads
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import as_reviewers
 from kraft.executor import walk
+from kraft.templates.models import ForgeTask
 
 from .nodes import Api
 
@@ -261,7 +262,13 @@ async def test_a_merge_the_forge_holds_names_the_threads_when_its_wait_times_out
     assert "timed out" in log
     assert ("calc.py:3 (coderabbitai)" in log) is says
     assert log.count("calc.py:3") == int(says), "named once, at the stop"
-    # What the timed-out stop's reason is built from.
-    node, task = SimpleNamespace(id="mr_checks"), SimpleNamespace(path="on.ci.poll")
-    hint = walk._threads_hint(run_forge.database, "w1", node, [task], "capped_out")
-    assert ("calc.py:3 (coderabbitai)" in hint) is says
+    # The timed-out stop, which a person reads.
+    node = SimpleNamespace(id="mr_checks")
+    task = SimpleNamespace(path="on.ci.poll", task=Mock(spec=ForgeTask))
+    await walk._stop_for_wait_timeout(run_forge.database, "w1", node, [task])
+    [stop] = run_forge.events("work_item_needs_human")
+    assert stop["reason"].endswith("calc.py:3 (coderabbitai)") is says
+    # Only Kraft's own forge task writes that line: the same log read as an agent's
+    # or a subprocess's output names nothing on the card.
+    other = SimpleNamespace(path=task.path, task=Mock())
+    assert walk._threads_hint(run_forge.database, "w1", node, [other], "capped_out") == ""

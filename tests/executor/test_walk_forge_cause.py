@@ -9,6 +9,7 @@ import pytest
 
 from kraft import escalate, store, waits
 from kraft.adapters import forge as _forge
+from kraft.adapters.forge.models import OPEN_THREADS_NOTE
 from kraft.automated_review import as_reviewers
 from kraft.builtins import RebaseConflict
 from kraft.executor import dispatch, gates
@@ -290,7 +291,7 @@ class _RefusedOnThreads(_forge.FakeForge):
             {"fix_loop": {"tasks": [_agent("repair")]}},
             "a worker commit cannot change them. Reinstall and restart",
         ),
-        ("src/calc.py", {"escalation": _sub("esc", ["false"])}, "(stuck escalation esc"),
+        ("docs/plan.md", {"escalation": _agent("esc")}, "(stuck escalation spent"),
     ],
     ids=[
         "auth-words",
@@ -298,7 +299,7 @@ class _RefusedOnThreads(_forge.FakeForge):
         "a-line-break-in-the-name",
         "plain",
         "an-infra-stop",
-        "a-failed-stuck-escalation",
+        "a-stuck-escalation",
     ],
 )
 async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
@@ -331,6 +332,13 @@ async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
     escalated = escalate._reason_line(stop, "needs_human")
     assert named not in escalated
     assert kept is None or kept in escalated, "what Kraft says before the thread is kept"
+    # The node's own escalation can push too: it is told of the threads, not their files.
+    started = it.events("stuck_escalation_started")
+    assert bool(started) is ("escalation" in fields)
+    assert not any(named in e["payload"]["reason"] for e in started)
+    told = fake_agent.prompts()
+    assert not any(named in p for p in told)
+    assert any(OPEN_THREADS_NOTE in p for p in told) is ("escalation" in fields)
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"

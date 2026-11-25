@@ -21,7 +21,7 @@ from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
-from kraft.adapters.forge.models import OPEN_THREADS_LINE
+from kraft.adapters.forge.models import OPEN_THREADS_LINE, OPEN_THREADS_NOTE
 from kraft.executor import LaunchContext, stops
 from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask, GateNode, TaskKind
@@ -169,13 +169,6 @@ def _last_stop(db, work_item_id: str, evts: list | None = None) -> dict:
     return {}
 
 
-#: Stands in for a stop's open-threads line, which quotes repository file names:
-#: this agent can commit and push, so none of that text reaches its prompt.
-_OPEN_THREADS_NOTE = (
-    "Review-bot threads left open may be blocking this merge; the session log names them."
-)
-
-
 def _reason_line(stop: dict, status: str) -> str:
     """The `{reason_line}` `_STATE` slot, with the stop's `suggested_action`
     when it has one (Kraft-s7c04.27), so a turn starts from what the chain
@@ -189,7 +182,7 @@ def _reason_line(stop: dict, status: str) -> str:
     reason = stop.get("reason") or "(no reason recorded)"
     before, marker, _ = reason.partition(OPEN_THREADS_LINE)
     if marker:
-        reason = f"{before.rstrip()} {_OPEN_THREADS_NOTE}".lstrip()
+        reason = f"{before.rstrip()} {OPEN_THREADS_NOTE}".lstrip()
     line = f"Why it is stopped: {reason}\n"
     if suggested := stop.get("suggested_action"):
         line += (
