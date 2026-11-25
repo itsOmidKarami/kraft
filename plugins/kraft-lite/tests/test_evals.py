@@ -5,14 +5,22 @@ skill that is not installed) is caught before a model is asked to run it."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
+
+import kl_bindings
 
 PLUGIN = Path(__file__).resolve().parents[1]
 EVALS = sorted((PLUGIN / "evals").glob("*.json"))
 SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
 KEYS = {"skills", "query", "setup", "expected_behavior"}
+#: Every prompt Lite ships for a builtin or forge task, which a setup copies out of `state`.
+DEFAULTS = {
+    **{f"builtins.{k}": v["prompt"] for k, v in kl_bindings.BUILTIN_DEFAULTS.items()},
+    **{f"forge.{k}": v["prompt"] for k, v in kl_bindings.FORGE_DEFAULTS.items()},
+}
 
 
 def _text(value: object) -> bool:
@@ -45,6 +53,17 @@ def check_case(case: object, own: str, installed: set) -> list:
     return problems
 
 
+def stale_prompts(setup: str) -> list:
+    """The defaults `setup` quotes from their first sentence but not whole: a
+    copy of `state` that a later change to the prompt left behind."""
+    return sorted(
+        name
+        for name, prompt in DEFAULTS.items()
+        for found in re.finditer(re.escape(prompt.split(". ")[0]), setup)
+        if not setup.startswith(prompt, found.start())
+    )
+
+
 def test_every_skill_has_an_evals_file():
     assert [p.stem for p in EVALS] == SKILLS
 
@@ -59,6 +78,21 @@ def test_every_eval_case_is_well_formed(path):
         if (problems := check_case(case, path.stem, set(SKILLS)))
     }
     assert not found, f"{path.name}: {found}"
+
+
+@pytest.mark.parametrize("path", EVALS, ids=[p.stem for p in EVALS])
+def test_a_setup_quotes_each_default_prompt_as_lite_ships_it(path):
+    found = {
+        index: stale
+        for index, case in enumerate(json.loads(path.read_text()))
+        if (stale := stale_prompts(case["setup"]))
+    }
+    assert not found, f"{path.name}: copy the current prompt from kl_bindings into {found}"
+
+
+def test_a_prompt_quoted_from_an_older_release_is_stale():
+    first = kl_bindings.FORGE_DEFAULTS["mr.sync"]["prompt"].split(". ")[0]
+    assert stale_prompts(f"its prompt is '{first}.'") == ["forge.mr.sync"]
 
 
 _GOOD = {"skills": ["kraft-lite:gate"], "query": "q", "setup": "s", "expected_behavior": ["b"]}
