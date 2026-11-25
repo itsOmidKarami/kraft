@@ -483,6 +483,22 @@ def _record_description(c, work_item_id: str, node_id: str | None, repo: Path, s
     )
 
 
+async def _record_opening(
+    db, forge: Forge, work_item_id: str, node_id: str | None, repo: Path, body: str
+) -> None:
+    """Record the description `forge.open_mr` writes, before it does: on GitLab the
+    body, then the body with `open_marker` it writes as an edit of it."""
+    # getattr: a test's bare forge may define nothing beyond the calls it answers.
+    marker = getattr(forge, "open_marker", "")
+    texts = [body, body + marker] if marker else [body]
+
+    def _write(c) -> None:
+        for text in texts:
+            _record_description(c, work_item_id, node_id, repo, mr_ops.body_hash(text))
+
+    await db.write(_write)
+
+
 def _our_descriptions(c, work_item_id: str, repo: Path) -> set[str]:
     """The hash of every description Kraft recorded writing to `repo`."""
     rows = c.execute(
@@ -1662,10 +1678,7 @@ async def _run_one(
                 # artifact, not from the newer head. Re-run on.mr.describe
                 # from the fix loop if CI-fix commits start changing the
                 # story.
-                sha = mr_ops.body_hash(body)
-                await db.write(
-                    lambda c: _record_description(c, work_item_id, node_id, orig_repo, sha)
-                )
+                await _record_opening(db, forge, work_item_id, node_id, orig_repo, body)
                 mr = await forge.open_mr(
                     repo=repo,
                     branch=branch,
@@ -2031,7 +2044,8 @@ async def _run_one(
             # run again. Only when Kraft changed the body AND the current
             # head's checks are red: a sync after new commits sees a pending
             # pipeline.
-            if replaced is not None and replaced.strip() != body.strip():
+            unmarked = (replaced or "").strip().removesuffix(mr_ops.OPEN_MARKER.strip())
+            if replaced is not None and unmarked.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
                         repo=repo, mr=MR(number=0, url=""), branch=branch
@@ -3625,8 +3639,7 @@ async def _bump_pointer_only_root(
             f"work item {work_item_id}."
         ),
     )
-    sha = mr_ops.body_hash(body)
-    await db.write(lambda c: _record_description(c, work_item_id, node_id, orig_repo, sha))
+    await _record_opening(db, forge, work_item_id, node_id, orig_repo, body)
     mr = await forge.open_mr(
         repo=root_repo,
         branch=branch,

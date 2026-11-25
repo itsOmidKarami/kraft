@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import replace
@@ -36,8 +37,10 @@ from kraft.adapters.forge.models import (
     ReviewResult,
 )
 from kraft.adapters.forge.replies import facts
-from kraft.adapters.forge.transport import CliTransport, Transport
+from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
+
+logger = logging.getLogger(__name__)
 
 #: The system notes GitLab writes when someone approves or withdraws approval.
 _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request")
@@ -252,8 +255,58 @@ _ENQUEUE_NOTES = (
 )
 
 
+#: Every note on a merge request, oldest first, with the description text a
+#: "changed the description" note links. Free tiers included; REST has no route.
+_DESCRIPTION_NOTES_QUERY = """
+query($id: MergeRequestID!, $after: String) {
+  mergeRequest(id: $id) {
+    notes(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        system createdAt author { bot }
+        systemNoteMetadata { action descriptionVersion { id description } }
+      }
+    }
+  }
+}
+"""
+
+
+def _description_saves(notes: list) -> tuple[DescriptionRevision, ...]:
+    """Each save of the description, newest first, from a merge request's notes:
+    a `description` note's linked text, and a `task` note (a checkbox tick, which
+    links none) as a save of unknown text. Empty on any shape it cannot vouch for,
+    so the description stays as it is. Raises on a missing field."""
+    saves: list[DescriptionRevision] = []
+    last = None
+    for note in notes:
+        at = mr_ops.forge_time(note["createdAt"])
+        if at is None or (last is not None and at < last):
+            return ()
+        last = at
+        if not note["system"]:
+            continue
+        meta = note["systemNoteMetadata"]
+        if not meta or not isinstance(meta["action"], str):
+            return ()  # a system note that cannot say what it changed
+        if meta["action"] not in ("description", "task"):
+            continue
+        text = None
+        if meta["action"] == "description":
+            text = (meta["descriptionVersion"] or {}).get("description")
+            if not isinstance(text, str) or not text:
+                return ()
+        saves.append(DescriptionRevision(text, (note["author"] or {}).get("bot") is True))
+    return tuple(reversed(saves))
+
+
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
+
+    #: What `open_mr` appends to the body it created with: GitLab keeps a creation
+    #: text in a version no note links, so Kraft's own text would never be found in
+    #: the history a bot's later save is read from (`_mark_open`).
+    open_marker = mr_ops.OPEN_MARKER
 
     def __init__(self, transport: Transport | None = None):
         self._injected = transport
@@ -310,7 +363,22 @@ class GlabCli(mr_ops.CliWaits):
             "POST", "projects/:id/merge_requests", fields=fields
         )
         data = resp.json()
-        return MR(number=int(data["iid"]), url=str(data["web_url"]))
+        mr = MR(number=int(data["iid"]), url=str(data["web_url"]))
+        await self._mark_open(repo, mr.number, body)
+        return mr
+
+    async def _mark_open(self, repo: Path, iid: int, body: str) -> None:
+        """Write `body` again with `open_marker`, so it is a version a note links.
+        Only over Kraft's own text, never a person's edit made since the create, and
+        best-effort: the body is live either way, and Kraft's next rewrite links it."""
+        path = f"projects/:id/merge_requests/{iid}"
+        try:
+            live = str((await self._api(repo, path) or {}).get("description") or "")
+            if mr_ops.body_hash(live) == mr_ops.body_hash(body):
+                marked = {"description": body + self.open_marker}
+                await self._api(repo, path, method="PUT", fields=marked)
+        except ForgeError as exc:
+            logger.warning("!%s: left the description unmarked: %s", iid, exc)
 
     async def _user_id(self, repo: Path, username: str) -> str:
         if username == "@me":  # glab's spelling for the authenticated user (user.go:16-19)
@@ -450,10 +518,32 @@ class GlabCli(mr_ops.CliWaits):
     async def mr_description_history(
         self, *, repo: Path, branch: str
     ) -> tuple[DescriptionRevision, ...]:
-        """None to give: GitLab's merge request names only its last editor, which
-        proves nothing about the edits before it, and description versions are
-        not on every tier. So a changed description stays a person's here."""
-        return ()
+        """From the merge request's notes over GraphQL (`_description_saves`). Empty,
+        so a person's, when the notes run past `BOT_PAGES` pages or come back in a
+        shape it does not know."""
+        mr = await self._mr(repo, branch)
+        notes: list = []
+        try:
+            variables: dict[str, Field] = {"id": f"gid://gitlab/MergeRequest/{int(mr['id'])}"}
+            for _ in range(mr_ops.BOT_PAGES):
+                data = await self._transport(repo).graphql(_DESCRIPTION_NOTES_QUERY, variables)
+                page = data["mergeRequest"]["notes"]
+                notes += page["nodes"]
+                info = page["pageInfo"]
+                if info["hasNextPage"] is False:
+                    return _description_saves(notes)
+                cursor = info["endCursor"]
+                if (
+                    info["hasNextPage"] is not True
+                    or not cursor
+                    or cursor == variables.get("after")
+                ):
+                    return ()
+                variables = {**variables, "after": cursor}
+            return ()
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            logger.debug("description history: an answer it cannot read: %r", exc)
+            return ()
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge (`_merge_view`)."""

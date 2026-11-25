@@ -280,6 +280,13 @@ class GlabOverHttp(CliOverHttp):
         assert path.startswith(mine) or not re.match(r"projects/\D", path), path
         return path.replace(mine, "projects/:id", 1)
 
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        if request.url.raw_path.decode() != "/api/graphql":
+            return super()._answer(request)
+        body = json.loads(request.content)
+        argv = ["glab", "api", "graphql", "-i", "-f", f"query={body['query']}"]
+        return self._run([*argv, *transport._flags(body["variables"])])
+
 
 _PLACEHOLDER_WIRE = re.compile(r"\{(owner|repo|branch)\}|%7B(owner|repo|branch)%7D", re.I)
 _PLACEHOLDER_VALUE = frozenset({"{owner}", "{repo}", "{branch}"})

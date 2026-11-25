@@ -477,9 +477,10 @@ class MRDetails:
 @dataclass(frozen=True)
 class DescriptionRevision:
     """One saved version of a merge request's description, and whether a bot
-    account saved it. An unknown or deleted editor is not a bot."""
+    account saved it. An unknown or deleted editor is not a bot. `text` is None
+    for a save the forge names without its text (a GitLab checkbox tick)."""
 
-    text: str
+    text: str | None
     bot: bool
 
 

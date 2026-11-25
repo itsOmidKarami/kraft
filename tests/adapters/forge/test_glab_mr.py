@@ -156,7 +156,41 @@ async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta,
         *lookups,
         "api projects/:id/merge_requests -X POST -i -f source_branch=kraft/abc "
         "-f target_branch=release -f title=Draft: Teach it -f description=why" + fields,
+        GET,
     ]
+
+
+#: The marked body: the call log is one line per line, so its blank line shows.
+_MARK = [f"{PUT} -f description=why", "", "<!-- kraft -->"]
+
+
+@pytest.mark.parametrize(
+    "live, put, sent",
+    [
+        ("why\r\n", "{}", [GET, *_MARK]),
+        ("why, and a person's line", "{}", [GET]),
+        (FAIL, "{}", [GET]),
+        ("why", FAIL, [GET, *_MARK]),
+    ],
+    ids=["kraft-s-text-marked", "person-edited-kept", "read-failed", "mark-failed"],
+)
+async def test_glab_open_mr_marks_its_own_text_as_an_edit(cli, tmp_path, live, put, sent):
+    """GitLab links no note to a creation text, so Kraft writes its body again with
+    a marker: only over its own text, and a failure still leaves the merge request
+    opened."""
+    cli.stub("git", "")
+    view = FAIL if live is FAIL else json.dumps({"iid": 54, "description": live})
+    cli.stub(
+        "glab",
+        routes={"api*merge_requests -X POST*": GLAB_MR_VIEW, f"{GET}*": view, f"{PUT}*": put},
+    )
+
+    mr = await forge.GlabCli().open_mr(
+        repo=tmp_path, branch="kraft/abc", base="main", title="t", body="why"
+    )
+
+    assert mr.number == 54
+    assert cli.calls("glab")[1:] == sent
 
 
 async def test_glab_open_mr_refuses_a_user_gitlab_does_not_know(cli, tmp_path):
@@ -559,7 +593,7 @@ async def test_glab_open_mr_resolves_a_user_as_glab_does(cli, tmp_path, routes, 
 
     if expect.startswith("assignee_ids"):
         await opening
-        assert expect in cli.calls("glab")[-1]
+        assert expect in cli.calls("glab")[-2]
     else:
         with pytest.raises(forge.ForgeError, match=expect):
             await opening
