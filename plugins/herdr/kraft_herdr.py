@@ -1,6 +1,7 @@
 """Kraft in Herdr: one tab per live work item, its state in Herdr's sidebar.
 
-Stdlib only, and Python 3.10 at the floor. It imports nothing from Kraft: it
+Stdlib only, and Python 3.9 at the floor: Herdr can restart a tab with the
+system's `python3`, which on macOS is 3.9. It imports nothing from Kraft: it
 talks to Kraft through the `kraft` command and to Herdr through the `herdr`
 command, so either can change inside and this keeps working.
 
@@ -164,6 +165,9 @@ class Herdr:
     def rename(self, pane: str, label: str) -> None:
         self.run("pane", "rename", pane, label)
 
+    def close(self, pane: str) -> None:
+        self.run("pane", "close", pane)
+
     def report(self, pane: str, state: str, label: str, resume: list[str] | None = None) -> None:
         """Say what the item is doing. Herdr ignores a `--seq` that is not higher
         than the last it took, across restarts of this bridge too, so the
@@ -174,6 +178,15 @@ class Herdr:
             "--seq", str(time.time_ns() // 1_000_000),
         ]  # fmt: skip
         self.run(*args, *(["--", *resume] if resume else []))
+        # The sidebar's label comes from metadata: `--message` only explains a
+        # block. Herdr shows an idle agent nobody has looked at yet as `done`,
+        # so an idle label is given for both. Each call replaces the whole map.
+        shown = (state, "done") if state == "idle" else (state,)
+        labels = [part for s in shown for part in ("--state-label", f"{s}={label}")]
+        try:
+            self.run("pane", "report-metadata", pane, "--source", SOURCE, "--agent", AGENT, *labels)
+        except CommandFailed as exc:  # the state is in: a missing label must not lose it
+            log(f"{pane}: {exc}")
 
     def panes(self, workspace: str) -> list[dict]:
         return self.run("pane", "list", "--workspace", workspace).get("panes", [])
@@ -478,13 +491,25 @@ def item_main(args: list[str]) -> int:
 BRIDGE_LABEL = "kraft bridge"
 
 
-def start(herdr: Herdr) -> int:
+def start(herdr: Herdr, *, state_dir: Path | None = None) -> int:
     """The startup hook. Herdr runs it once, and again after a live handoff,
-    and does not supervise it: so it only makes sure the bridge has a pane, and
-    leaves the loop to that pane."""
+    and does not supervise it: so it only makes sure a bridge is running, and
+    leaves the loop to that pane. The bridge's lock says whether one is, not the
+    tab's name: after a restart of its server Herdr brings the tab back as a
+    plain shell, so a free lock means a new tab opens and the old one goes. The
+    new one opens first, so a close that fails never leaves no bridge."""
+    lock = acquire_lock(state_dir or _dir("HERDR_PLUGIN_STATE_DIR"))
+    if lock is None:
+        return 0  # a bridge holds it
+    lock.close()
     workspace = herdr.workspace_id(WORKSPACE)
-    if BRIDGE_LABEL not in herdr.panes_by_label(workspace):
-        herdr.rename(herdr.open_bridge_tab(workspace), BRIDGE_LABEL)
+    stale = herdr.panes_by_label(workspace).get(BRIDGE_LABEL)
+    herdr.rename(herdr.open_bridge_tab(workspace), BRIDGE_LABEL)
+    if stale is not None:
+        try:
+            herdr.close(stale)
+        except CommandFailed as exc:  # gone already, most likely
+            log(f"old bridge tab {stale}: {exc}")
     return 0
 
 
@@ -510,8 +535,10 @@ def takeover(herdr: Herdr, context: dict, *, state_dir: Path | None = None) -> i
 
 
 def resume_command(item_id: str) -> list[str]:
-    """What Herdr runs to bring an item tab back after a restart of its server."""
-    return [sys.executable, str(Path(__file__).resolve()), "item", item_id]
+    """What Herdr runs to bring an item tab back after a restart of its server.
+    Herdr refuses one that starts with a path, so it is the manifest's plain
+    `python3`, and the script goes by its full path."""
+    return ["python3", str(Path(__file__).resolve()), "item", item_id]
 
 
 def load_config(config_dir: Path) -> dict:

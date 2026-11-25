@@ -6,7 +6,7 @@ _Added in next_
 
 ## Install
 
-It needs Herdr 0.9.2 or newer, Python 3.10 or newer, and `kraft` on the `PATH`.
+It needs Herdr 0.9.2 or newer (checked against 0.9.5), Python 3.9 or newer, and `kraft` on the `PATH`, recent enough to have `kraft view events --all`.
 
 ```bash
 herdr plugin install itsOmidKarami/kraft/plugins/herdr

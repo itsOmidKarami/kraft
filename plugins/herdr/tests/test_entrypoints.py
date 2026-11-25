@@ -20,16 +20,54 @@ def fakes(tmp_path, monkeypatch):
     return f
 
 
-@pytest.mark.parametrize("present", [True, False], ids=["bridge-open", "bridge-absent"])
-def test_start_opens_the_bridge_once(fakes, present):
+@pytest.mark.parametrize(
+    ("present", "running", "close_fails"),
+    [
+        pytest.param(True, True, False, id="bridge-running"),
+        # A live handoff runs the hook again while the bridge runs on.
+        pytest.param(False, True, False, id="bridge-running-without-its-tab"),
+        pytest.param(False, False, False, id="bridge-absent"),
+        # Herdr's server restarted: the tab is back under its name, as a plain shell.
+        pytest.param(True, False, False, id="bridge-tab-restored-without-it"),
+        # The stale tab went away first: the new bridge still opens.
+        pytest.param(True, False, True, id="stale-tab-will-not-close"),
+    ],
+)
+def test_start_opens_the_bridge_once(fakes, tmp_path, present, running, close_fails):
+    state = tmp_path / "state"
     panes = [{"pane_id": "w1:p1", "label": "kraft bridge"}] if present else []
     fakes.reply("herdr", "pane list", result(panes=panes))
     fakes.reply("herdr", "plugin pane open", result(plugin_pane={"pane": {"pane_id": "w1:p4"}}))
-    assert kraft_herdr.start(kraft_herdr.Herdr()) == 0
+    if close_fails:
+        fakes.reply("herdr", "pane close", {"exit": 1, "stderr": "pane_not_found"})
+    herdr, lock_free = kraft_herdr.Herdr(), []
+    opens = herdr.open_bridge_tab
+
+    def open_bridge_tab(workspace):
+        # The bridge this starts takes the lock at once: start must not hold it then.
+        probe = kraft_herdr.acquire_lock(state)
+        lock_free.append(probe is not None)
+        if probe:
+            probe.close()
+        return opens(workspace)
+
+    herdr.open_bridge_tab = open_bridge_tab
+    held = kraft_herdr.acquire_lock(state) if running else None
+    try:
+        assert kraft_herdr.start(herdr, state_dir=state) == 0
+    finally:
+        if held:
+            held.close()
     opened = fakes.calls("herdr", "plugin pane open")
-    if present:
-        assert opened == []
+    if running:
+        assert opened == [] and fakes.calls("herdr", "pane close") == []
         return
+    assert lock_free == [True]
+    # the stale tab goes, so its name points at the new one only
+    assert [a[2:] for a in fakes.calls("herdr", "pane close")] == ([["w1:p1"]] if present else [])
+    if present:  # and only after the new one is open: closing it first could leave no bridge
+        calls = [a[:3] for a in fakes.calls("herdr")]
+        assert calls.index(["plugin", "pane", "open"]) < calls.index(["pane", "close", "w1:p1"])
     (call,) = opened
     assert call[call.index("--entrypoint") + 1] == "bridge"
     assert call[call.index("--placement") + 1] == "tab" and "--no-focus" in call
@@ -80,7 +118,7 @@ def test_load_config_defaults(tmp_path):
 
 
 def test_the_manifest_declares_every_entry_point_the_script_has():
-    tomllib = pytest.importorskip("tomllib")  # 3.11+; the floor, 3.10, skips it
+    tomllib = pytest.importorskip("tomllib")  # 3.11+; the 3.9 floor skips it
     manifest = tomllib.loads((Path(kraft_herdr.__file__).parent / "herdr-plugin.toml").read_text())
     assert manifest["min_herdr_version"] == "0.9.2"
     assert {p["id"] for p in manifest["panes"]} == {"bridge", "item"}

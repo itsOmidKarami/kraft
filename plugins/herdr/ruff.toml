@@ -1,7 +1,8 @@
-# The plugin runs on whatever python3 the machine has: Python 3.10 is the floor,
-# the same as kraft-lite's, so ruff must not accept newer syntax.
+# The plugin runs on whatever python3 the machine has. Herdr can restart a tab
+# with the system's, which on macOS is 3.9: that is the floor,
+# so ruff must not accept newer syntax.
 line-length = 100
-target-version = "py310"
+target-version = "py39"
 
 [lint]
 select = ["E", "F", "W", "I", "UP", "B"]
