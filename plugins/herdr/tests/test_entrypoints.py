@@ -20,16 +20,28 @@ def fakes(tmp_path, monkeypatch):
     return f
 
 
-@pytest.mark.parametrize("present", [True, False], ids=["bridge-open", "bridge-absent"])
-def test_start_opens_the_bridge_once(fakes, present):
+@pytest.mark.parametrize(
+    ("present", "running"),
+    [
+        pytest.param(True, True, id="bridge-running"),
+        pytest.param(False, False, id="bridge-absent"),
+        # Herdr's server restarted: the tab is back under its name, as a plain shell.
+        pytest.param(True, False, id="bridge-tab-restored-without-it"),
+    ],
+)
+def test_start_opens_the_bridge_once(fakes, tmp_path, present, running):
     panes = [{"pane_id": "w1:p1", "label": "kraft bridge"}] if present else []
     fakes.reply("herdr", "pane list", result(panes=panes))
     fakes.reply("herdr", "plugin pane open", result(plugin_pane={"pane": {"pane_id": "w1:p4"}}))
-    assert kraft_herdr.start(kraft_herdr.Herdr()) == 0
+    held = kraft_herdr.acquire_lock(tmp_path / "state") if running else None
+    assert kraft_herdr.start(kraft_herdr.Herdr(), state_dir=tmp_path / "state") == 0
     opened = fakes.calls("herdr", "plugin pane open")
-    if present:
-        assert opened == []
+    if running:
+        assert opened == [] and fakes.calls("herdr", "pane close") == []
+        held.close()
         return
+    # the stale tab goes, so its name points at the new one only
+    assert [a[2:] for a in fakes.calls("herdr", "pane close")] == ([["w1:p1"]] if present else [])
     (call,) = opened
     assert call[call.index("--entrypoint") + 1] == "bridge"
     assert call[call.index("--placement") + 1] == "tab" and "--no-focus" in call
@@ -80,7 +92,7 @@ def test_load_config_defaults(tmp_path):
 
 
 def test_the_manifest_declares_every_entry_point_the_script_has():
-    tomllib = pytest.importorskip("tomllib")  # 3.11+; the floor, 3.10, skips it
+    tomllib = pytest.importorskip("tomllib")  # 3.11+; the 3.9 floor skips it
     manifest = tomllib.loads((Path(kraft_herdr.__file__).parent / "herdr-plugin.toml").read_text())
     assert manifest["min_herdr_version"] == "0.9.2"
     assert {p["id"] for p in manifest["panes"]} == {"bridge", "item"}

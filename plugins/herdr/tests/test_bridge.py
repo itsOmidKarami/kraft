@@ -51,6 +51,14 @@ def reports(fakes):
     return out
 
 
+def labels(fakes):
+    """(pane, state labels) for every report-metadata call: what the sidebar shows."""
+    out = []
+    for argv in fakes.calls("herdr", "pane report-metadata"):
+        out.append((argv[2], [argv[i + 1] for i, a in enumerate(argv) if a == "--state-label"]))
+    return out
+
+
 def test_reconcile_opens_a_tab_per_live_item_and_reports_states(fakes, state_dir):
     """Three items, one of them finished and with a tab already: two live tabs
     are opened, and the finished one is told so."""
@@ -89,6 +97,10 @@ def test_reconcile_opens_a_tab_per_live_item_and_reports_states(fakes, state_dir
     assert ("w1:p1", "working", "implementation") in reports(fakes)
     assert ("w1:p2", "blocked", "plan_review") in reports(fakes)
     assert reports(fakes).count(("w1:p3", "idle", "merged")) == 1
+    # Herdr's sidebar shows these, not `--message`; an unseen idle agent reads `done`.
+    assert ("w1:p1", ["working=implementation"]) in labels(fakes)
+    assert ("w1:p2", ["blocked=plan_review"]) in labels(fakes)
+    assert ("w1:p3", ["idle=merged", "done=merged"]) in labels(fakes)
     renames = {tuple(a[2:]) for a in fakes.calls("herdr", "pane rename")}
     assert ("w1:p1", "aaaaaaaa a title") in renames
 
@@ -101,7 +113,9 @@ def test_every_report_carries_the_source_agent_and_an_increasing_seq(fakes, stat
     calls = fakes.calls("herdr", "pane report-agent")
     assert all(a[a.index("--source") + 1] == "custom:kraft" for a in calls)
     assert all(a[a.index("--agent") + 1] == "kraft" for a in calls)
-    # Herdr restarts the tab's process itself from the command reported after `--`.
+    # Herdr restarts the tab's process itself from the command reported after `--`,
+    # and refuses one that starts with a path.
+    assert all(a[a.index("--") + 1] == "python3" for a in calls)
     assert all(a[a.index("--") + 3 :] == ["item", "aaaaaaaa1"] for a in calls)
     seqs = [int(a[a.index("--seq") + 1]) for a in calls]
     assert seqs == sorted(seqs) and seqs[0] > 1_700_000_000_000  # milliseconds, not seconds
@@ -209,6 +223,16 @@ def test_stream_end_reconnects(fakes, state_dir, monkeypatch):
     assert len(fakes.calls("kraft", EVENTS)) == 3
     assert len(fakes.calls("kraft", LIST)) == 3
     assert len(fakes.calls("herdr", "plugin pane open")) == 1
+
+
+def test_the_bridge_outlives_a_kraft_it_cannot_start(fakes, state_dir, monkeypatch, capsys):
+    """Nothing restarts the bridge: a `kraft` that is not there is an error in the
+    pane and another try, never the end of the loop."""
+    monkeypatch.setattr(kraft_herdr, "BACKOFF_MIN", 0)
+    monkeypatch.setattr(kraft_herdr, "BACKOFF_MAX", 0)
+    gone = kraft_herdr.Bridge(kraft_herdr.Herdr(), str(state_dir / "no-kraft"), state_dir)
+    gone.run(max_cycles=2)
+    assert capsys.readouterr().out.count("error:") == 2
 
 
 def test_events_trigger_a_reconcile_without_waiting_a_minute(fakes, state_dir, monkeypatch):
