@@ -197,6 +197,21 @@ HEAD_MODIFIED = json.dumps(
     }
 )
 
+#: GitHub's GraphQL error for a pull request it is merging already; go-gh prints it
+#: as `GraphQL: Merge already in progress (mergePullRequest)`.
+MERGE_IN_PROGRESS = json.dumps(
+    {
+        "data": {"mergePullRequest": None},
+        "errors": [
+            {
+                "type": "UNPROCESSABLE",
+                "path": ["mergePullRequest"],
+                "message": "Merge already in progress",
+            }
+        ],
+    }
+)
+
 
 def workflow_run(run_id: int, **fields) -> dict:
     """One `workflow_runs[]` entry of `GET /repos/{o}/{r}/actions/runs`, trimmed to

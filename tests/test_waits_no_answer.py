@@ -212,9 +212,15 @@ async def test_a_local_refusal_on_the_next_try_keeps_the_count(
     [
         ("this-item", waits.NO_ANSWER_TRIES, "could not reach the forge"),
         ("another-item", waits.NO_ANSWER_TRIES, "could not reach the forge"),
+        ("recovered", waits.NO_ANSWER_TRIES, "could not reach the forge"),
         ("never", waits.FIRST_CONTACT_TRIES, "api_url"),
     ],
-    ids=["opened-an-mr", "the-repo-answered-another-item", "a-forge-that-never-answered"],
+    ids=[
+        "opened-an-mr",
+        "the-repo-answered-another-item",
+        "the-repo-recovered-from-a-park",
+        "a-forge-that-never-answered",
+    ],
 )
 async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_starts_over(
     walk,  # noqa: F811
@@ -230,11 +236,14 @@ async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_start
     fake.ci_status = AsyncMock(side_effect=DROPPED)
     opened = [forge_node("open", "mr.open_draft")] if answered_before == "this-item" else []
     it = await item_on([*opened, _feedback_node()])
-    if answered_before == "another-item":
+    if answered_before in ("another-item", "recovered"):
         other = await item_on([forge_node("open", "mr.open_draft")], wid="w2")
-        await it.database.write(
-            lambda c: events.append(c, other.id, "mr_opened", {"number": 1, "url": "u"})
+        kind, said = (
+            ("mr_opened", {"number": 1, "url": "u"})
+            if answered_before == "another-item"
+            else ("forge_answered", {"node_id": "open", "task": "open.main.open", "attempts": 1})
         )
+        await it.database.write(lambda c: events.append(c, other.id, kind, said))
 
     for _ in range(tries):
         assert await walk(fake, it) == "waiting"
@@ -255,6 +264,43 @@ async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_start
         )
     )
     assert it.events("forge_no_answer")[-1]["payload"]["attempt"] == 1
+
+
+@pytest.mark.parametrize("clears", [True, False], ids=["lands-on-a-later-ask", "never-clears"])
+async def test_a_merge_the_forge_is_still_making_is_read_again_and_asked_again(
+    walk,  # noqa: F811
+    item_on,
+    wait_clock,
+    clears,
+):
+    """A forge "already merging" is a lock, not a promise (Kraft-l1hbl): the item parks, the
+    retry reads the state and asks again, and a lock that never clears stops for a
+    person naming it, not the network."""
+    fake = forge.FakeForge(ci_states=["success"])
+    asked, real_merge = [], fake.merge
+
+    async def busy_then_free(**kw):
+        asked.append(kw)
+        if len(asked) == 1 or not clears:
+            raise forge.MergeBusy("Merge already in progress")
+        await real_merge(**kw)
+
+    fake.merge = busy_then_free
+    it = await item_on([forge_node("open", "mr.open_draft"), forge_node("land", "mr.merge")])
+
+    assert await walk(fake, it) == "waiting"
+    assert "finish a merge" in it.events("work_item_waiting")[-1]["payload"]["reason"]
+    tries = 1 if clears else waits.NO_ANSWER_TRIES
+    for _ in range(tries):
+        wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
+        status = await walk(fake, it)
+    assert status == ("completed" if clears else "needs_human")
+
+    assert len(asked) == 1 + tries
+    assert not it.events("fix_cycle_started") and not it.events("node_recovery_started")
+    if not clears:
+        stop = it.events("work_item_needs_human")[-1]["payload"]
+        assert "still merging" in stop["reason"] and "network" not in stop["reason"]
 
 
 @pytest.mark.parametrize(

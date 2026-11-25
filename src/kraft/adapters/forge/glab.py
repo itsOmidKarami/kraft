@@ -26,6 +26,7 @@ from kraft.adapters.forge.models import (
     HeadMoved,
     Job,
     Label,
+    MergeBusy,
     MergedMR,
     MRDetails,
     MRRef,
@@ -1195,7 +1196,7 @@ class GlabCli(mr_ops.CliWaits):
             data = await self._view(repo, branch, mr.number)
             if data.get("state") == "locked":
                 # GitLab is merging it now: an earlier ask whose answer was lost.
-                return
+                raise MergeBusy(f"!{data.get('iid')} is locked")
             if data.get("draft"):  # mrutils.go:61-63: glab refuses a draft before any PUT
                 raise ForgeError(f"cannot merge !{data['iid']}: still a draft")
             pipeline = data.get("head_pipeline") or data.get("pipeline")

@@ -321,6 +321,13 @@ def _tries(conn, work_item_id: str) -> int:
     return NO_ANSWER_TRIES if answered else FIRST_CONTACT_TRIES
 
 
+def _busy(error: str) -> bool:
+    """Whether a parked try was the forge still merging (`MergeBusy`), not the network."""
+    from kraft.adapters.forge.models import MergeBusy  # the adapters import this module
+
+    return error.startswith(MergeBusy.PREFIX)
+
+
 def note_no_answer(
     conn, work_item_id: str, *, node_id: str, task: str, error: str, started: datetime
 ) -> bool:
@@ -338,12 +345,25 @@ def note_no_answer(
     ids = {"node_id": node_id, "task": task, "attempt": attempt, "error": error}
     tries = _tries(conn, work_item_id)
     if attempt > tries:
-        reason = f"{task} got no answer from the forge in {tries} tries: {error}\n" + (
-            "The Kraft server's machine could not reach the forge. Check its network, then retry."
-            if tries == NO_ANSWER_TRIES
-            else "This repo's forge has never answered Kraft, so check its setup first: the"
-            " forge account's api_url, the remote's host and port, and ssh access. Then retry."
-        )
+        if _busy(error):
+            reason = (
+                f"{task}: the forge was still merging the merge request at each of {tries}"
+                f" tries: {error}\nIt has held the merge without finishing it. Look at the"
+                " merge request on the forge, then retry."
+            )
+        elif tries == NO_ANSWER_TRIES:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "The Kraft server's machine could not reach the forge. Check its network,"
+                " then retry."
+            )
+        else:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "This repo's forge has never answered Kraft. The network may just have been"
+                " down, and then retrying is all it needs. Otherwise check its setup: the"
+                " forge account's api_url, the remote's host and port, and ssh access."
+            )
         events.append(conn, work_item_id, ForgeEvent.FORGE_NO_ANSWER, {**ids, "reason": reason})
         return False
     delay = min(_NO_ANSWER_FIRST_S * 2 ** (attempt - 1), _NO_ANSWER_MAX_S)
@@ -383,10 +403,12 @@ def no_answer_park(conn, work_item_id: str, tasks) -> tuple[str, str] | None:
     if not parked:
         return None
     p = max(parked, key=lambda x: datetime.fromisoformat(x["retry_at"]))
-    return p["retry_at"], (
-        f"waiting for the network: no answer from the forge "
-        f"(try {p['attempt']} of {_tries(conn, work_item_id)})"
+    waiting = (
+        "waiting for the forge to finish a merge it is making"
+        if _busy(p["error"])
+        else "waiting for the network: no answer from the forge"
     )
+    return p["retry_at"], f"{waiting} (try {p['attempt']} of {_tries(conn, work_item_id)})"
 
 
 # --- the scheduler --------------------------------------------------------------

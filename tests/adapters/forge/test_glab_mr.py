@@ -452,13 +452,14 @@ async def test_glab_merge_409_is_a_head_that_moved_and_names_the_forges(
 
 async def test_glab_merge_sends_nothing_while_gitlab_is_merging(cli, tmp_path):
     """A retry after an ask whose answer was lost (Kraft-l1hbl): GitLab holds the
-    merge request `locked` while it merges, so `merge` returns and the merge node
-    waits for it to land. By branch, as `run_task` asks: `locked` is not `opened`."""
+    merge request `locked` while it merges, which parks the item to read it again
+    (`MergeBusy`). By branch, as `run_task` asks: `locked` is not `opened`."""
     cli.stub("git", "0")
     locked = json.dumps({"iid": 54, "state": "locked", "head_pipeline": None})
     cli.stub("glab", routes={**_NO_TRAIN, **glab_mr(locked, open=False)}, default="{}")
 
-    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head=_HEAD)
+    with pytest.raises(forge.MergeBusy, match="!54 is locked"):
+        await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head=_HEAD)
 
     assert not [c for c in cli.calls("glab") if "/merge " in c]
 
