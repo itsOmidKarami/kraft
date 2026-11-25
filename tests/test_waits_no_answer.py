@@ -207,22 +207,43 @@ async def test_a_local_refusal_on_the_next_try_keeps_the_count(
     assert kept["attempt"] == 1
 
 
+@pytest.mark.parametrize(
+    "answered_before, tries, names",
+    [
+        ("this-item", waits.NO_ANSWER_TRIES, "could not reach the forge"),
+        ("another-item", waits.NO_ANSWER_TRIES, "could not reach the forge"),
+        ("never", waits.FIRST_CONTACT_TRIES, "api_url"),
+    ],
+    ids=["opened-an-mr", "the-repo-answered-another-item", "a-forge-that-never-answered"],
+)
 async def test_the_limit_stops_for_a_person_naming_the_network_and_a_retry_starts_over(
     walk,  # noqa: F811
     item_on,
     wait_clock,
+    answered_before,
+    tries,
+    names,
 ):
+    """A forge that has never answered this repo is a setup mistake until proven
+    otherwise (Kraft-675vy): it stops after a few tries, not ten."""
     fake = forge.FakeForge()
     fake.ci_status = AsyncMock(side_effect=DROPPED)
-    it = await item_on([forge_node("open", "mr.open_draft"), _feedback_node()])
+    opened = [forge_node("open", "mr.open_draft")] if answered_before == "this-item" else []
+    it = await item_on([*opened, _feedback_node()])
+    if answered_before == "another-item":
+        other = await item_on([forge_node("open", "mr.open_draft")], wid="w2")
+        await it.database.write(
+            lambda c: events.append(c, other.id, "mr_opened", {"number": 1, "url": "u"})
+        )
 
-    for _ in range(waits.NO_ANSWER_TRIES):
+    for _ in range(tries):
         assert await walk(fake, it) == "waiting"
+        assert f"of {tries})" in it.events("work_item_waiting")[-1]["payload"]["reason"]
         wait_clock.now = datetime.fromisoformat(it.row()["retry_at"])
     assert await walk(fake, it) == "needs_human"
 
     stop = it.events("work_item_needs_human")[-1]["payload"]
-    assert "could not reach the forge" in stop["reason"] and "closed by remote" in stop["reason"]
+    assert names in stop["reason"] and "closed by remote" in stop["reason"]
     assert stop["facts"]["cause"] == "forge_unreachable"
     assert not it.events("fix_cycle_started") and not it.events("node_recovery_started")
     assert it.events("external_wait_ended")[-1]["payload"]["outcome"] == "error"

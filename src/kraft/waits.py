@@ -285,6 +285,10 @@ def next_observation(conn, work_item_id: str, tasks) -> str | None:
 #: doubling from `_NO_ANSWER_FIRST_S` up to `_NO_ANSWER_MAX_S`: about 90 minutes
 #: of a machine that is awake and offline.
 NO_ANSWER_TRIES = 10
+#: The tries for a repo whose forge has never answered Kraft: a wrong host, port or
+#: `api_url` fails the same way as a dropped network (an offline machine cannot
+#: resolve a name either), so only the history tells them apart. About 3.5 minutes.
+FIRST_CONTACT_TRIES = 3
 _NO_ANSWER_FIRST_S = 30
 _NO_ANSWER_MAX_S = 900
 #: A try that starts this long after it was due: the machine slept or the server
@@ -304,6 +308,19 @@ def _last_no_answer(conn, work_item_id: str, task: str) -> dict | None:
     return json.loads(row["payload"]) if row and row["type"] == ForgeEvent.FORGE_NO_ANSWER else None
 
 
+def _tries(conn, work_item_id: str) -> int:
+    """`NO_ANSWER_TRIES` once any item in this item's repo opened a merge request
+    or heard back after a drop; `FIRST_CONTACT_TRIES` before. Not `branch_pushed`:
+    a push over ssh says nothing about an `api_url`."""
+    answered = conn.execute(
+        "SELECT 1 FROM events e JOIN work_items w ON w.id = e.work_item_id"
+        " WHERE e.type IN (?, ?)"
+        " AND w.repo = (SELECT repo FROM work_items WHERE id = ?) LIMIT 1",
+        (ForgeEvent.MR_OPENED, ForgeEvent.FORGE_ANSWERED, work_item_id),
+    ).fetchone()
+    return NO_ANSWER_TRIES if answered else FIRST_CONTACT_TRIES
+
+
 def note_no_answer(
     conn, work_item_id: str, *, node_id: str, task: str, error: str, started: datetime
 ) -> bool:
@@ -319,10 +336,13 @@ def note_no_answer(
         )
         attempt = last["attempt"] + (0 if late else 1)
     ids = {"node_id": node_id, "task": task, "attempt": attempt, "error": error}
-    if attempt > NO_ANSWER_TRIES:
-        reason = (
-            f"{task} got no answer from the forge in {NO_ANSWER_TRIES} tries: {error}\n"
+    tries = _tries(conn, work_item_id)
+    if attempt > tries:
+        reason = f"{task} got no answer from the forge in {tries} tries: {error}\n" + (
             "The Kraft server's machine could not reach the forge. Check its network, then retry."
+            if tries == NO_ANSWER_TRIES
+            else "This repo's forge has never answered Kraft, so check its setup first: the"
+            " forge account's api_url, the remote's host and port, and ssh access. Then retry."
         )
         events.append(conn, work_item_id, ForgeEvent.FORGE_NO_ANSWER, {**ids, "reason": reason})
         return False
@@ -365,7 +385,7 @@ def no_answer_park(conn, work_item_id: str, tasks) -> tuple[str, str] | None:
     p = max(parked, key=lambda x: datetime.fromisoformat(x["retry_at"]))
     return p["retry_at"], (
         f"waiting for the network: no answer from the forge "
-        f"(try {p['attempt']} of {NO_ANSWER_TRIES})"
+        f"(try {p['attempt']} of {_tries(conn, work_item_id)})"
     )
 
 
