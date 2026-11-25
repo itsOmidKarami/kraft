@@ -279,18 +279,30 @@ class _RefusedOnThreads(_forge.FakeForge):
 
 
 @pytest.mark.parametrize(
-    ("file", "fix_loop"),
+    ("file", "fields", "kept"),
     [
-        ("docs/403 forbidden.md", False),
-        ("notes/connection refused.txt", False),
-        ("docs/a\n403 forbidden.md", False),
-        ("src/calc.py", False),
-        ("src/calc.py", True),
+        ("docs/403 forbidden.md", {}, None),
+        ("notes/connection refused.txt", {}, None),
+        ("docs/a\n403 forbidden.md", {}, None),
+        ("src/calc.py", {}, None),
+        (
+            "src/calc.py",
+            {"fix_loop": {"tasks": [_agent("repair")]}},
+            "a worker commit cannot change them. Reinstall and restart",
+        ),
+        ("src/calc.py", {"escalation": _sub("esc", ["false"])}, "(stuck escalation esc"),
     ],
-    ids=["auth-words", "network-words", "a-line-break-in-the-name", "plain", "an-infra-stop"],
+    ids=[
+        "auth-words",
+        "network-words",
+        "a-line-break-in-the-name",
+        "plain",
+        "an-infra-stop",
+        "a-failed-stuck-escalation",
+    ],
 )
 async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
-    item_on, tmp_path, fake_agent, monkeypatch, file, fix_loop
+    item_on, tmp_path, fake_agent, monkeypatch, file, fields, kept
 ):
     """The stop names the thread, and a thread's file name is repository content: it
     must not read as a refused credential or an unreachable forge. The thread comes
@@ -302,9 +314,8 @@ async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
     fake.feedback_script = [[_forge.ReviewerFeedback(bot, None, threads=(thread,))]]
     monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
     wait = {**_forge_task("wait", "mr.automated_review"), "reviewers": [{"bot": "coderabbitai"}]}
-    loop = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
     it = await item_on(
-        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"), **loop)], "land"
+        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"), **fields)], "land"
     )
     await fake.open_mr(
         repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
@@ -319,9 +330,7 @@ async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
     assert stop["reason"].endswith(f"{named}:3 (coderabbitai)"), "the person sees the thread"
     escalated = escalate._reason_line(stop, "needs_human")
     assert named not in escalated
-    if fix_loop:
-        assert it.row()["stop_kind"] == "infra"
-        assert "a worker commit cannot change them. Reinstall and restart" in escalated
+    assert kept is None or kept in escalated, "what Kraft says before the thread is kept"
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"

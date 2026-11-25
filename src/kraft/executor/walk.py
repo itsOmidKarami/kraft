@@ -768,6 +768,9 @@ class _Stuck:
     #: `escalation` nor `gates.auto_escalate_stuck` answers it, and it is not
     #: marked `stuck`. A red `ci.pipeline`, which no agent can fix.
     escalatable: bool = True
+    #: `_threads_hint`: ends the recorded reason, after any `_stop_stuck` adds, and
+    #: stays out of the stuck escalation's prompt, which quotes `reason`.
+    threads: str = ""
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -784,7 +787,7 @@ def _escalation_key(node: ResolvedNode) -> str:
 
 
 async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, extra="") -> str:
-    reason = stuck.reason + extra
+    reason = stuck.reason + extra + stuck.threads
     await db.write(
         lambda c: store.mark_needs_human(
             c,
@@ -2033,7 +2036,6 @@ async def _walk_node_once(
                     reason += f" ({', '.join(repr(e) for e in excs)})"
                 if repaired:
                     reason += " (after on_failure)"
-                reason += _threads_hint(db, work_item_id, node, failed, "failed")
                 facts = {
                     **(_scope_facts(scopes) or {}),
                     **(_forge_cause(db, work_item_id, node, failed)[0] or {}),
@@ -2043,6 +2045,7 @@ async def _walk_node_once(
                     kind=StopKind.FAILED,
                     facts=facts or None,
                     escalatable=not _red_pipeline_only(failed),
+                    threads=_threads_hint(db, work_item_id, node, failed, "failed"),
                 )
         # Only records `no_fix_loop` when a bot has replies on: nothing here can act.
         await _replies.posting_point(
