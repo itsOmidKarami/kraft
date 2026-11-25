@@ -65,6 +65,9 @@ def test_start_opens_the_bridge_once(fakes, tmp_path, present, running, close_fa
     assert lock_free == [True]
     # the stale tab goes, so its name points at the new one only
     assert [a[2:] for a in fakes.calls("herdr", "pane close")] == ([["w1:p1"]] if present else [])
+    if present:  # and only after the new one is open: closing it first could leave no bridge
+        calls = [a[:3] for a in fakes.calls("herdr")]
+        assert calls.index(["plugin", "pane", "open"]) < calls.index(["pane", "close", "w1:p1"])
     (call,) = opened
     assert call[call.index("--entrypoint") + 1] == "bridge"
     assert call[call.index("--placement") + 1] == "tab" and "--no-focus" in call
