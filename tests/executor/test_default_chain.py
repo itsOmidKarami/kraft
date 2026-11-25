@@ -14,11 +14,12 @@ import pytest
 from support.harness import entry_of
 from support.item_walk import approve, commits_a_fix, merge_drops, walk_once
 
-from kraft import db, executor, item_paths, store
+from kraft import db, events, executor, item_paths, store
 from kraft import policy as _policy
-from kraft.executor import gates
+from kraft.executor import gates, stops
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import BuiltinTask
+from kraft.vocab import ChainEvent
 
 SEEDED = Path(__file__).resolve().parents[2] / "config"
 NO_SETUP = entry_of({"setup_command": ""})
@@ -115,28 +116,96 @@ def _moves_base_once(it):
     return effect
 
 
+def _holds_a_members_move_once(it):
+    """What `forge.run_task` writes when a workspace member's CI wait rebased it and the root
+    then stopped, parked or failed: the member's move, held for the node's next completion."""
+    held = []
+
+    async def effect(_row):
+        if not held:
+            held.append(True)
+            await it.database.write(
+                lambda c: events.append(
+                    c,
+                    it.id,
+                    ChainEvent.BASE_MOVE_HELD,
+                    {"node_id": "merge_request_feedback", "before": ""},
+                )
+            )
+
+    return effect
+
+
+def _reentered_at_once(monkeypatch, it):
+    """Its poller re-enters the park before the walk that parked it has returned."""
+    for name in ("stop_for_rate_limit", "stop_for_waiting"):
+        real = getattr(stops, name)
+
+        async def parks(*args, real=real):
+            stopped = await real(*args)
+            await it.database.write(lambda c: store.mark_reentered(c, it.id))
+            return stopped
+
+        monkeypatch.setattr(stops, name, parks)
+
+
+_REPAIRED = ["await_review", "triage", "await_ci", "repair_feedback", "sync_mr", "await_review"]
+
+
 @pytest.mark.parametrize(
-    ("plan", "parks", "before"),
+    ("plan", "moves", "parks", "before"),
     [
-        ({}, None, ["await_review", "triage", "await_ci"]),
+        ({}, "base", None, ["await_review", "triage", "await_ci"]),
         # Pushing the rebased head failed: `on_failure` repairs and pushes it,
         # and the node's re-measure parks on the review of that head.
         (
             {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
+            "base",
             "waiting",
-            ["await_review", "triage", "await_ci", "repair_feedback", "sync_mr", "await_review"],
+            _REPAIRED,
         ),
         # Pushing the rebased head was rate-limited.
         (
             {"await_ci": ["rate_limited", "done"]},
+            "base",
             "rate_limited",
             ["await_review", "triage", "await_ci"],
         ),
+        # Its poller took the park back before the walk that parked it checked the move.
+        (
+            {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
+            "reentered",
+            None,
+            _REPAIRED,
+        ),
+        (
+            {"await_ci": ["rate_limited", "done"]},
+            "reentered",
+            None,
+            ["await_review", "triage", "await_ci"],
+        ),
+        # A workspace member moved under a root whose failure the node repaired.
+        ({"await_ci": ["failed", "done"]}, "member", None, [*_REPAIRED, "triage", "await_ci"]),
+        # A workspace member moved under a rate-limited root: held across the park.
+        (
+            {"await_ci": ["rate_limited", "done"]},
+            "member",
+            "rate_limited",
+            ["await_review", "triage", "await_ci", "await_ci"],
+        ),
     ],
-    ids=["completes", "parks-on-the-review-wait", "rate-limited"],
+    ids=[
+        "completes",
+        "parks-on-the-review-wait",
+        "rate-limited",
+        "parks-and-its-poller-re-enters-first",
+        "rate-limited-and-its-poller-re-enters-first",
+        "a-member-moved-under-a-repaired-root",
+        "a-member-moved-under-a-rate-limited-root",
+    ],
 )
 async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head(
-    item_on, script, default_chain, plan, parks, before
+    item_on, script, default_chain, monkeypatch, plan, moves, parks, before
 ):
     """Kraft-bjw6a. A CI conflict rebased away moves the base, and
     `merge_request_feedback` declares `on_base_changed: {restart_from:
@@ -152,17 +221,23 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     it = await item_on(default_chain, "merge_request_feedback")
     await approve(it, "local_review")
     script.plan = plan
-    script.effects = {"await_ci": _moves_base_once(it)}
+    script.effects = {
+        "await_ci": _holds_a_members_move_once(it) if moves == "member" else _moves_base_once(it)
+    }
+    if moves == "reentered":
+        _reentered_at_once(monkeypatch, it)
     await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
     walked = await _walk(it, default_chain, "merge_request_feedback")
-    # No later walk observes that wait, or reuses its row for the rebased head.
-    assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     if parks:
         assert walked == parks
+        # A member's move does not re-verify into the rate limit it parked on.
+        assert bool(it.events("base_change_restart")) == (moves != "member")
         await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
         walked = await walk_once(it, POLICY)
     assert walked == "awaiting_gate"
+    # No later walk observes that wait, or reuses its row for the rebased head.
+    assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     assert script.calls == [
         *before,
         "test_changed_scopes",
