@@ -3852,6 +3852,7 @@ def judge_history(
     loop_severities: frozenset[str],
     evts: list | None = None,
     fix_paths: Sequence[str] = (),
+    repair_rounds: bool = False,
 ) -> list[dict]:
     """Every round measured so far for this node, oldest first: the judge's
     cross-round view (spec's "cheap pointers, not full transcripts" input) --
@@ -3876,7 +3877,9 @@ def judge_history(
     # mr_checks/on.ci.poll every time. Seeding narrowed the collision; it did
     # not remove it, so this stays a list.
     # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
-    # nothing to do with the budget the judge is weighing.
+    # nothing to do with the budget the judge is weighing. `repair_rounds` keeps
+    # it for a caller that wants what is still there: when a stop came before
+    # cycle 1 recorded, the repair's re-measure is the newest (Kraft-a51c5).
     #: `evts`, when given, is a timeline the caller already fetched -- the same
     #: shape `escalate._reason` accepts. Read fresh when nothing is handed in,
     #: which is every existing caller including the judge's own.
@@ -3884,7 +3887,7 @@ def judge_history(
     for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
         if e["type"] == ChainEvent.FINDINGS_MEASURED and e["payload"].get("node_id") == node_id:
             cycle = e["payload"]["cycle"]
-            if cycle < 0:
+            if cycle < 0 and not repair_rounds:
                 continue
             measured.append(
                 (
@@ -4048,7 +4051,7 @@ def unresolved_findings_steer(
     `last_rejection` fallback still applies.
     """
     severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
-    history = judge_history(db, work_item_id, node_id, severities)
+    history = judge_history(db, work_item_id, node_id, severities, repair_rounds=True)
     if not history:
         return None
     found = history[-1]["findings"]
