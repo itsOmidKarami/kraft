@@ -72,10 +72,15 @@ and invoke `kraft-lite:gate`; the chain continues as one.
 3. Add the mode: the user's words for this run if they named one, logged with
    `KL decide --question "Mode for this run" --answer "<their words>" --why "set by the user"`,
    else the mode `KL settings` prints. Add the feature branch (`feature` mode: a
-   new branch from the base branch, named by the repo's own rules, else
-   `kraft/<chain-id>`, shown to the user at the slice gate; `main` mode:
-   `null`) and the state branch (section 7). The feature branch is never the
-   state branch.
+   new branch from the base branch; `main` mode: `null`) and the state branch
+   (section 7). The feature branch is never the state branch.
+   **Branch names**, locally and in the cloud: the run's name is the feature
+   branch, or in `main` mode a name for the run, by the repo's own rules, else
+   `kraft/<chain-id>`. The state branch is the run's name plus `-state`; each
+   slice's branch is the run's name plus `-slice-<key>`. A cloud session that may
+   push only to its own branch (its instructions say so, or a push is refused)
+   uses its own branch in that one's place, without asking. The slice gate shows
+   these names to the user.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
    Then `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`: it
@@ -95,7 +100,7 @@ Copy this and tick it off; while a line is unticked, no child starts.
 
 ```
 - [ ] Abilities confirmed from the guide, a local guide, or discover.md, or its fallback named: start, message, be messaged, archive, check in later. Each one with no guide, or that its guide leaves unconfirmed, looked for as discover.md says before its fallback. A missing ability is never a block.
-- [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and locally the state branch.
+- [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and the state branch unless it is this session's own.
 - [ ] Setup and the scoped test command run once here, and the working setup line written down.
 - [ ] The user has finished giving instructions for this run: ask, and hear "go".
 - [ ] Every command taken from a local guide (`.kraft-lite/harnesses/`) listed to the user in that ask.
@@ -126,8 +131,8 @@ For each key you start:
    after `git fetch origin <branch>`).
    Export state (section 7).
 2. Start the session from that commit, where the user said children run for
-   this run (locally or in the cloud), else where this session runs. Its own
-   branch is the slice branch; its title is `<chain-id> <key>: <slice title>`;
+   this run (locally or in the cloud), else where this session runs. Its
+   branch is the slice branch (section 1, Branch names); its title is `<chain-id> <key>: <slice title>`;
    it is tagged with the chain id where the guide confirms tags; it has
    **an explicit model** (middle tier).
 3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
@@ -178,7 +183,7 @@ The starting instructions, in this order:
 7. **Models:** the policy in section 11, with the model set on every subagent.
 8. **Tests:** the scoped test paths for its plan tasks, which its
    `kraft.verify_changed_test_scopes` task runs under the slice layer.
-9. **Branches and PRs:** push only its own slice branch; its target, named:
+9. **Branches and PRs:** push only its slice branch, named; its target, named:
    the feature branch, or in `main` mode the base branch. Its PR goes into the
    target, and so does its `kraft.mr_rebase`. It rebases, and force-pushes its
    own branch, as `kraft-lite:build-slice` says. The repo's rules, quoted from
@@ -200,8 +205,9 @@ the user's merges. When the user merges a slice, the steps after a merge
 
 Before any other write and before starting anything:
 
-1. Find the state checkout (section 7): in a cloud session, this checkout;
-   locally, the worktree of the `-state` branch in `git worktree list`, and with
+1. Find the state checkout (section 7): in a cloud session, this checkout when
+   the state branch is this session's own, else that branch, as this
+   conversation names it, fetched into a worktree; locally, the worktree of the `-state` branch in `git worktree list`, and with
    none, ask the user and write nothing. Fetch the state branch,
    `KL import --from <state-checkout>/kraft-lite-state`, then `KL chains` for
    the chain id; with several unfinished chains, ask which. An empty `chains`
@@ -253,6 +259,9 @@ Answering a question:
 - Critical or costly to undo: `KL decide --held --slice <key> --question "..." --why "..."`,
   and tell the child to keep working on everything else.
 - A user-only decision: see below.
+- A child reports it builds on its own session branch, not the slice branch it
+  was given (section 1, Branch names): `KL slice-set --slice <key> --branch <its branch>`,
+  then export state.
 - A fix loop over its cap arrives with its traces: re-steer the child once, and
   log it with `decide`; if it comes back over the cap, hold it for the user. A binding in
   `.kraft-lite/bindings.yaml` that a child's `start` or `state` refuses is
@@ -343,9 +352,11 @@ mode, ready to merge or merged):
 
 ## 7. State branch
 
-In a cloud session the state branch is this session's own branch, and this
-checkout is its checkout. Locally it is the feature branch's name plus `-state`
-(in `main` mode, a name for the run plus `-state`), in its own worktree. After every change to slices or decisions, check that
+The state branch is the run's name plus `-state` (section 1), in its own
+worktree. A cloud session that may push only to its own branch uses that branch,
+and this checkout is its checkout. If the state branch's first push is refused,
+no child has started yet: say so, and take the slice gate again with this
+session's own branch as the state branch. After every change to slices or decisions, check that
 `git -C <state-checkout> branch --show-current` prints the state branch (switch
 to it if not; never commit state on another branch), then:
 

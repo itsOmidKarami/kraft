@@ -20,6 +20,12 @@ Your **target** is the branch your PR goes into, as the **Branches and PRs**
 item of your starting instructions names it: the feature branch, or in `main`
 mode the base branch.
 
+Your **slice branch** is the one that item names: before your first commit, be
+on it (`git checkout -b <slice branch>` if you are not). In a cloud session that
+may push only to its own branch (its instructions say so, or a push there is
+refused), your slice branch is your session's own branch instead: use it without
+asking, and name it in your next `status` to the controller.
+
 ## 1. Setup
 
 Copy this and tick it off; the walk starts when all four are ticked.

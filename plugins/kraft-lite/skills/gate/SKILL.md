@@ -45,7 +45,8 @@ so offer `reject --from-node <node>` instead, naming the node whose task
 `produces` `gate.artifact` in `.kraft-lite/chains/<chain-id>.json` (section 2).
 At the slice gate
 (`gate.slice_gate` true), show the slicing proposal beside it, its
-`feature_branch` and `state_branch` named, so the user can agree to them or
+`feature_branch` and `state_branch` named, and the slice branches they lead to
+(`kraft-lite:run-slices`, Branch names), so the user can agree to them or
 rename them; with no
 proposal file, say no slicing is proposed, so an approval builds the plan in
 one session. A gate answered without the artifact in front of the user has
