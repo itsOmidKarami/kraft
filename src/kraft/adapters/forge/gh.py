@@ -26,6 +26,7 @@ from kraft.adapters.forge.models import (
     HeadMoved,
     Job,
     Label,
+    MergeBusy,
     MergedMR,
     MRDetails,
     MRRef,
@@ -1213,6 +1214,11 @@ class GhCli(mr_ops.CliWaits):
         try:
             await self._gql(repo, mutation, {"id": pr["id"], "head": head})
         except ForgeError as exc:
+            # GitHub's words on both APIs: GraphQL's `UNPROCESSABLE` error (go-gh
+            # shows it as `GraphQL: Merge already in progress (mergePullRequest)`)
+            # and REST's 405.
+            if "merge already in progress" in str(exc).lower():
+                raise MergeBusy(str(exc)) from exc
             if exc.reason != "head_moved":
                 raise
             # GitHub's wording is matched, not known: an error that names the head

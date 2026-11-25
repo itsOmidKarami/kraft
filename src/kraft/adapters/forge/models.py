@@ -104,6 +104,19 @@ def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Re
     return None
 
 
+class MergeBusy(ForgeError):
+    """The forge is merging this merge request already, for an earlier ask whose
+    answer was lost. A lock, not a promise: GitHub's can lapse with nothing merged,
+    and GitLab's stuck-merge rescue reopens one. So it parks as a dropped connection
+    does (`no_answer`) and the merge node reads the state again; `waits` knows it
+    by `PREFIX`."""
+
+    PREFIX = "the forge is still merging this merge request"
+
+    def __init__(self, detail: str):
+        super().__init__(f"{self.PREFIX}: {detail}", no_answer=True)
+
+
 class HeadMoved(ForgeError):
     """The forge refused a merge because the head it holds is not the one named
     (`Forge.merge(head=)`): a commit reached the merge request that nobody
