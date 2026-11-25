@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from kraft import builtins as _builtins
 from kraft import ci_reruns, events, inplace, item_paths, node_runs, reviewed_head, store
@@ -69,6 +71,7 @@ from kraft.vocab import (
     SessionEvent,
     StopKind,
     WorkItemEvent,
+    WorkItemStatus,
 )
 from kraft.worker import callback as _callback
 
@@ -1205,13 +1208,17 @@ async def _hold_at_restart(
     the next entry into the merge node would merge code no gate saw. `reason`
     is what a reopened gate says."""
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
-    await _reopen_gates(db, work_item_id, nodes, range(target, index), reason)
-    # The span will run again from scratch, as after a rewind: a fresh fix-loop
-    # budget for it (Kraft-s7c04.25). No seeded note, unlike a rewind: the only
-    # place a stop keeps one is `pending_steer_context`, which every later door
-    # reads as a person's steer and which may already hold a person's own.
-    await _clear_span_counters(db, work_item_id, nodes[target : index + 1])
-    await db.write(lambda c: store.stand_at(c, work_item_id, restart_from))
+
+    def hold(c) -> None:
+        _reopen_gates(c, work_item_id, nodes, range(target, index), reason)
+        # The span will run again from scratch, as after a rewind: a fresh fix-loop
+        # budget for it (Kraft-s7c04.25). No seeded note, unlike a rewind: the only
+        # place a stop keeps one is `pending_steer_context`, which every later door
+        # reads as a person's steer and which may already hold a person's own.
+        _clear_span_counters(c, work_item_id, nodes[target : index + 1])
+        store.stand_at(c, work_item_id, restart_from)
+
+    await db.write(hold)
 
 
 def _rejects_merges(node: ResolvedNode) -> bool:
@@ -1505,7 +1512,9 @@ async def _repair_merge_rejection(
     key = _merge_rejected_key(node)
     breach = _span_breach(db, work_item_id, key, _merge_rejected_cap(key), policy)
     if breach is not None:
-        await _stop_span_capped(db, work_item_id, node, key, restart_from, *breach)
+        await db.write(
+            lambda c: _stop_span_capped(c, work_item_id, node, key, restart_from, *breach)
+        )
         return "needs_human"
     if drop.get("cause") == "conflict" and drop.get("rebased"):
         return MERGE_REWIND
@@ -3010,41 +3019,41 @@ def _span_breach(
     return None
 
 
-async def _stop_span_capped(
-    db, work_item_id: str, node: ResolvedNode, key: str, restart_from: str, count: int, bound
+def _stop_span_capped(
+    c, work_item_id: str, node: ResolvedNode, key: str, restart_from: str, count: int, bound
 ) -> None:
     """A node's restarts under `key` are spent: a person decides."""
     reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
     capped = {"cycles": count - 1, "attempts": bound.attempts}
-    await db.write(
-        lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, capped, kind=StopKind.CAP
-        )
-    )
+    store.mark_needs_human(c, work_item_id, node.id, reason, capped, kind=StopKind.CAP)
 
 
-async def _clear_span_counters(db, work_item_id: str, span) -> None:
+def _clear_span_counters(c, work_item_id: str, span) -> None:
     """A fresh fix-loop budget for every execution node among `span`'s: re-running
     a node is a fresh pass over it (Kraft-s7c04.25)."""
     for n in span:
         if isinstance(n.node, ExecNode):
-            await db.write(
-                lambda c, n=n: store.clear_loop_counters(
-                    c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
-                )
+            store.clear_loop_counters(
+                c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
             )
 
 
-async def _reopen_gates(db, work_item_id: str, nodes, span: Iterable[int], reason: str) -> None:
+def _reopen_gates(c, work_item_id: str, nodes, span: Iterable[int], reason: str) -> None:
     """Reopen every approved gate among the nodes at `span`'s indexes, saying
-    `reason`: each one whose approval stands, read gate by gate."""
+    `reason`: each one whose approval stands, read gate by gate
+    (`gates.gate_cleared`'s read, on the writer's transaction)."""
     for i in span:
         gate = nodes[i]
-        if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, nodes, i):
-            await db.write(
-                lambda c, g=gate.id: events.append(
-                    c, work_item_id, GateEvent.REOPENED, {"gate": g, "reason": reason}, node_id=g
-                )
+        upstream = {n.id for n in nodes[: i + 1]}
+        if isinstance(gate.node, GateNode) and store.approval_stands(
+            c, work_item_id, gate.id, upstream
+        ):
+            events.append(
+                c,
+                work_item_id,
+                GateEvent.REOPENED,
+                {"gate": gate.id, "reason": reason},
+                node_id=gate.id,
             )
 
 
@@ -3076,7 +3085,8 @@ async def _restart_span(
     reopen_gates: bool,
     reopen_reason: str,
     cause: str | None = None,
-) -> int | None:
+    only_if: Callable[[sqlite3.Connection], bool] | None = None,
+) -> int | None | Literal[False]:
     """Restart the chain at `restart_from` because node `index` moved the
     worktree base (`base-change-restarts-a-declared-chain-span`) or had its
     merge request rejected by a merge train or queue (`on_merge_rejected`), or
@@ -3105,38 +3115,42 @@ async def _restart_span(
     conflict changed code no gate saw: every approved gate in the span
     reopens, and a human approves it again. A merge-rejection rewind always
     reopens them, clean rebase or not, for the same reason as the final gate.
+
+    One transaction, the stop at the cap included: a crash leaves the item on
+    node `index` with nothing of the restart written -- where a resume finds an
+    unanswered drop (`hold_interrupted_repair`) -- or wholly restarted, never
+    with its waits closed and its cursor still on the node. `only_if`, read in
+    that transaction first, can refuse it: False, and nothing written.
     """
     node = nodes[index]
-    bound = cap(policy)
-    count, started_at, bound = await db.write(
-        lambda c: store.bump_counter(c, work_item_id, key, bound)
-    )
-    if _policy.check(count=count, started_at=started_at, cap=bound, now=_now()) == "breached":
-        await _stop_span_capped(db, work_item_id, node, key, restart_from, count, bound)
-        return None
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
     if reopen_gates:
-        await _reopen_gates(db, work_item_id, nodes, range(target, index), reopen_reason)
+        reopen, reason = range(target, index), reopen_reason
     else:
         # A clean rebase changed nothing a gate saw, but the span's own fix
         # loops can commit before the walk comes back past the final gate:
         # that one reopens all the same, or its approval would let them merge.
-        finals = [
+        reopen = [
             i
             for i in range(target, index)
             if isinstance(nodes[i].node, GateNode) and nodes[i].node.chain_finalized
         ]
-        await _reopen_gates(db, work_item_id, nodes, finals, "base_changed")
-    await _clear_span_counters(db, work_item_id, span)
-    # No walk observes a wait of this run again, and a later one must not reuse its row.
-    await db.write(lambda c: store.close_parked_sessions(c, work_item_id, node.id))
-    # The cursor moves last, after the gates reopened: a crash before it
-    # leaves the item on node `index`, where a resume finds its unanswered
-    # drop (`hold_interrupted_repair`); one after it resumes at the restart.
-    await db.write(lambda c: store.stand_at(c, work_item_id, restart_from))
-    await db.write(
-        lambda c: events.append(
+        reason = "base_changed"
+
+    def restart(c) -> int | None | Literal[False]:
+        if only_if is not None and not only_if(c):
+            return False
+        count, started_at, bound = store.bump_counter(c, work_item_id, key, cap(policy))
+        if _policy.check(count=count, started_at=started_at, cap=bound, now=_now()) == "breached":
+            _stop_span_capped(c, work_item_id, node, key, restart_from, count, bound)
+            return None
+        _reopen_gates(c, work_item_id, nodes, reopen, reason)
+        _clear_span_counters(c, work_item_id, span)
+        # No walk observes a wait of this run again, and a later one must not reuse its row.
+        store.close_parked_sessions(c, work_item_id, node.id)
+        store.stand_at(c, work_item_id, restart_from)
+        events.append(
             c,
             work_item_id,
             restart_event,
@@ -3148,8 +3162,21 @@ async def _restart_span(
                 **({"cause": cause} if cause else {}),
             },
         )
+        return target
+
+    return await db.write(restart)
+
+
+async def _drift_steer(db, row, worktree, pre_base: str | None, new_base: str | None) -> Steer:
+    """What a restarted span is told moved under it."""
+    # Named by the base branch it moved on, not the item's own branch.
+    base_name = await _builtins.base_branch(db, row["id"], Path(row["repo"]))
+    return Steer(
+        prompts.rebase_drift_note(worktree, base_name, pre_base or "HEAD", new_base or "HEAD"),
+        # Kraft wrote this one, not a person; it must not claim the
+        # judge exemption a human's own answer gets.
+        source="seeded",
     )
-    return target
 
 
 def _cursor(row, nodes) -> tuple[int, int]:
@@ -3550,14 +3577,16 @@ async def run_once(
         base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
         pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         # A move this node made before a person's stop still counts on this walk.
-        held = None
+        held, members_held = None, 0
         if base_change is not None:
             start = next(j for j, n in enumerate(nodes) if n.id == base_change.restart_from)
             rerun = frozenset(n.id for n in nodes[start + 1 : i + 1])
             held = db.read(
                 lambda c, n=node.id, r=rerun: store.held_base_move(c, work_item_id, n, r)
             )
-            pre_base = pre_base if held is None else held
+            # A workspace member's move holds no base of the item's own ("").
+            pre_base = held or pre_base
+            members_held = db.read(lambda c, n=node.id: store.member_moves_held(c, work_item_id, n))
         if isinstance(node.node, GroupNode):
             from kraft.executor import slices
 
@@ -3604,17 +3633,24 @@ async def run_once(
             # the node they are looking at, where their steer or answer lands:
             # the move is recorded, and the next walk of this node restarts.
             # Neither for an item another door has since taken.
-            if (
-                base_change is not None
-                and dispatch._current_base_ref(db, work_item_id) != pre_base
-                and db.read(
-                    lambda c: c.execute(
-                        "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
-                    ).fetchone()["status"]
-                )
-                == result
-            ):
-                if result in (RATE_LIMITED, WAITING):
+            if base_change is not None and dispatch._current_base_ref(db, work_item_id) != pre_base:
+                parked = result in (RATE_LIMITED, WAITING)
+                seen: list[str] = []
+
+                def ours(c, parked=parked, result=result, at=node.id, seen=seen) -> bool:
+                    # Read in the writing transaction, and keyed on the cursor and on
+                    # what a poller cannot write: re-entering a park, it only flips
+                    # the status to `active`, which a person's door never leaves on
+                    # the node with this walk still running.
+                    r = c.execute(
+                        "SELECT status, current_node_id FROM work_items WHERE id = ?",
+                        (work_item_id,),
+                    ).fetchone()
+                    seen.append(r["status"])
+                    still = (result, WorkItemStatus.ACTIVE) if parked else (result,)
+                    return r["current_node_id"] == at and r["status"] in still
+
+                if parked:
                     key = f"{node.id}.on_base_changed"
                     restarted = await _restart_span(
                         db,
@@ -3628,18 +3664,29 @@ async def run_once(
                         restart_event=ChainEvent.BASE_CHANGE_RESTART,
                         reopen_gates=False,
                         reopen_reason="conflict_resolved",
+                        only_if=ours,
                     )
                     if restarted is None:
                         return "needs_human"
+                    if restarted is not False and seen[-1] == WorkItemStatus.ACTIVE:
+                        # Its poller re-entered it already, and cannot start a walk
+                        # while this one runs: this one carries on from the restart.
+                        new_base = dispatch._current_base_ref(db, work_item_id)
+                        carried = await _drift_steer(db, row, worktree, pre_base, new_base)
+                        i = restarted
+                        continue
                 elif held is None:
-                    await db.write(
-                        lambda c, n=node.id, b=pre_base: events.append(
-                            c,
-                            work_item_id,
-                            ChainEvent.BASE_MOVE_HELD,
-                            {"node_id": n, "before": b or ""},
-                        )
-                    )
+
+                    def hold(c, n=node.id, b=pre_base) -> None:
+                        if ours(c):
+                            events.append(
+                                c,
+                                work_item_id,
+                                ChainEvent.BASE_MOVE_HELD,
+                                {"node_id": n, "before": b or ""},
+                            )
+
+                    await db.write(hold)
             return result
         if result in (MERGE_REWIND, MERGE_REPAIRED, ESCALATION_COMMITTED):
             # Ahead of the base-change branch: Kraft's own forced rebase on the
@@ -3690,7 +3737,12 @@ async def run_once(
             continue
         new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         if base_change is not None and (
-            result in (BASE_MOVED, CONFLICT_RESOLVED) or new_base != pre_base
+            result in (BASE_MOVED, CONFLICT_RESOLVED)
+            or new_base != pre_base
+            # A member's move, held across a stop (`forge.run_task`) or one this walk repaired.
+            or held == ""
+            or db.read(lambda c, n=node.id: store.member_moves_held(c, work_item_id, n))
+            > members_held
         ):
             key = f"{node.id}.on_base_changed"
             target = await _restart_span(
@@ -3713,16 +3765,7 @@ async def run_once(
             # the original steer survived this far untaken, report it before
             # it is overwritten (Kraft-s7c04.50).
             await _report_if_undelivered(db, work_item_id, carried)
-            # Named by the base branch it moved on, not the item's own branch.
-            base_name = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
-            carried = Steer(
-                prompts.rebase_drift_note(
-                    worktree, base_name, pre_base or "HEAD", new_base or "HEAD"
-                ),
-                # Kraft wrote this one, not a person; it must not claim the
-                # judge exemption a human's own answer gets.
-                source="seeded",
-            )
+            carried = await _drift_steer(db, row, worktree, pre_base, new_base)
             i = target
             continue
         # Only reached after `node` *completed* -- every stop above already

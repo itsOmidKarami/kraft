@@ -4,6 +4,8 @@ nothing answered yet -- a resume, the rate-limit poller, a person's retry.
 None of them asks the forge to merge a head the train rejected, or a repair's
 commit, before a gate saw it."""
 
+import inspect
+
 import pytest
 from support.harness import v1_node, v1_task
 from support.item_walk import (
@@ -41,7 +43,14 @@ def _crash_after(monkeypatch, module, name: str, *, before: bool = False, when=N
             await real(*args, **kwargs)
         raise _Crash
 
-    monkeypatch.setattr(module, name, crashing)
+    def crashing_in_its_transaction(*args, **kwargs):
+        monkeypatch.setattr(module, name, real)
+        if not before:
+            real(*args, **kwargs)
+        raise _Crash
+
+    sync = not inspect.iscoroutinefunction(real)
+    monkeypatch.setattr(module, name, crashing_in_its_transaction if sync else crashing)
 
 
 async def _retry_where_it_stands(it, steer=None, at=None):

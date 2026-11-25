@@ -138,6 +138,16 @@ def held_base_move(
     return None
 
 
+def member_moves_held(conn: sqlite3.Connection, work_item_id, node_id) -> int:
+    """How many workspace-member base moves were held for `node_id`: `base_move_held` with no
+    `before`, since a member's move leaves the item's own `base_ref` where it was."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.node_id') = ? AND json_extract(payload, '$.before') = ''",
+        (work_item_id, ChainEvent.BASE_MOVE_HELD, node_id),
+    ).fetchone()[0]
+
+
 def close_parked_sessions(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     """End the sessions `node_id` left parked on an external wait, as a skip does."""
     now = _now()

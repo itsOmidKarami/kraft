@@ -44,7 +44,7 @@ from kraft.config import ConfigError, load_repos
 from kraft.paths import config_dir
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds, pipeline_variable
-from kraft.vocab import RUNNING, ForgeEvent
+from kraft.vocab import RUNNING, ChainEvent, ForgeEvent
 from kraft.vocab.events.limit import LimitEvent
 from kraft.vocab.sql import in_list
 
@@ -3333,10 +3333,12 @@ async def run_task(
         forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
-    # `builtins.mr_rebase` does, so the node's declared span re-verifies it --
-    # whatever the targets after it reported, or the move is never seen again.
-    # Not over a drop from the merge queue, whose own restart reopens the gates,
-    # or a stop a person must look at first.
+    # `builtins.mr_rebase` does, so the node's declared span re-verifies it,
+    # over a root that is done or still waiting. A root that stopped, parked
+    # or failed keeps its own outcome, and the move is held for the node's
+    # next completion (`walk.run_once`): restarting now would re-verify into a
+    # rate limit, or hide why it stopped. Not over a drop from the merge
+    # queue, whose own restart reopens the gates.
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
@@ -3350,8 +3352,14 @@ async def run_task(
         return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
-    if moved and has_rebase_bounce and recorded not in ("merge_rejected", "config_error"):
+    if moved and has_rebase_bounce and recorded in ("done", "waiting"):
         return BASE_MOVED
+    if moved and has_rebase_bounce and recorded != "merge_rejected":
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, ChainEvent.BASE_MOVE_HELD, {"node_id": node_id, "before": ""}
+            )
+        )
     # The session ended unfinished; what the walk does next is park on the wait
     # scheduler, which re-enters with no steer and restarts nothing.
     return "waiting" if parked and recorded == "rate_limited" else recorded
