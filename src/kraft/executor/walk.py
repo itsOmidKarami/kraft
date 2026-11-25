@@ -451,12 +451,24 @@ def _task_cause(
         )
     ]
     line = own[-1] if own else next(iter(lines), "")
-    # Beside the cause, not instead of it: the forge's words stay first.
-    threads = [ln for ln in lines[1:] if ln.startswith(forge_mod.OPEN_THREADS_LINE)]
-    return " ".join(
-        ln if len(ln) <= _STOP_CAUSE_MAX else ln[: _STOP_CAUSE_MAX - 1] + "…"
-        for ln in (line, *threads[-1:])
-    )
+    return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+def _threads_hint(db, work_item_id: str, node: ResolvedNode, tasks: list, status: str) -> str:
+    """ " <open-threads line>" for each of `tasks` whose `status` log names a merge's
+    open bot threads, or "". A reason ends with it: the line quotes file names, so
+    the escalation prompt cuts a reason at it (`escalate._reason_line`), and any
+    advice after it would be cut too (Kraft-6c4js)."""
+    hints = []
+    for t in tasks:
+        lines = [ln.strip() for ln in _task_log(db, work_item_id, node, t, status).splitlines()]
+        lines = [ln for ln in lines if ln]
+        threads = [ln for ln in lines[1:] if ln.startswith(forge_mod.OPEN_THREADS_LINE)]
+        hints += [
+            ln if len(ln) <= _STOP_CAUSE_MAX else ln[: _STOP_CAUSE_MAX - 1] + "…"
+            for ln in threads[-1:]
+        ]
+    return "".join(f" {h}" for h in hints)
 
 
 def _named_for_stop(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask) -> str:
@@ -625,6 +637,7 @@ async def _stop_for_wait_timeout(
     named = ", ".join(t.path for t in timed_out)
     causes = [c for t in timed_out if (c := _task_cause(db, work_item_id, node, t, WAIT_TIMED_OUT))]
     reason = f"{named} timed out waiting" + (f": {'; '.join(causes)}" if causes else "")
+    reason += _threads_hint(db, work_item_id, node, timed_out, WAIT_TIMED_OUT)
     # `cap`: a stop for a person naming the wait, never a failure -- NEEDS YOU,
     # not FAILED (`board.display_status`).
     await db.write(
@@ -2020,6 +2033,7 @@ async def _walk_node_once(
                     reason += f" ({', '.join(repr(e) for e in excs)})"
                 if repaired:
                     reason += " (after on_failure)"
+                reason += _threads_hint(db, work_item_id, node, failed, "failed")
                 facts = {
                     **(_scope_facts(scopes) or {}),
                     **(_forge_cause(db, work_item_id, node, failed)[0] or {}),
@@ -2561,6 +2575,7 @@ async def _walk_node_once(
                 f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "
                 "tasks are executed by the running Kraft daemon — a worker commit cannot "
                 f"change them. {fix}"
+                f"{_threads_hint(db, work_item_id, node, blind_failures, 'failed')}"
             )
             await db.write(
                 lambda c, reason=reason, cause=cause: store.mark_needs_human(
@@ -2872,6 +2887,7 @@ async def _walk_node_once(
             reason = (
                 f"fix attempt {count} in node {node.id} could not finish: {named} failed"
                 f"{_in_process_causes(db, work_item_id, node, fix_failed)}"
+                f"{_threads_hint(db, work_item_id, node, fix_failed, 'failed')}"
             )
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(

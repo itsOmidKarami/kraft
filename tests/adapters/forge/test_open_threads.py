@@ -263,5 +263,5 @@ async def test_a_merge_the_forge_holds_names_the_threads_when_its_wait_times_out
     assert log.count("calc.py:3") == int(says), "named once, at the stop"
     # What the timed-out stop's reason is built from.
     node, task = SimpleNamespace(id="mr_checks"), SimpleNamespace(path="on.ci.poll")
-    cause = walk._task_cause(run_forge.database, "w1", node, task, "capped_out")
-    assert ("calc.py:3 (coderabbitai)" in cause) is says
+    hint = walk._threads_hint(run_forge.database, "w1", node, [task], "capped_out")
+    assert ("calc.py:3 (coderabbitai)" in hint) is says

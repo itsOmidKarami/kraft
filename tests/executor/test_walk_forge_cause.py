@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kraft import store, waits
+from kraft import escalate, store, waits
 from kraft.adapters import forge as _forge
 from kraft.automated_review import as_reviewers
 from kraft.builtins import RebaseConflict
@@ -279,40 +279,49 @@ class _RefusedOnThreads(_forge.FakeForge):
 
 
 @pytest.mark.parametrize(
-    "file",
+    ("file", "fix_loop"),
     [
-        "docs/403 forbidden.md",
-        "notes/connection refused.txt",
-        "docs/a\n403 forbidden.md",
-        "src/calc.py",
+        ("docs/403 forbidden.md", False),
+        ("notes/connection refused.txt", False),
+        ("docs/a\n403 forbidden.md", False),
+        ("src/calc.py", False),
+        ("src/calc.py", True),
     ],
-    ids=["auth-words", "network-words", "a-line-break-in-the-name", "plain"],
+    ids=["auth-words", "network-words", "a-line-break-in-the-name", "plain", "an-infra-stop"],
 )
 async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
-    item_on, tmp_path, fake_agent, monkeypatch, file
+    item_on, tmp_path, fake_agent, monkeypatch, file, fix_loop
 ):
     """The stop names the thread, and a thread's file name is repository content: it
-    must not read as a refused credential or an unreachable forge."""
+    must not read as a refused credential or an unreachable forge. The thread comes
+    last, so the escalation prompt, which cuts the reason there, keeps the stop's
+    advice (Kraft-6c4js)."""
     bot = as_reviewers([{"bot": "coderabbitai"}])[0]
     thread = {"id": "t1", "file": file, "line": 3, "body": "b"}
     fake = _RefusedOnThreads(merge_detail="MERGEABLE/BLOCKED", resolved_rule=True)
     fake.feedback_script = [[_forge.ReviewerFeedback(bot, None, threads=(thread,))]]
     monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
     wait = {**_forge_task("wait", "mr.automated_review"), "reviewers": [{"bot": "coderabbitai"}]}
+    loop = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
     it = await item_on(
-        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"))], "land"
+        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"), **loop)], "land"
     )
     await fake.open_mr(
         repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
     )
 
-    await _walk(it, repo_entry=FORGE_REPO)
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
 
     stop = it.events("work_item_needs_human")[-1]["payload"]
     assert (stop.get("facts") or {}).get("cause") is None
     assert "GraphQL: Pull request is not mergeable" in stop["reason"]
     named = " ".join(file.split())
-    assert f"{named}:3 (coderabbitai)" in stop["reason"], "the person still sees the thread"
+    assert stop["reason"].endswith(f"{named}:3 (coderabbitai)"), "the person sees the thread"
+    escalated = escalate._reason_line(stop, "needs_human")
+    assert named not in escalated
+    if fix_loop:
+        assert it.row()["stop_kind"] == "infra"
+        assert "a worker commit cannot change them. Reinstall and restart" in escalated
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
