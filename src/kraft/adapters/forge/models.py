@@ -205,6 +205,11 @@ _LOCAL_GIT = ("git rebase ", "git worktree add timed out")
 #: Starts the line naming a merge's open bot threads (`open_threads`). It quotes
 #: file names, so `failure_cause` never reads it.
 OPEN_THREADS_LINE = "Open review-bot threads"
+#: Stands in for that line where an agent that can commit and push reads a stop's
+#: reason: none of its file names reaches the agent's prompt.
+OPEN_THREADS_NOTE = (
+    "Review-bot threads left open may be blocking this merge; the session log names them."
+)
 
 
 #: What each `ForgeError.reason` means for a stop. A reason missing here (a rate
