@@ -378,9 +378,6 @@ def _two(head: str | None, older: str | None) -> str:
         pytest.param(_piped("failed"), [], id="failed-sends-nothing"),
         pytest.param(_piped("canceled"), [], id="canceled-sends-nothing"),
         pytest.param(_draft(), [], id="a-draft-sends-nothing"),
-        pytest.param(
-            json.dumps({"iid": 54, "state": "locked"}), [], id="one-gitlab-is-merging-sends-nothing"
-        ),
         pytest.param(_draft("running"), [], id="a-draft-with-a-running-pipeline-sends-nothing"),
     ],
 )
@@ -396,7 +393,7 @@ async def test_glab_merge_puts_the_fields_glab_sends_for_the_head_pipeline(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(54, ""), head=_HEAD
     )
 
-    if sent or '"locked"' in view:  # a merge already under way is waited for, not refused
+    if sent:
         await merging
     else:
         with pytest.raises(forge.ForgeError, match="!54: (its pipeline|still a draft)"):
@@ -451,6 +448,19 @@ async def test_glab_merge_409_is_a_head_that_moved_and_names_the_forges(
         assert caught.value.current == forge_head
     else:
         assert caught.value.status == refusal.status
+
+
+async def test_glab_merge_sends_nothing_while_gitlab_is_merging(cli, tmp_path):
+    """A retry after an ask whose answer was lost (Kraft-l1hbl): GitLab holds the
+    merge request `locked` while it merges, so `merge` returns and the merge node
+    waits for it to land. By branch, as `run_task` asks: `locked` is not `opened`."""
+    cli.stub("git", "0")
+    locked = json.dumps({"iid": 54, "state": "locked", "head_pipeline": None})
+    cli.stub("glab", routes={**_NO_TRAIN, **glab_mr(locked, open=False)}, default="{}")
+
+    await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head=_HEAD)
+
+    assert not [c for c in cli.calls("glab") if "/merge " in c]
 
 
 async def test_glab_merge_names_the_branch_when_no_number_is_known(cli, tmp_path):

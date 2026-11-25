@@ -1215,6 +1215,8 @@ class GhCli(mr_ops.CliWaits):
         except ForgeError as exc:
             if "merge already in progress" in str(exc).lower():
                 # An earlier ask whose answer was lost is still merging: wait for it.
+                # shortcut: the wording is GitHub's REST 405 as docs.trunk.io quotes it;
+                # GraphQL's is unconfirmed, and a mismatch only keeps the old refusal.
                 return
             if exc.reason != "head_moved":
                 raise
