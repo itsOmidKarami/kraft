@@ -541,13 +541,13 @@ def test_regressed_fingerprints_finds_a_finding_a_fix_undid(history, regressed):
 # -- the unresolved findings a retry is seeded with (Kraft-7sec) -------------
 
 
-def _measured(cycle, *findings):
+def _measured(cycle, *findings, severity="important"):
     return {
         "node_id": "verify",
         "cycle": cycle,
         "findings": [
             {
-                "severity": "important",
+                "severity": severity,
                 "message": message,
                 "file": file,
                 "line": line,
@@ -575,12 +575,30 @@ def _measured(cycle, *findings):
         # A blind task failure with nothing structured reported falls through
         # to the caller's own `last_rejection`, rather than seeding an empty note.
         ([_measured(0)], None, None),
+        # The on_failure repair's re-measure (cycle -1) is what is still there when a
+        # cap stopped the node before cycle 1 recorded (Kraft-a51c5)...
+        (
+            [_measured(0, ("old bug", "a.py", 1)), _measured(-1, ("triage bug", "b.py", 2))],
+            ["triage bug"],
+            ["old bug"],
+        ),
+        # ...even when it found nothing at the loop's severities.
+        (
+            [
+                _measured(0, ("old bug", "a.py", 1)),
+                _measured(-1, ("nit", "b.py", 2), severity="minor"),
+            ],
+            None,
+            None,
+        ),
     ],
     ids=[
         "the-latest-measurements-findings",
         "not-one-resolved-in-a-later-cycle",
         "no-measurement-yet",
         "no-eligible-finding",
+        "the-repairs-re-measure-when-newest",
+        "a-re-measure-with-only-below-severity-findings",
     ],
 )
 async def test_unresolved_findings_steer_seeds_the_latest_measurements_findings(
