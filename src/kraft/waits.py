@@ -285,6 +285,10 @@ def next_observation(conn, work_item_id: str, tasks) -> str | None:
 #: doubling from `_NO_ANSWER_FIRST_S` up to `_NO_ANSWER_MAX_S`: about 90 minutes
 #: of a machine that is awake and offline.
 NO_ANSWER_TRIES = 10
+#: The tries for a repo whose forge has never answered Kraft: a wrong host, port or
+#: `api_url` fails the same way as a dropped network (an offline machine cannot
+#: resolve a name either), so only the history tells them apart. About 3.5 minutes.
+FIRST_CONTACT_TRIES = 3
 _NO_ANSWER_FIRST_S = 30
 _NO_ANSWER_MAX_S = 900
 #: A try that starts this long after it was due: the machine slept or the server
@@ -304,6 +308,26 @@ def _last_no_answer(conn, work_item_id: str, task: str) -> dict | None:
     return json.loads(row["payload"]) if row and row["type"] == ForgeEvent.FORGE_NO_ANSWER else None
 
 
+def _tries(conn, work_item_id: str) -> int:
+    """`NO_ANSWER_TRIES` once any item in this item's repo opened a merge request
+    or heard back after a drop; `FIRST_CONTACT_TRIES` before. Not `branch_pushed`:
+    a push over ssh says nothing about an `api_url`."""
+    answered = conn.execute(
+        "SELECT 1 FROM events e JOIN work_items w ON w.id = e.work_item_id"
+        " WHERE e.type IN (?, ?)"
+        " AND w.repo = (SELECT repo FROM work_items WHERE id = ?) LIMIT 1",
+        (ForgeEvent.MR_OPENED, ForgeEvent.FORGE_ANSWERED, work_item_id),
+    ).fetchone()
+    return NO_ANSWER_TRIES if answered else FIRST_CONTACT_TRIES
+
+
+def _busy(error: str) -> bool:
+    """Whether a parked try was the forge still merging (`MergeBusy`), not the network."""
+    from kraft.adapters.forge.models import MergeBusy  # the adapters import this module
+
+    return error.startswith(MergeBusy.PREFIX)
+
+
 def note_no_answer(
     conn, work_item_id: str, *, node_id: str, task: str, error: str, started: datetime
 ) -> bool:
@@ -319,11 +343,27 @@ def note_no_answer(
         )
         attempt = last["attempt"] + (0 if late else 1)
     ids = {"node_id": node_id, "task": task, "attempt": attempt, "error": error}
-    if attempt > NO_ANSWER_TRIES:
-        reason = (
-            f"{task} got no answer from the forge in {NO_ANSWER_TRIES} tries: {error}\n"
-            "The Kraft server's machine could not reach the forge. Check its network, then retry."
-        )
+    tries = _tries(conn, work_item_id)
+    if attempt > tries:
+        if _busy(error):
+            reason = (
+                f"{task}: the forge was still merging the merge request at each of {tries}"
+                f" tries: {error}\nIt has held the merge without finishing it. Look at the"
+                " merge request on the forge, then retry."
+            )
+        elif tries == NO_ANSWER_TRIES:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "The Kraft server's machine could not reach the forge. Check its network,"
+                " then retry."
+            )
+        else:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "This repo's forge has never answered Kraft. The network may just have been"
+                " down, and then retrying is all it needs. Otherwise check its setup: the"
+                " forge account's api_url, the remote's host and port, and ssh access."
+            )
         events.append(conn, work_item_id, ForgeEvent.FORGE_NO_ANSWER, {**ids, "reason": reason})
         return False
     delay = min(_NO_ANSWER_FIRST_S * 2 ** (attempt - 1), _NO_ANSWER_MAX_S)
@@ -363,10 +403,12 @@ def no_answer_park(conn, work_item_id: str, tasks) -> tuple[str, str] | None:
     if not parked:
         return None
     p = max(parked, key=lambda x: datetime.fromisoformat(x["retry_at"]))
-    return p["retry_at"], (
-        f"waiting for the network: no answer from the forge "
-        f"(try {p['attempt']} of {NO_ANSWER_TRIES})"
+    waiting = (
+        "waiting for the forge to finish a merge it is making"
+        if _busy(p["error"])
+        else "waiting for the network: no answer from the forge"
     )
+    return p["retry_at"], f"{waiting} (try {p['attempt']} of {_tries(conn, work_item_id)})"
 
 
 # --- the scheduler --------------------------------------------------------------

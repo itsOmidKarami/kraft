@@ -104,6 +104,19 @@ def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Re
     return None
 
 
+class MergeBusy(ForgeError):
+    """The forge is merging this merge request already, for an earlier ask whose
+    answer was lost. A lock, not a promise: GitHub's can lapse with nothing merged,
+    and GitLab's stuck-merge rescue reopens one. So it parks as a dropped connection
+    does (`no_answer`) and the merge node reads the state again; `waits` knows it
+    by `PREFIX`."""
+
+    PREFIX = "the forge is still merging this merge request"
+
+    def __init__(self, detail: str):
+        super().__init__(f"{self.PREFIX}: {detail}", no_answer=True)
+
+
 class HeadMoved(ForgeError):
     """The forge refused a merge because the head it holds is not the one named
     (`Forge.merge(head=)`): a commit reached the merge request that nobody
@@ -205,6 +218,11 @@ _LOCAL_GIT = ("git rebase ", "git worktree add timed out")
 #: Starts the line naming a merge's open bot threads (`open_threads`). It quotes
 #: file names, so `failure_cause` never reads it.
 OPEN_THREADS_LINE = "Open review-bot threads"
+#: Stands in for that line where an agent that can commit and push reads a stop's
+#: reason: none of its file names reaches the agent's prompt.
+OPEN_THREADS_NOTE = (
+    "Review-bot threads left open may be blocking this merge; the session log names them."
+)
 
 
 #: What each `ForgeError.reason` means for a stop. A reason missing here (a rate

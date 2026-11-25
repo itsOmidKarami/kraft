@@ -77,17 +77,20 @@ async def test_a_step_recovery_reruns_every_task_in_the_step_and_no_earlier_step
 @pytest.mark.parametrize(
     ("loop", "finding", "after", "measured", "cycles"),
     [
-        (None, False, [], [], []),
+        (None, None, [], [], []),
         # A fix loop's re-measure is recorded at the repair's round, clean or not.
-        ({}, False, [], [-1], []),
+        ({}, None, [], [-1], []),
+        # A finding below the loop's severities is recorded, and the node completes.
+        ({}, "minor", [], [-1], []),
         # It passes with a finding the loop takes, as the default chain's triage does: the
         # finding is fixed, at a paid cycle, and `on_failure` does not run again.
-        ({}, True, ["cycle", "prep", "a"], [-1, 1], [1]),
-        ({"early": True}, True, ["cycle", "prep", "a"], [-1, 1], [1]),
+        ({}, "important", ["cycle", "prep", "a"], [-1, 1], [1]),
+        ({"early": True}, "important", ["cycle", "prep", "a"], [-1, 1], [1]),
     ],
     ids=[
         "no-fix-loop",
         "clean-is-recorded",
+        "a-below-severity-finding-is-recorded",
         "findings-enter-the-fix-loop",
         "findings-enter-an-early-fix-loop",
     ],
@@ -112,7 +115,7 @@ async def test_a_node_recovery_reruns_the_node_from_its_first_step(
 
     async def reports(_row):
         if finding and script.calls.count("a") == 2:
-            found = {"severity": "important", "message": "rename x", "source_plugin": "a"}
+            found = {"severity": finding, "message": "rename x", "source_plugin": "a"}
             (it.run_dirs.results / "s-a.json").write_text(
                 json.dumps({"status": "done", "findings": [found]})
             )

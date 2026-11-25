@@ -26,6 +26,7 @@ from kraft.adapters.forge.models import (
     HeadMoved,
     Job,
     Label,
+    MergeBusy,
     MergedMR,
     MRDetails,
     MRRef,
@@ -195,9 +196,10 @@ _MERGE_ATTEMPTS = 3
 _MERGE_RETRY_DELAY = 6.0
 
 #: glab's merge request vocabulary (`glab mr list -F json`, glab 1.117.0).
-#: 'locked' is an open merge request with discussion locked, so it is open
-#: here; anything unrecognised is 'closed', which fails the merge node loudly
-#: rather than guessing in the one direction that cannot be walked back.
+#: 'locked' is an open merge request GitLab is merging right now (its docs: "short-lived
+#: and transitional"), so it is open here; anything unrecognised is 'closed', which
+#: fails the merge node loudly rather than guessing in the one direction that cannot
+#: be walked back.
 _GLAB_MR_STATES: dict[str, str] = {
     "opened": "open",
     "locked": "open",
@@ -1192,6 +1194,9 @@ class GlabCli(mr_ops.CliWaits):
             # nodes, so the branch names it. Passing a literal 0 would target a
             # merge request that does not exist.
             data = await self._view(repo, branch, mr.number)
+            if data.get("state") == "locked":
+                # GitLab is merging it now: an earlier ask whose answer was lost.
+                raise MergeBusy(f"!{data.get('iid')} is locked")
             if data.get("draft"):  # mrutils.go:61-63: glab refuses a draft before any PUT
                 raise ForgeError(f"cannot merge !{data['iid']}: still a draft")
             pipeline = data.get("head_pipeline") or data.get("pipeline")
