@@ -155,43 +155,43 @@ _REPAIRED = ["await_review", "triage", "await_ci", "repair_feedback", "sync_mr",
 @pytest.mark.parametrize(
     ("plan", "moves", "parks", "before"),
     [
-        ({}, "base", None, ["await_review", "triage", "await_ci"]),
+        ({}, "base", (), ["await_review", "triage", "await_ci"]),
         # Pushing the rebased head failed: `on_failure` repairs and pushes it,
         # and the node's re-measure parks on the review of that head.
         (
             {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
             "base",
-            "waiting",
+            ("waiting",),
             _REPAIRED,
         ),
         # Pushing the rebased head was rate-limited.
         (
             {"await_ci": ["rate_limited", "done"]},
             "base",
-            "rate_limited",
+            ("rate_limited",),
             ["await_review", "triage", "await_ci"],
         ),
         # Its poller took the park back before the walk that parked it checked the move.
         (
             {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
             "reentered",
-            None,
+            (),
             _REPAIRED,
         ),
         (
             {"await_ci": ["rate_limited", "done"]},
             "reentered",
-            None,
+            (),
             ["await_review", "triage", "await_ci"],
         ),
         # A workspace member moved under a root whose failure the node repaired.
-        ({"await_ci": ["failed", "done"]}, "member", None, [*_REPAIRED, "triage", "await_ci"]),
-        # A workspace member moved under a rate-limited root: held across the park.
+        ({"await_ci": ["failed", "done"]}, "member", (), [*_REPAIRED, "triage", "await_ci"]),
+        # A workspace member moved under a rate-limited root: held across each park.
         (
-            {"await_ci": ["rate_limited", "done"]},
+            {"await_ci": ["rate_limited", "rate_limited", "done"]},
             "member",
-            "rate_limited",
-            ["await_review", "triage", "await_ci", "await_ci"],
+            ("rate_limited", "rate_limited"),
+            ["await_review", "triage", "await_ci", "await_ci", "await_ci"],
         ),
     ],
     ids=[
@@ -229,8 +229,8 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
     walked = await _walk(it, default_chain, "merge_request_feedback")
-    if parks:
-        assert walked == parks
+    for park in parks:
+        assert walked == park
         # A member's move does not re-verify into the rate limit it parked on.
         assert bool(it.events("base_change_restart")) == (moves != "member")
         await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
