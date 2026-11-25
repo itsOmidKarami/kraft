@@ -72,7 +72,8 @@ and invoke `kraft-lite:gate`; the chain continues as one.
 3. Add the mode: the user's words for this run if they named one, logged with
    `KL decide --question "Mode for this run" --answer "<their words>" --why "set by the user"`,
    else the mode `KL settings` prints. Add the feature branch (`feature` mode: a
-   new branch from the base branch, named by the repo's own rules; `main` mode:
+   new branch from the base branch, named by the repo's own rules, else
+   `kraft/<chain-id>`, shown to the user at the slice gate; `main` mode:
    `null`) and the state branch (section 7). The feature branch is never the
    state branch.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:
