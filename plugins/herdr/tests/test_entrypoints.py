@@ -21,25 +21,48 @@ def fakes(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("present", "running"),
+    ("present", "running", "close_fails"),
     [
-        pytest.param(True, True, id="bridge-running"),
-        pytest.param(False, False, id="bridge-absent"),
+        pytest.param(True, True, False, id="bridge-running"),
+        # A live handoff runs the hook again while the bridge runs on.
+        pytest.param(False, True, False, id="bridge-running-without-its-tab"),
+        pytest.param(False, False, False, id="bridge-absent"),
         # Herdr's server restarted: the tab is back under its name, as a plain shell.
-        pytest.param(True, False, id="bridge-tab-restored-without-it"),
+        pytest.param(True, False, False, id="bridge-tab-restored-without-it"),
+        # The stale tab went away first: the new bridge still opens.
+        pytest.param(True, False, True, id="stale-tab-will-not-close"),
     ],
 )
-def test_start_opens_the_bridge_once(fakes, tmp_path, present, running):
+def test_start_opens_the_bridge_once(fakes, tmp_path, present, running, close_fails):
+    state = tmp_path / "state"
     panes = [{"pane_id": "w1:p1", "label": "kraft bridge"}] if present else []
     fakes.reply("herdr", "pane list", result(panes=panes))
     fakes.reply("herdr", "plugin pane open", result(plugin_pane={"pane": {"pane_id": "w1:p4"}}))
-    held = kraft_herdr.acquire_lock(tmp_path / "state") if running else None
-    assert kraft_herdr.start(kraft_herdr.Herdr(), state_dir=tmp_path / "state") == 0
+    if close_fails:
+        fakes.reply("herdr", "pane close", {"exit": 1, "stderr": "pane_not_found"})
+    herdr, lock_free = kraft_herdr.Herdr(), []
+    opens = herdr.open_bridge_tab
+
+    def open_bridge_tab(workspace):
+        # The bridge this starts takes the lock at once: start must not hold it then.
+        probe = kraft_herdr.acquire_lock(state)
+        lock_free.append(probe is not None)
+        if probe:
+            probe.close()
+        return opens(workspace)
+
+    herdr.open_bridge_tab = open_bridge_tab
+    held = kraft_herdr.acquire_lock(state) if running else None
+    try:
+        assert kraft_herdr.start(herdr, state_dir=state) == 0
+    finally:
+        if held:
+            held.close()
     opened = fakes.calls("herdr", "plugin pane open")
     if running:
         assert opened == [] and fakes.calls("herdr", "pane close") == []
-        held.close()
         return
+    assert lock_free == [True]
     # the stale tab goes, so its name points at the new one only
     assert [a[2:] for a in fakes.calls("herdr", "pane close")] == ([["w1:p1"]] if present else [])
     (call,) = opened

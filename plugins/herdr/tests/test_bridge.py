@@ -200,6 +200,17 @@ def test_a_failing_item_does_not_stop_the_others(fakes, state_dir):
     assert [r[0] for r in reports(fakes)] == ["w1:p2"]
 
 
+def test_a_refused_label_still_records_the_item(fakes, state_dir):
+    """The state went in; a label Herdr turns down must not stop the item being
+    recorded, or it would never notify and never be marked finished."""
+    fakes.reply("herdr", "pane report-metadata", {"exit": 1, "stderr": "no"})
+    board(fakes, row("aaaaaaaa1", "needs_you"))
+    bridge(state_dir).reconcile()
+    assert reports(fakes) == [("w1:p9", "blocked", "needs you")]
+    saved = json.loads((state_dir / "panes.json").read_text())["items"]["aaaaaaaa1"]
+    assert saved["status"] == "needs_you"
+
+
 def test_second_bridge_exits_on_the_lock(state_dir):
     first = kraft_herdr.acquire_lock(state_dir)
     assert first is not None

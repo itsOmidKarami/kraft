@@ -1,5 +1,5 @@
-# The plugin runs on whatever python3 the machine has. Herdr restarts a tab with
-# the first one it finds, which on macOS is the system's 3.9: that is the floor,
+# The plugin runs on whatever python3 the machine has. Herdr can restart a tab
+# with the system's, which on macOS is 3.9: that is the floor,
 # so ruff must not accept newer syntax.
 line-length = 100
 target-version = "py39"

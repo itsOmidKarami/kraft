@@ -1,7 +1,7 @@
 """Kraft in Herdr: one tab per live work item, its state in Herdr's sidebar.
 
-Stdlib only, and Python 3.9 at the floor: Herdr restarts a tab with the first
-`python3` it finds, which on macOS is the system's 3.9. It imports nothing from Kraft: it
+Stdlib only, and Python 3.9 at the floor: Herdr can restart a tab with the
+system's `python3`, which on macOS is 3.9. It imports nothing from Kraft: it
 talks to Kraft through the `kraft` command and to Herdr through the `herdr`
 command, so either can change inside and this keeps working.
 
@@ -183,7 +183,10 @@ class Herdr:
         # so an idle label is given for both. Each call replaces the whole map.
         shown = (state, "done") if state == "idle" else (state,)
         labels = [part for s in shown for part in ("--state-label", f"{s}={label}")]
-        self.run("pane", "report-metadata", pane, "--source", SOURCE, "--agent", AGENT, *labels)
+        try:
+            self.run("pane", "report-metadata", pane, "--source", SOURCE, "--agent", AGENT, *labels)
+        except CommandFailed as exc:  # the state is in: a missing label must not lose it
+            log(f"{pane}: {exc}")
 
     def panes(self, workspace: str) -> list[dict]:
         return self.run("pane", "list", "--workspace", workspace).get("panes", [])
@@ -493,15 +496,20 @@ def start(herdr: Herdr, *, state_dir: Path | None = None) -> int:
     and does not supervise it: so it only makes sure a bridge is running, and
     leaves the loop to that pane. The bridge's lock says whether one is, not the
     tab's name: after a restart of its server Herdr brings the tab back as a
-    plain shell, so a free lock means the old tab goes and a new one opens."""
+    plain shell, so a free lock means a new tab opens and the old one goes. The
+    new one opens first, so a close that fails never leaves no bridge."""
     lock = acquire_lock(state_dir or _dir("HERDR_PLUGIN_STATE_DIR"))
     if lock is None:
         return 0  # a bridge holds it
     lock.close()
     workspace = herdr.workspace_id(WORKSPACE)
-    if (stale := herdr.panes_by_label(workspace).get(BRIDGE_LABEL)) is not None:
-        herdr.close(stale)
+    stale = herdr.panes_by_label(workspace).get(BRIDGE_LABEL)
     herdr.rename(herdr.open_bridge_tab(workspace), BRIDGE_LABEL)
+    if stale is not None:
+        try:
+            herdr.close(stale)
+        except CommandFailed as exc:  # gone already, most likely
+            log(f"old bridge tab {stale}: {exc}")
     return 0
 
 

@@ -581,7 +581,7 @@ jobs:
     # The Herdr plugin is stdlib-only and says it runs on python3 alone, so it
     # gets the same treatment as kraft-lite: both ends of the range, no project,
     # no lockfile, nothing but pytest. Its tests import nothing from Kraft. Its
-    # floor is 3.9, macOS's own python3, which Herdr restarts tabs with; the
+    # floor is 3.9, macOS's own python3, which Herdr can restart tabs with; the
     # repo's conftest.py is newer than that, so --confcutdir leaves it out.
     name: herdr plugin on python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
