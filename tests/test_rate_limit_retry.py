@@ -87,6 +87,19 @@ async def test_tick_relaunches_a_due_item(tmp_path, monkeypatch, repo, stub_app)
     assert ev["steer"] == rate_limit_retry.RESUME_PROMPT
 
 
+async def test_tick_leaves_a_due_item_whose_walk_is_still_returning(tmp_path, repo, stub_app):
+    """Claimed under the walk that parked it, the item would get a cap stop or a retry that
+    walk then overwrites."""
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    before = app.state.db.read(lambda c: events.read_after(c, 0, "w1"))
+    app.state.tasks["w1"] = asyncio.ensure_future(asyncio.sleep(1))  # the walk that parked it
+
+    assert await rate_limit_retry.tick(app) == []
+    assert app.state.db.read(lambda c: events.read_after(c, 0, "w1")) == before
+    assert app.state.db.read(lambda c: store.cap_counts(c, "w1")) == {}
+
+
 async def test_a_relaunch_resets_no_cap_counter(tmp_path, monkeypatch, repo, stub_app):
     """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the poller's
     relaunch is Kraft's own retry, so the stopped node's counters stand."""

@@ -31,13 +31,14 @@ def default_chain():
     return TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("default")
 
 
-def _walk(it, chain, node: str):
+def _walk(it, chain, node: str, steer_to: dict[str, str] | None = None):
     return executor.run_once(
         it.database,
         it.run_dirs,
         work_item_id=it.id,
         start_index=[n.id for n in chain.nodes].index(node),
         policy=POLICY,
+        steer_to=steer_to,
         launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
@@ -136,14 +137,14 @@ def _holds_a_members_move_once(it):
     return effect
 
 
-def _reentered_at_once(monkeypatch, it):
-    """Its poller re-enters the park before the walk that parked it has returned."""
+def _taken_at_its_park(monkeypatch, it, door):
+    """`door` takes the park before the walk that parked it has returned."""
     for name in ("stop_for_rate_limit", "stop_for_waiting"):
         real = getattr(stops, name)
 
         async def parks(*args, real=real):
             stopped = await real(*args)
-            await it.database.write(lambda c: store.mark_reentered(c, it.id))
+            await it.database.write(door)
             return stopped
 
         monkeypatch.setattr(stops, name, parks)
@@ -224,11 +225,17 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     script.effects = {
         "await_ci": _holds_a_members_move_once(it) if moves == "member" else _moves_base_once(it)
     }
-    if moves == "reentered":
-        _reentered_at_once(monkeypatch, it)
+    if moves == "reentered":  # its poller, before that walk has returned
+        _taken_at_its_park(monkeypatch, it, lambda c: store.mark_reentered(c, it.id))
     await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
-    walked = await _walk(it, default_chain, "merge_request_feedback")
+    # Addressed to a task this walk never launches, so no launch takes it.
+    unread = {"elsewhere.main.task": "a note"} if moves == "reentered" else None
+    walked = await _walk(it, default_chain, "merge_request_feedback", unread)
+    if unread:
+        # The walk that carries on reports the steer it replaces with what moved.
+        assert [e["payload"]["steer"] for e in it.events("steer_undelivered")][0] == "a note"
+        assert script.steers["test_changed_scopes"][0].source == "seeded"
     # No later walk observes that wait, or reuses its row for the rebased head.
     closed = [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     assert closed == (moves != "member" or not parks), "a held member move closes it later"
@@ -259,6 +266,36 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
     assert requested == ["local_review", "final_review"]
     assert it.events("gate_reopened") == []
+
+
+@pytest.mark.parametrize(
+    ("park", "door", "left"),
+    [
+        ("rate_limited", "pause", "paused"),
+        ("waiting", "pause", "paused"),
+        ("rate_limited", "abandon", "abandoned"),
+    ],
+    ids=["paused-at-a-rate-limit", "paused-at-a-wait", "abandoned-at-a-rate-limit"],
+)
+async def test_a_door_that_takes_the_park_first_keeps_the_restart_off_it(
+    item_on, script, default_chain, monkeypatch, park, door, left
+):
+    """A person pauses or abandons the item between its park and the restart the move owes:
+    it stays where they left it, and nothing of the restart is written."""
+    it = await item_on(default_chain, "merge_request_feedback")
+    await approve(it, "local_review")
+    script.plan = {"await_ci": [park]}
+    script.effects = {"await_ci": _moves_base_once(it)}
+    takes = {
+        "pause": lambda c: store.pause_work_item(c, it.id, []),
+        "abandon": lambda c: store.abandon_work_item(c, it.id, "dropped"),
+    }[door]
+    _taken_at_its_park(monkeypatch, it, takes)
+
+    assert await _walk(it, default_chain, "merge_request_feedback") == park
+    assert it.status() == left
+    assert it.row()["current_node_id"] == "merge_request_feedback"
+    assert it.events("base_change_restart") == []
 
 
 @pytest.mark.parametrize(

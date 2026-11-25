@@ -3667,8 +3667,9 @@ async def run_once(
                     if restarted is None:
                         return "needs_human"
                     if restarted is not False and seen[-1] == WorkItemStatus.ACTIVE:
-                        # Its poller re-entered it already, and cannot start a walk
-                        # while this one runs: this one carries on from the restart.
+                        # Claimed back already (the pollers wait for this walk to
+                        # return, `waits.tick`): no walk can start while this one runs,
+                        # so this one carries on. `carried` was reported above.
                         new_base = dispatch._current_base_ref(db, work_item_id)
                         carried = await _drift_steer(db, row, worktree, pre_base, new_base)
                         i = restarted
