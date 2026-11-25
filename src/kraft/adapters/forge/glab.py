@@ -1192,6 +1192,10 @@ class GlabCli(mr_ops.CliWaits):
             # nodes, so the branch names it. Passing a literal 0 would target a
             # merge request that does not exist.
             data = await self._view(repo, branch, mr.number)
+            if data.get("state") == "locked":
+                # GitLab is merging it now (the state is "short-lived and
+                # transitional"): an earlier ask whose answer was lost, so wait.
+                return
             if data.get("draft"):  # mrutils.go:61-63: glab refuses a draft before any PUT
                 raise ForgeError(f"cannot merge !{data['iid']}: still a draft")
             pipeline = data.get("head_pipeline") or data.get("pipeline")

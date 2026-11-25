@@ -378,6 +378,9 @@ def _two(head: str | None, older: str | None) -> str:
         pytest.param(_piped("failed"), [], id="failed-sends-nothing"),
         pytest.param(_piped("canceled"), [], id="canceled-sends-nothing"),
         pytest.param(_draft(), [], id="a-draft-sends-nothing"),
+        pytest.param(
+            json.dumps({"iid": 54, "state": "locked"}), [], id="one-gitlab-is-merging-sends-nothing"
+        ),
         pytest.param(_draft("running"), [], id="a-draft-with-a-running-pipeline-sends-nothing"),
     ],
 )
@@ -393,7 +396,7 @@ async def test_glab_merge_puts_the_fields_glab_sends_for_the_head_pipeline(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(54, ""), head=_HEAD
     )
 
-    if sent:
+    if sent or '"locked"' in view:  # a merge already under way is waited for, not refused
         await merging
     else:
         with pytest.raises(forge.ForgeError, match="!54: (its pipeline|still a draft)"):

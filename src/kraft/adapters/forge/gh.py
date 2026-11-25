@@ -1213,6 +1213,9 @@ class GhCli(mr_ops.CliWaits):
         try:
             await self._gql(repo, mutation, {"id": pr["id"], "head": head})
         except ForgeError as exc:
+            if "merge already in progress" in str(exc).lower():
+                # An earlier ask whose answer was lost is still merging: wait for it.
+                return
             if exc.reason != "head_moved":
                 raise
             # GitHub's wording is matched, not known: an error that names the head
