@@ -3638,10 +3638,9 @@ async def run_once(
                 seen: list[str] = []
 
                 def ours(c, parked=parked, result=result, at=node.id, seen=seen) -> bool:
-                    # Read in the writing transaction, and keyed on the cursor and on
-                    # what a poller cannot write: re-entering a park, it only flips
-                    # the status to `active`, which a person's door never leaves on
-                    # the node with this walk still running.
+                    # Read in the writing transaction, and keyed on the cursor, which
+                    # a poller re-entering the park leaves where it is: it only flips
+                    # the status to `active`. A pause or an end moves it elsewhere.
                     r = c.execute(
                         "SELECT status, current_node_id FROM work_items WHERE id = ?",
                         (work_item_id,),
