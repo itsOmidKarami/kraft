@@ -648,6 +648,56 @@ def test_an_unmeasured_finding_holds_its_stuck_streak(history, stuck):
     assert dispatch.stuck_fingerprint(history, 3) == (_f(stuck).fingerprint if stuck else None)
 
 
+@pytest.mark.parametrize(
+    ("rounds", "stuck", "regressed"),
+    [
+        # A fresh entry records no pre-repair measurement: the re-measure is the baseline.
+        ([(-1, ["p"]), (1, ["p"]), (2, ["p"])], "p", []),
+        ([(-1, ["p"]), (1, []), (2, ["p"])], None, ["p"]),
+        # A re-entry's repair ran no fix: the streak starts again there.
+        ([(0, ["p"]), (1, ["p"]), (-1, ["p"]), (2, ["p"])], None, []),
+        # Gone only at the repair's re-measure: no fix removed it, so none reverted it.
+        ([(1, ["p"]), (-1, []), (2, ["p"])], None, []),
+    ],
+    ids=[
+        "the-re-measure-starts-the-streak",
+        "a-re-measure-finding-a-fix-undid",
+        "a-re-entry-repair-resets-the-streak",
+        "a-gap-of-only-the-repair-is-no-fix",
+    ],
+)
+async def test_a_repairs_re_measure_is_a_round_with_no_fix(item_on, rounds, stuck, regressed):
+    """An `on_failure` repair's re-measure (cycle -1) is a round the stuck and regression checks
+    read, and no fix ran before it (Kraft-d8gne)."""
+    it = await item_on([_NEEDS_CONTEXT_NODE], repo="/r")
+    for cycle, messages in rounds:
+        payload = _measured(cycle, *[(m, "a.py", 1) for m in messages])
+        await it.database.write(
+            lambda c, p=payload: events.append(c, it.id, "findings_measured", p)
+        )
+        if cycle > 0:
+            await it.database.write(
+                lambda c, n=cycle: store.create_session(
+                    c,
+                    id=f"fix{n}",
+                    work_item_id=it.id,
+                    node_id="verify",
+                    hook_point="fix",
+                    log_path="/l",
+                    result_path=f"/r{n}",
+                    round=n,
+                )
+            )
+
+    history = dispatch.judge_history(
+        it.database, it.id, "verify", frozenset({"important"}), fix_paths=["fix"]
+    )
+
+    message = {f.fingerprint: f.message for h in history for f in h["findings"]}
+    assert message.get(dispatch.stuck_fingerprint(history, 3)) == stuck
+    assert [message[fp] for fp in dispatch.regressed_fingerprints(history)] == regressed
+
+
 def _raw(message, *, source="code-review", label="n.ci.ci"):
     """A finding as a `findings_measured` payload stores it: the session it was read
     from in `jobs`."""

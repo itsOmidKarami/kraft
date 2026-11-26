@@ -2771,7 +2771,7 @@ async def _walk_node_once(
                     f"stuck: {len(prints)} finding(s) unchanged across cycle {count - 1}"
                     if stuck_fp is None
                     else f"stuck: finding {stuck_fp} unchanged across "
-                    f"{_FINGERPRINT_STREAK_LIMIT} cycles"
+                    f"{_FINGERPRINT_STREAK_LIMIT} rounds"
                 )
                 reason += prompts.ci_rerun_stop_note(dispatch.node_reruns(db, work_item_id, node))
                 # Deliberately NOT mark_sessions_capped_out: these sessions did

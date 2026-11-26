@@ -3852,7 +3852,6 @@ def judge_history(
     loop_severities: frozenset[str],
     evts: list | None = None,
     fix_paths: Sequence[str] = (),
-    repair_rounds: bool = False,
 ) -> list[dict]:
     """Every round measured so far for this node, oldest first: the judge's
     cross-round view (spec's "cheap pointers, not full transcripts" input) --
@@ -3876,22 +3875,19 @@ def judge_history(
     # the judge a truncated trend pointing the wrong way, on
     # mr_checks/on.ci.poll every time. Seeding narrowed the collision; it did
     # not remove it, so this stays a list.
-    # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
-    # nothing to do with the budget the judge is weighing. `repair_rounds` keeps
-    # it for a caller that wants what is still there: when a stop came before
-    # cycle 1 recorded, the repair's re-measure is the newest (Kraft-a51c5).
+    # An `on_failure` repair's re-measure (_REPAIR_ROUND, -1) is an ordinary
+    # round with no fix of its own: on a fresh entry it is the loop's baseline,
+    # the only record before cycle 1 (Kraft-d8gne). No fix session carries -1,
+    # so it pairs with none and no streak or regression is read across it.
     #: `evts`, when given, is a timeline the caller already fetched -- the same
     #: shape `escalate._reason` accepts. Read fresh when nothing is handed in,
     #: which is every existing caller including the judge's own.
     measured: list[tuple[int, list[_findings.Finding], list[_findings.Finding], bool]] = []
     for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
         if e["type"] == ChainEvent.FINDINGS_MEASURED and e["payload"].get("node_id") == node_id:
-            cycle = e["payload"]["cycle"]
-            if cycle < 0 and not repair_rounds:
-                continue
             measured.append(
                 (
-                    cycle,
+                    e["payload"]["cycle"],
                     [
                         _findings.from_payload(f)
                         for f in e["payload"].get("findings", [])
@@ -4051,7 +4047,7 @@ def unresolved_findings_steer(
     `last_rejection` fallback still applies.
     """
     severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
-    history = judge_history(db, work_item_id, node_id, severities, repair_rounds=True)
+    history = judge_history(db, work_item_id, node_id, severities)
     if not history:
         return None
     found = history[-1]["findings"]
