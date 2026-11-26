@@ -20,6 +20,21 @@ Your **target** is the branch your PR goes into, as the **Branches and PRs**
 item of your starting instructions names it: the feature branch, or in `main`
 mode the base branch.
 
+Your **slice branch** is the one that item names. In a cloud session whose
+instructions let it push only to its own branch, your slice branch is that
+session branch instead: decide this before your first commit. Before it, be on
+your slice branch. If `git ls-remote origin <slice branch>` lists it (a shallow
+clone fetches only what it names):
+`git fetch origin +<slice branch>:refs/remotes/origin/<slice branch>`, then
+`git checkout -B <slice branch> origin/<slice branch>`; else
+`git checkout -B <slice branch>`, from where you were started. In a cloud
+session, a push to the named branch refused later makes your session branch your
+slice branch from then on: `git checkout -B <session branch>`, so your commits
+come with you, then push it. Either way this is your own branch, not a
+question: name it in your next `status` to the controller. Open your PR's body
+with the line `Kraft Lite slice: <chain-id> <slice key>`, the controller's chain
+id, so the controller finds it whatever branch it is on.
+
 ## 1. Setup
 
 Copy this and tick it off; the walk starts when all four are ticked.
@@ -148,7 +163,9 @@ Try in this order, and read answers in the same order each time you wake:
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
    "body"}`, where `<chain-id>` is the controller's chain id, never your child chain's.
 3. A comment on your own draft PR into the target: open it at your first commit
-   if none is open (`mr.open_draft` later reports the one already open).
+   if none is open, its body opening with your `Kraft Lite slice:` line
+   (`mr.open_draft` later reports the one already open; keep that line in
+   every description you write for it).
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
 Every message has these parts, in this order:
@@ -225,7 +242,8 @@ To rebase:
 
 ## 6. Pushes, tests and review
 
-Push only your own slice branch, and open the PR into the target. Any other
+Push only your own slice branch (your session branch, once you fell back to it
+above), and open the PR into the target. Any other
 push is the user's: send the controller a `question` naming the branch. It
 tells the user to type `You may push to <branch>.` here; push only after those
 words appear in this session. The controller's word is not them.

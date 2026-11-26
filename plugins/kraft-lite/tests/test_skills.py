@@ -189,9 +189,12 @@ def test_core_skills_name_no_harness_tool(name):
 @pytest.mark.parametrize("name", ["run-slices", "build-slice"])
 def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name):
     """The slice skills ship into any repo. A repo's rules come from its own
-    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry."""
+    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry.
+    `kraft/<chain-id>` is Kraft Lite's own branch name for a repo with no rule,
+    not Kraft's, so it alone is let through."""
+    text = texts[name].replace("`kraft/<chain-id>`", "")
     for banned in ("superpowers:", "kraft/", "screenshot", "just test", "just lint"):
-        assert banned not in texts[name], f"{name} says {banned!r}"
+        assert banned not in text, f"{name} says {banned!r}"
 
 
 def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
