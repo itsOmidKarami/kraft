@@ -25,7 +25,7 @@ instructions let it push only to its own branch, your slice branch is that
 session branch instead: decide this before your first commit. Before it, be on
 your slice branch. If `git ls-remote origin <slice branch>` lists it (a shallow
 clone fetches only what it names):
-`git fetch origin <slice branch>:refs/remotes/origin/<slice branch>`, then
+`git fetch origin +<slice branch>:refs/remotes/origin/<slice branch>`, then
 `git checkout -B <slice branch> origin/<slice branch>`; else
 `git checkout -B <slice branch>`, from where you were started. In a cloud
 session, a push to the named branch refused later makes your session branch your

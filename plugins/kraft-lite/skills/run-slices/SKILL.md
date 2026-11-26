@@ -85,7 +85,7 @@ and invoke `kraft-lite:gate`; the chain continues as one.
    session that may push only to its own branch makes that branch the state
    branch, without asking. The feature branch keeps its name; such a session
    asks for its push approval now (section 2's line), and with none asks the
-   user whether to run in `main` mode. A child falls back the same way, to its
+   user whether to run in `main` mode, logging their answer as the mode above. A child falls back the same way, to its
    session branch as its slice branch (`kraft-lite:build-slice`). The slice
    gate shows these names; only the run's name can be renamed there, and the
    rest follow from it, except a state branch that is this session's own.
@@ -371,7 +371,7 @@ mode, ready to merge or merged):
 The state branch is the run's name plus `-state` (section 1), in its own
 worktree: `git worktree add -b <state-branch> <path> origin/<base branch>` before
 the first export. Once it exists (a shallow clone fetches only what it names):
-`git fetch origin <state-branch>:refs/remotes/origin/<state-branch>`, then
+`git fetch origin +<state-branch>:refs/remotes/origin/<state-branch>`, then
 `git worktree add -B <state-branch> <path> origin/<state-branch>`.
 A cloud session that may push only to its own branch uses that branch, and this
 checkout is its checkout. A first push refused anyway, before the slice gate:
