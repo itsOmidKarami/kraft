@@ -75,9 +75,9 @@
 | src/kraft/api/routes/one\_off.py                 |       48 |        0 |    100% |           |
 | src/kraft/api/routes/one\_off\_editor.py         |       86 |        1 |     99% |       119 |
 | src/kraft/api/routes/repos.py                    |      427 |       21 |     95% |114-115, 142-143, 283, 353-354, 365, 431-432, 462, 479-480, 558-559, 734-735, 894-895, 920-921 |
-| src/kraft/api/routes/review.py                   |      364 |       14 |     96% |86, 90, 101, 164, 205, 237, 277, 279, 290, 354, 540, 585-586, 683 |
+| src/kraft/api/routes/review.py                   |      364 |       13 |     96% |86, 90, 101, 164, 205, 277, 279, 290, 354, 540, 585-586, 683 |
 | src/kraft/api/routes/search.py                   |      158 |       11 |     93% |50-51, 85-88, 91, 138, 151-152, 191-192, 253 |
-| src/kraft/api/routes/sessions.py                 |      214 |        8 |     96% |171, 220, 224, 390, 466, 471, 473, 476 |
+| src/kraft/api/routes/sessions.py                 |      214 |       10 |     95% |171, 220, 224, 390, 465-467, 471, 473, 476 |
 | src/kraft/api/routes/settings.py                 |      503 |       29 |     94% |103-104, 148-149, 261-262, 271-272, 290-291, 375, 403-404, 570-573, 576, 620-621, 684-687, 690-691, 728-729, 791-792, 807-808, 842 |
 | src/kraft/api/routes/storage.py                  |       51 |        0 |    100% |           |
 | src/kraft/api/routes/work\_items.py              |      605 |       38 |     94% |201, 350-351, 615-618, 741-759, 852, 854-855, 999, 1021-1022, 1248, 1264, 1283, 1302-1303, 1445-1446, 1522-1523, 1528 |
@@ -85,7 +85,7 @@
 | src/kraft/api/schemas.py                         |       66 |        0 |    100% |           |
 | src/kraft/api/startup.py                         |      317 |       12 |     96% |319-320, 397-398, 403-404, 426-427, 435-436, 479-480 |
 | src/kraft/apply.py                               |      176 |        8 |     95% |73, 100-101, 168-169, 248-249, 287 |
-| src/kraft/archive.py                             |       61 |        5 |     92% |61-63, 114-115 |
+| src/kraft/archive.py                             |       61 |        7 |     89% |61-63, 112-115 |
 | src/kraft/auth.py                                |       75 |        8 |     89% |44, 48, 50-51, 96-99 |
 | src/kraft/auto\_escalate\_delay.py               |       54 |        5 |     91% |72, 190-193 |
 | src/kraft/automated\_review.py                   |       52 |        3 |     94% |37, 83, 122 |
@@ -130,7 +130,7 @@
 | src/kraft/console/screens/addons.py              |      245 |        5 |     98% |309-312, 317, 406 |
 | src/kraft/console/screens/board.py               |      405 |        9 |     98% |397, 400, 411, 540, 576-580 |
 | src/kraft/console/screens/item.py                |      493 |       10 |     98% |465, 477-478, 501, 550, 642-643, 669, 728-729 |
-| src/kraft/console/screens/item\_chain.py         |      138 |        5 |     96% |68-69, 84, 172, 192 |
+| src/kraft/console/screens/item\_chain.py         |      138 |        4 |     97% |68-69, 172, 192 |
 | src/kraft/console/screens/item\_menu.py          |      116 |        5 |     96% |136, 144-147 |
 | src/kraft/console/screens/new\_item.py           |      103 |        4 |     96% |143-145, 178 |
 | src/kraft/console/screens/repos.py               |       86 |        2 |     98% |   105-106 |
@@ -199,7 +199,7 @@
 | src/kraft/intake.py                              |      144 |       13 |     91% |58, 102-104, 120, 163-164, 202-204, 245-250, 287 |
 | src/kraft/intent.py                              |      198 |        9 |     95% |91-92, 186, 203, 264-265, 321-322, 339 |
 | src/kraft/item\_paths.py                         |      325 |       59 |     82% |159, 426, 454, 483-484, 498-501, 513-529, 539-543, 546-548, 565-580, 587-588, 602, 616-619, 703-704, 726 |
-| src/kraft/logs.py                                |      292 |        9 |     97% |107, 112, 279, 296, 312-313, 321-322, 448 |
+| src/kraft/logs.py                                |      292 |        7 |     98% |107, 112, 279, 296, 321-322, 448 |
 | src/kraft/mcp.py                                 |      194 |        2 |     99% |   817-818 |
 | src/kraft/mr\_poller.py                          |       68 |        9 |     87% |78-79, 91-92, 98, 133-136 |
 | src/kraft/node\_runs.py                          |      104 |        5 |     95% |51, 116-117, 154-155 |
