@@ -557,7 +557,8 @@ async def test_judge_history_keeps_both_entries_first_measurements_at_cycle_zero
     """`walk_node` resets `round` to 0 on every re-entry while the loop counter
     persists, so two entries' first measurements collide on cycle 0. Keyed by
     that number, the older one vanished and the newest was relabelled the
-    oldest — the judge's trend pointed backwards."""
+    oldest — the judge's trend pointed backwards. A repair's re-measure (cycle -1)
+    is a round like any other (Kraft-d8gne), labelled by its place, not its cycle."""
 
     wid = "w1"
     await database.write(
@@ -585,11 +586,13 @@ async def test_judge_history_keeps_both_entries_first_measurements_at_cycle_zero
     assert [h["findings"][0].message for h in history] == [
         "first entry, oldest",
         "first entry, after one fix",
+        "a repair pass, not a paid cycle",
         "second entry, after the retry",
         "second entry, newest",
     ]
     # Renumbered by position, so "round 0" really is the oldest.
-    assert [h["round"] for h in history] == [0, 1, 2, 3]
+    assert [h["round"] for h in history] == [0, 1, 2, 3, 4]
+    assert "round -1" not in prompts.format_judge_history(history)
 
 
 async def test_needs_context_question_ignores_a_judge_session(tmp_path, database):
