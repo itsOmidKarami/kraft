@@ -186,21 +186,15 @@ def test_core_skills_name_no_harness_tool(name):
     assert not found, f"{name} names harness tools: {sorted(set(found))}"
 
 
-@pytest.mark.parametrize(
-    "name, banned",
-    [
-        # run-slices names `kraft/<chain-id>`: Kraft Lite's own branch names,
-        # for a repo with no naming rule of its own.
-        ("run-slices", ("superpowers:", "screenshot", "just test", "just lint")),
-        ("build-slice", ("superpowers:", "kraft/", "screenshot", "just test", "just lint")),
-    ],
-    ids=["run-slices", "build-slice"],
-)
-def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name, banned):
+@pytest.mark.parametrize("name", ["run-slices", "build-slice"])
+def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name):
     """The slice skills ship into any repo. A repo's rules come from its own
-    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry."""
-    for word in banned:
-        assert word not in texts[name], f"{name} says {word!r}"
+    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry.
+    `kraft/<chain-id>` is Kraft Lite's own branch name for a repo with no rule,
+    not Kraft's, so it alone is let through."""
+    text = texts[name].replace("`kraft/<chain-id>`", "")
+    for banned in ("superpowers:", "kraft/", "screenshot", "just test", "just lint"):
+        assert banned not in text, f"{name} says {banned!r}"
 
 
 def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
