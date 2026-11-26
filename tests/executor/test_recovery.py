@@ -129,6 +129,9 @@ async def test_a_node_recovery_reruns_the_node_from_its_first_step(
     assert script.calls == ["prep", "a", "fix", "prep", "a", *after]
     assert [e["payload"]["cycle"] for e in it.events("findings_measured")] == measured
     assert [e["payload"]["cycle"] for e in it.events("fix_cycle_started")] == cycles
+    # A fix session is stamped with its paid cycle, never the repair's round: a -1 one
+    # would pair with the re-measure and count it as a fixed round.
+    assert script.rounds.get("cycle", []) == cycles
 
 
 @pytest.mark.parametrize(

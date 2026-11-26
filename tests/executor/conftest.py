@@ -67,6 +67,7 @@ class Script:
         self.log: list[tuple[str, str]] = []
         self.steers: dict[str, list] = {}
         self.instructions: dict[str, list] = {}
+        self.rounds: dict[str, list] = {}
 
     @property
     def calls(self) -> list[str]:
@@ -80,6 +81,7 @@ class Script:
         self.log.append(("start", tid))
         self.steers.setdefault(tid, []).append(kw.get("steer"))
         self.instructions.setdefault(tid, []).append(kw.get("instruction_override"))
+        self.rounds.setdefault(tid, []).append(kw.get("round"))
         if tid in self.real:
             status = await self._real(db_, run_dirs_, task, node, row_, wt, **kw)
         else:
