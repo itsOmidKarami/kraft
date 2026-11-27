@@ -280,9 +280,7 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (*drop_lines, "measurement")
     if version < 62:
         drop_lines = (*drop_lines, "takeover", "cli_session_id")
-    if version < 63:
-        drop_lines = (*drop_lines, "-- 1 for a session that ran on an ACP", "-- caps read it")
-        drop_lines = (*drop_lines, "acp            INTEGER")
+    drop_lines += ("ran on an ACP", "caps read it", "acp            INT") if version < 63 else ()
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
