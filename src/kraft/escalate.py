@@ -21,6 +21,7 @@ from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
+from kraft.adapters.forge.models import OPEN_THREADS_LINE, OPEN_THREADS_NOTE
 from kraft.executor import LaunchContext, stops
 from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask, GateNode, TaskKind
@@ -178,7 +179,11 @@ def _reason_line(stop: dict, status: str) -> str:
     misleading (Kraft-k5ol code-review finding)."""
     if status != "needs_human":
         return ""
-    line = f"Why it is stopped: {stop.get('reason') or '(no reason recorded)'}\n"
+    reason = stop.get("reason") or "(no reason recorded)"
+    before, marker, _ = reason.partition(OPEN_THREADS_LINE)
+    if marker:
+        reason = f"{before.rstrip()} {OPEN_THREADS_NOTE}".lstrip()
+    line = f"Why it is stopped: {reason}\n"
     if suggested := stop.get("suggested_action"):
         line += (
             f"What Kraft suggests a person do: {suggested['action']} -- {suggested['reason']} "

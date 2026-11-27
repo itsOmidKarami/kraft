@@ -34,6 +34,7 @@
 .ph-sheet-title { margin: 0; font-size: var(--fs-h2); font-weight: 600; overflow-wrap: anywhere; }
 .ph-sheet-text { margin: 0 0 8px; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); }
 .ph-sheet-error { margin: 0; font-size: var(--fs-meta); color: var(--bad); }
+.ph-sheet-read { font-size: var(--fs-meta); line-height: 1.55; overflow-wrap: anywhere; }
 .ph-sheet-pair { display: flex; gap: 8px; margin-top: 6px; }
 .ph-sheet-pair > .ph-btn { flex: 1; }
 .ph-sheet-edit { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }

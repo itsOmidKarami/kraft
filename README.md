@@ -20,202 +20,126 @@ Kraft isn't another coding agent. It runs the one you already use, and adds
 what a single session can't: a process the agent can't skip, checks it doesn't
 grade itself on, and a person at the decisions that matter.
 
-Hand Kraft a task, start it and walk away. A new task, a *work item*, is filed paused,
-in the web interface, on a phone and from the CLI alike, so nothing runs until
-you start it. Your agent drafts the spec and the plan and
-stops for your approval of each, or starts from a spec you wrote. It's for
-developers tired of babysitting a session to the end of a task;
-[when not to use Kraft](https://kraft-sdlc.dev/get-started/why-kraft#when-not-to-use-kraft)
+Hand Kraft a task, start it and walk away. You file a task, a *work item*, from
+the web UI, a phone or the CLI, and it waits paused until you start it. Your
+agent then drafts a spec and a plan, stops for your approval of each, builds the
+change on its own branch and opens a merge request. It's for developers tired of
+babysitting a session; [when not to use Kraft](https://kraft-sdlc.dev/why#when-not-to-use-kraft)
 says who it isn't for.
 
-Install it with `uv tool install kraft-sdlc` and run `kraft`. It needs Claude
-Code, signed in; [Install](#install) has Homebrew and the agent plugin.
+[![One work item in the Kraft web UI: filed from the board, stopped for a person at the spec, plan and local review gates in the order its chain file sets, then back at the final review with its draft merge request. Recorded on a dev instance with a simulated agent, sped up while the agent works.](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/run.gif)](https://kraft-sdlc.dev/demo/)
 
-Kraft works with Claude Code out of the box, and you can drive it from Codex,
-Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
-their agent steps on Claude Code, and any step can
-[switch to another agent](https://kraft-sdlc.dev/guides/harnesses/switch-harness).
+## What you get
 
-The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
-each version adds. Coming from 1.4? [Upgrade from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4)
-says what to check before you upgrade.
+- **A process the agent can't skip.** Each work item follows a *chain*, a YAML
+  file you can read and diff. Its *nodes* are steps such as write the spec,
+  implement, verify and open the merge request. Some run your agent, some run a
+  command and some stop for you.
+- **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its
+  own, waits for your CI and has a separate reviewer decide whether a fix is
+  done.
+- **A person at the decisions.** A *gate* is a node where the chain stops for
+  you. Read what the agent wrote, then approve it or request changes with a note
+  that re-runs the node that wrote it. A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](https://kraft-sdlc.dev/project/security-in-depth#agents-and-gates)
+  has the scope.
+- **Capped retries and spend.** Attempts, time and dollars are bounded. A capped
+  item stops and hands you the full trace.
+- **Your checkout stays as you left it.** Each item runs on its own branch in
+  its own git worktree, so items run in parallel. Kraft is one local process,
+  bound to loopback, and a tunnel reaches it from a phone.
 
-[![The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item's one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
+![A gate's review page: the review brief an agent wrote, the files on the branch, and Request changes and Approve buttons](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
-- **Gates where a human decides.** Kraft pauses at a spec, a plan or a merge
-  request for your approval; request changes with a note and the node that wrote it
-  tries again.
-- **Capped retries, not runaway loops.** Attempts, wall-clock time and spend
-  are all bounded. Hit a cap and the item stops and hands you the full trace
-  instead of quietly burning tokens.
-- **Isolated git worktrees.** Each work item runs on its own branch in its own
-  worktree by default, so your checkout stays as you left it and items run in
-  parallel. A repo whose setup is heavy can run its items in its own checkout
-  instead, one at a time.
-- **Local.** One process on your machine, bound to loopback by default, not a
-  hosted service.
-- **A board you can check from your phone.** Reach it from another device
-  through a tunnel.
+## How the pieces fit
 
-New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what it does that a session, a loop or a skill doesn't, and when not to use it.
+**Kraft** is the server, the `kraft` command and the web UI. The
+**[Kraft plugin](https://kraft-sdlc.dev/guides/day-to-day/agent-integration)**
+gives Claude Code, Codex, Cursor and Antigravity slash commands and Model
+Context Protocol (MCP) tools to file work and clear gates from a session.
+**[Kraft Lite](https://kraft-sdlc.dev/guides/kraft-lite)** runs a chain inside
+one session, with no server. [Add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons)
+share chains, and the [VS Code extension](https://kraft-sdlc.dev/guides/day-to-day/vscode)
+clears gates beside your code.
 
-*Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to merge request.
-
-**A gate stops the chain where a human decides.** Read what the agent wrote,
-then approve or request changes with a note that re-runs the node that wrote it.
-
-![The gate's review page headed Approve final review: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts release with no gate after it and the spend, the review brief an agent wrote rendered below, and the files on the branch beside it](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
-
-**Read by name, not by ID.** Nodes show as "approve spec" and "chain revision",
-and a chain too long to read whole gets an overview of all of it, one small
-glyph per node with a frame on the part in view, above the full-size graph. The
-board filters by chain, gate and stop reason, and retries or resumes a
-selection in one go. Settings keeps code and board preferences on their own
-Board & code page. Every page warns when Kraft is offline, and `?` lists the
-keyboard shortcuts.
-
-<table>
-<tr>
-<td width="60%">
-
-**Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. A gate's card opens its review, so nothing is approved from the list, and Chains edits drafts there too. Reach it from another device through a tunnel; see
-[Remote access](https://kraft-sdlc.dev/guides/run/remote-access).
-
-</td>
-<td width="40%">
-
-![The board at a 390px phone viewport, with bottom tab navigation, status chips and Chain, Gate and Stop reason menus, and cards for an item at a gate whose Review button opens the review, and stopped items with Retry and Raise cap](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
-
-</td>
-</tr>
-</table>
-
-Each work item follows a
-[chain](https://kraft-sdlc.dev/concepts/vocabulary): a list of
-nodes such as write the spec, write the plan, implement, verify and open the
-merge request. Some nodes run your coding agent, some run a command, and some
-stop and wait for you. Chains are YAML files you can edit. A team can share
-chains as [Kraft add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons),
-which each instance installs from a git repository or a directory. How the
-pieces fit together is in
-[Architecture](https://kraft-sdlc.dev/project/architecture).
+The extension runs in VS Code and editors built on it, such as Cursor and
+VSCodium: install it from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft)
+or [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft).
 
 ## Requirements
 
-- **macOS or Linux.** CI runs on Linux, and `kraft admin install-service`
-  supports launchd and systemd only. Windows isn't supported, and WSL is
-  untested.
-- **`git`**, with `user.name` and `user.email` set (globally, or in each repo
-  you connect). Kraft commits the agents' work under that identity.
-- **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
-  already on your machine, or fetches one. Or Homebrew on macOS.
-- **[Claude Code](https://code.claude.com/docs)**, installed
-  and signed in. Every agent task in the shipped chains runs on it.
-- **`gh` or `glab`**, signed in, for the nodes that open the merge
-  request on GitHub or GitLab and merge it.
+- **macOS or Linux.** Windows isn't supported, and WSL is untested.
+- **`git`**, with `user.name` and `user.email` set. Kraft commits the agents'
+  work under that identity.
+- **[uv](https://docs.astral.sh/uv/)**, which fetches a Python 3.12 or newer if
+  you have none. Or Homebrew on macOS.
+- **[Claude Code](https://code.claude.com/docs)**, installed and signed in. The
+  shipped chains run every agent task on it. Codex, Cursor, Gemini CLI,
+  Antigravity, OpenCode and Amp work as
+  [harnesses](https://kraft-sdlc.dev/reference/harnesses) after a chain edit.
+- **`gh` or `glab`**, signed in, for the nodes that open and merge the merge
+  request on GitHub or GitLab.
 
-**Supported agents:** Claude Code, Codex, Cursor, Gemini, Antigravity, OpenCode
-and Amp all run as [harnesses](https://kraft-sdlc.dev/reference/harnesses).
-The shipped chains use Claude Code only; to use another agent, edit the chains.
-
-## What it costs
-
-Kraft is free and Apache-2.0 licensed. Your agent provider bills you for the
-sessions Kraft runs. The shipped `policy.yaml` caps spend at $10 per work item
-and $50 per day across all items, and `kraft item create --budget USD` sets one
-item's cap. A cap stops the next agent task from starting, so spend can go over
-it by the cost of the task already running. In testing, a small fix on the
-`quick-task` chain cost a few cents. See
+Kraft is free and Apache-2.0 licensed. Your agent provider bills the sessions
+Kraft runs, and the shipped policy caps spend per work item and per day: see
 [Caps and budgets](https://kraft-sdlc.dev/concepts/caps-and-budgets).
 
-## Install
-
-Install Kraft with `uv`, or with Homebrew on macOS:
+## Install and run
 
 ```bash
 uv tool install kraft-sdlc
-# or
+```
+
+On macOS, Homebrew works too:
+
+```bash
 brew tap itsOmidKarami/kraft && brew install kraft
 ```
 
-To drive Kraft from Claude Code, install the plugin:
+To drive Kraft from Claude Code, add the plugin:
 
 ```bash
 claude plugin marketplace add itsOmidKarami/kraft
 claude plugin install kraft@kraft
 ```
 
-Codex, Cursor and Antigravity install the same plugin; their commands are on
-the [install guide's agent tabs](https://kraft-sdlc.dev/get-started/install#connect-your-agent).
-If you drive Kraft from one of them, install the Claude Code plugin (or run
-`kraft admin init`) as well: the shipped chains run their workers on Claude
-Code.
-
-Start the server and leave it running in its own terminal:
+Start the server in its own terminal and leave it running. It listens on
+`http://127.0.0.1:8765`:
 
 ```bash
-kraft              # http://127.0.0.1:8765
-kraft --version    # in another terminal: confirms what you installed
+kraft
 ```
 
-Then open a Claude Code session in your repo, run this and follow what it
-asks. It needs the server running:
+In a second terminal, connect the repo you want Kraft to work on. It proposes
+the repo's test and setup commands and asks you to accept them:
 
-```text
-/kraft:onboard
+```bash
+cd ~/code/my-project
+kraft repo connect
 ```
 
-To clear gates and review diffs from VS Code, install the
-[Kraft extension](https://kraft-sdlc.dev/guides/day-to-day/vscode) from the
-[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft),
-or from [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft) in VSCodium
-and Cursor (publisher `kraft-sdlc` on both). You can also download
-`kraft-<version>.vsix` from the latest
-[GitHub release](https://github.com/itsOmidKarami/kraft/releases/latest) and run
-`code --install-extension kraft-<version>.vsix`.
-
-Every install path, connecting your agent, and updating are in the
-[install guide](https://kraft-sdlc.dev/get-started/install). Coming
-from 1.4? Update with `uv tool install`, not `kraft admin update`: see
-[Upgrading from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4#update-from-14).
-
-## First run
-
-Open http://127.0.0.1:8765. With no repo connected, a short setup walks you
-through connecting one, the chain and policy, and a first work item, which is
-created paused. Then follow the
-[first-work-item tutorial](https://kraft-sdlc.dev/get-started/first-work-item)
-to file your first work item.
-
-## Analytics
-
-Lead time, cost and where both go, by node and by repo, over a Range you pick:
-7 days, 30 days, 8 weeks (the default) or 90 days, the same menu on a desktop and a phone. Built from the same events the
-board renders live, not a separate pipeline.
-
-![The Analytics view over 8 weeks, with Range, Repo and Chain menus: the five overview figures (completed count, median lead time, the share waiting on you, cost and repairs per item); merged items per week; a Waiting at each gate table with waits, median, total and rejected for each gate; the top of the By node cost table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
+Open `http://127.0.0.1:8765`, then follow
+[Your first work item](https://kraft-sdlc.dev/get-started/first-work-item): it
+files a small change, stops at a gate for your approval and finishes. The
+[install guide](https://kraft-sdlc.dev/get-started/install) has the other agents,
+updating and uninstalling. Coming from 1.4? Read
+[Upgrade from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4) first.
 
 ## Where to go next
 
+- [Why Kraft](https://kraft-sdlc.dev/why): what it does that a session, a loop or a skill doesn't.
 - [Concepts](https://kraft-sdlc.dev/concepts/vocabulary): work items, chains, nodes, gates, caps.
 - [CLI reference](https://kraft-sdlc.dev/reference/cli): every `kraft` verb.
-- [Configuration](https://kraft-sdlc.dev/reference/configuration): `repos.yaml`, `policy.yaml`, `access.yaml`, and the state directory (`$KRAFT_HOME`).
-- [Agent integration](https://kraft-sdlc.dev/guides/day-to-day/agent-integration): MCP tools and skills.
-- [Share chains with add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons): publish chains, skills and agent profiles from a git repository, and install a team's.
-- [Remote access](https://kraft-sdlc.dev/guides/run/remote-access): reach the board from a phone or another machine.
-- [Triggers](https://kraft-sdlc.dev/reference/triggers): start a chain from a schedule or an HTTP call.
-- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions, ideas and the chains you've built.
-- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first contribution.
-- [Security](https://kraft-sdlc.dev/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
+- [Security](https://kraft-sdlc.dev/project/security): the threat model; report vulnerabilities as [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md) describes.
+- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions and ideas.
 
-Kraft Lite, a separate plugin, runs a chain inside a single
-agent session with no service; see the [Kraft Lite guide](https://kraft-sdlc.dev/guides/kraft-lite).
+The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
+each version adds. Kraft is young: expect rough edges and frequent releases, and
+report bugs in [GitHub issues](https://github.com/itsOmidKarami/kraft/issues).
 
-## Project status
-
-Kraft is young. Expect rough edges and frequent releases. Report bugs and ask
-questions in [GitHub issues](https://github.com/itsOmidKarami/kraft/issues).
-Report security problems as [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md) describes.
+*Kraft* is German for force; in English, its cousin *craft* means skill. Your
+agent brings the craft; Kraft is the force that carries it from spec to merge
+request.
 
 ## Contributing
 

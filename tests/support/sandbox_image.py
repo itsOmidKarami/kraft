@@ -9,6 +9,31 @@ import pytest
 
 IMAGE = "kraft-test-git:latest"
 
+# pytest-timeout (120s, `thread`) kills the whole xdist worker with os._exit,
+# fixture setup included, so a pull throttled by a registry (podman retries it
+# three times, ~30s apiece) would take every later test on that worker with it.
+# A subprocess limit under the test's own turns that into one ordinary failure.
+# A fixture may pull twice, so two of these still fit in 120s; the slowest
+# healthy setup in CI is ~21s.
+PULL_TIMEOUT_S = 40
+# One build of the git image: base pull plus an optional `apk add`, healthy in seconds.
+BUILD_TIMEOUT_S = 80
+
+
+def pull_failure(cli: str, image: str, *args: str) -> str | None:
+    """Why `cli pull image` failed, or None once it succeeded. A pull past
+    PULL_TIMEOUT_S fails naming the image rather than outliving the test."""
+    try:
+        pulled = subprocess.run(
+            [cli, "pull", "-q", *args, image],
+            capture_output=True,
+            text=True,
+            timeout=PULL_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return f"`{cli} pull {image}` took over {PULL_TIMEOUT_S}s (a throttled registry?)"
+    return None if pulled.returncode == 0 else pulled.stderr.strip()
+
 
 def build_git_image(
     cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False, python: bool = False
@@ -32,11 +57,18 @@ def build_git_image(
         + ("RUN apk add --no-cache python3\n" if python else "")
         + "ENTRYPOINT []\n"
     )
-    built = subprocess.run(
-        [cli, "build", "-q", "-t", image, str(context)], capture_output=True, text=True
-    )
-    if built.returncode != 0:
-        why = f"e2e: {cli} could not build {image}: {built.stderr.strip()}"
+    try:
+        built = subprocess.run(
+            [cli, "build", "-q", "-t", image, str(context)],
+            capture_output=True,
+            text=True,
+            timeout=BUILD_TIMEOUT_S,
+        )
+        failed = built.stderr.strip() if built.returncode != 0 else None
+    except subprocess.TimeoutExpired:
+        failed = f"took over {BUILD_TIMEOUT_S}s (a throttled registry?)"
+    if failed is not None:
+        why = f"e2e: {cli} could not build {image}: {failed}"
         # Where the runtime is required, an unreachable daemon or registry is
         # a failure, never a quiet skip past KRAFT_E2E_REQUIRE.
         if cli in os.environ.get("KRAFT_E2E_REQUIRE", "").split(","):

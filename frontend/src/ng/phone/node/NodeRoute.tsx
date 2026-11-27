@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useDocuments } from "../../item/useDocuments";
 import { useEvents } from "../../item/useEvents";
@@ -10,6 +10,7 @@ import { placeUrl, readPlace, selPath, type Place } from "../../item/url";
 import { Doc } from "../doc/Doc";
 import { ItemMissing } from "../nav/NotFound";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { useNow } from "../../useNow";
 import { NodeScreen } from "./NodeScreen";
 import { ScopeScreen } from "./ScopeScreen";
 import { TaskScreen } from "./TaskScreen";
@@ -23,11 +24,7 @@ export function NodeRoute() {
   const version = loaded.state === "ready" ? loaded.version : "";
   const events = useEvents(id, version);
   const docs = useDocuments(id, loaded.state === "ready" ? runVersion(loaded.item) : "");
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow();
   const nodes = loaded.state === "ready" ? loaded.item.chain_definition.nodes : [];
   const place = readPlace(nodeParam, params, nodes);
   // A node change inside the screen is not history; entering the screen was.

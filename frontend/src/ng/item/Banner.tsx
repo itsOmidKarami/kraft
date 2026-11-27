@@ -17,6 +17,8 @@ import { sendOnModEnter } from "../keys";
 export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRaise: () => void; reload: () => void; note?: ReactNode }) {
   const navigate = useNavigate();
   const [raising, setRaising] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useLimitAsked(item.id, () => setRaising(true));
   const stop = item.stop;
   const words = bannerOf(item);
@@ -31,7 +33,17 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
       </div>
     );
   }
-  if (words.kind === "limit")
+  if (words.kind === "limit") {
+    // A fix loop at its cap on merge-request CI, which can have failed outside the code: re-running it retries.
+    const rerun = stop.kind === "cap" && admits(item, "rerun_ci", false);
+    const rerunCi = async () => {
+      setRerunning(true);
+      const r = await act.rerunCi(item.id);
+      setRerunning(false);
+      if (!r.ok) return setError(r.error);
+      setError(null);
+      reload();
+    };
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
@@ -40,7 +52,9 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
           {words.name && <>Stopped at {words.name}. </>}
           {words.text}
           {words.way && <> {words.way}</>}
+          {error && <span className="item-error" role="alert"> {error}</span>}
         </span>
+        {rerun && <Button disabled={rerunning} onClick={rerunCi}>Re-run CI</Button>}
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,
             and a budget stop on the item's own cap that Config's budget editor. A budget the item cannot raise says so, and the header's Retry is the way on. */}
         {/* Each Raise only where the server admits its door: a budget's `raise_budget` (`offersRaise`), a cap's limit editor `retry`. */}
@@ -51,6 +65,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
         {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} override={item.policy_override} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
       </div>
     );
+  }
   return null;
 }
 

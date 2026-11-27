@@ -11,7 +11,8 @@ it with one atomic rename:
 
     run/carried/<repo>-<digest>/
         current -> gen-<time_ns>-<pid>
-        gen-<time_ns>-<pid>/<carried files>, and `superseded` once not current
+        gen-<time_ns>-<pid>/<carried files>, `base` (the commit its tree forks
+            from), and `superseded` once not current
 
 A reader resolves `current` once and copies the whole set from that directory,
 so it never pairs one save's database with another's WAL, and a crash
@@ -22,7 +23,9 @@ resolved `current` just before a save still has its directory.
 Each item keeps a baseline (`item_paths.carried_record`): what was copied into
 its worktree and those files' sizes and mtimes then. A save happens only when a
 listed file differs from the baseline, so a round that never touched the
-files cannot overwrite a newer copy with an old one.
+files cannot overwrite a newer copy with an old one. Nor can an item cut from an
+older base commit than the saved copy's: its record lacks every commit since,
+and the next item to seed from it would re-run the tests those commits touched.
 
 Standard library only: `builtins` imports this at the top.
 """
@@ -35,6 +38,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import time
 from collections.abc import Iterable
@@ -48,6 +52,7 @@ Stat = tuple[int, int]
 PRUNE_AFTER_S = 3600.0
 
 _SUPERSEDED = "superseded"
+_BASE = "base"
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,29 @@ def saved_set(store: Path, rels: Iterable[str]) -> Path | None:
     return generation if stats(generation, rels) else None
 
 
+def stored_base(generation: Path | None) -> str | None:
+    """The commit the generation's tree was made from, if its saver recorded one."""
+    if generation is None:
+        return None
+    try:
+        return (generation / _BASE).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def _is_older(repo: str | Path, saver: str, held: str) -> bool:
+    """Whether commit `saver` is a strict ancestor of `held` in `repo`. False when
+    git cannot say (a commit it lacks, git failing): no order is known."""
+    if saver == held:
+        return False
+    argv = ["git", "-C", str(repo), "--no-optional-locks", "merge-base", "--is-ancestor"]
+    try:
+        done = subprocess.run([*argv, saver, held], capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def read_record(path: Path) -> dict | None:
     try:
         record = json.loads(path.read_text())
@@ -153,19 +181,31 @@ def save(
     rels: list[str],
     record_path: Path,
     *,
+    base: str | None = None,
     now: float | None = None,
 ) -> bool:
     """Save the worktree's carried files as the repo's newest copy. False, and
-    nothing written, when none of them changed since the baseline. A listed
-    file the worktree lacks is not copied, so an old WAL never sits beside a
-    newer database. On `OSError` the half-built generation is removed and
-    `current` is untouched."""
+    nothing written, when none of them changed since the baseline, or when the
+    saved copy was made from a newer tree: `base` is the commit the worktree's
+    branch forks from, kept in the generation, and a save whose `base` is a
+    strict ancestor of the saved one's is skipped. The baseline stays as it was,
+    so a later round on a newer tree still saves. With no `base` on either side,
+    or none git orders (diverged, unknown), the save goes ahead.
+
+    A listed file the worktree lacks is not copied, so an old WAL never sits
+    beside a newer database. On `OSError` the half-built generation is removed
+    and `current` is untouched.
+
+    shortcut: the order check and the rename are not one step, so two saves
+    racing can still land out of order; the next save from a newer tree repairs it."""
     now = time.time() if now is None else now
     record = read_record(record_path)
     files = stats(worktree, rels)
     if not changed(record, files):
         return False
     store = store_dir(run_dirs, repo)
+    if base and (held := stored_base(current_generation(store))) and _is_older(repo, base, held):
+        return False
     store.mkdir(parents=True, exist_ok=True)
     generation = store / f"gen-{time.time_ns()}-{os.getpid()}"
     generation.mkdir()
@@ -175,6 +215,8 @@ def save(
             target = generation / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(worktree / rel, target)
+        if base:
+            (generation / _BASE).write_text(base)
         previous = current_generation(store)
         os.symlink(generation.name, link)
         os.replace(link, store / "current")

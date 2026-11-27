@@ -10,7 +10,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewer
 
 #: The levels an override's `effort` may take. Checked at the API rather than at
 #: dispatch: a typo reaching the CLI fails the node *after* the work item has
@@ -106,7 +106,7 @@ class _NodeOverride(_ModelEffortOverride):
     extra_prompt: StrictStr | None = None
     #: The reviewers this node's `mr.automated_review` tasks wait for, over the
     #: repository's and the task's own (`dispatch._reviewers`). `[]` expects none.
-    reviewers: list[AutomatedReview] | None = None
+    reviewers: list[Reviewer] | None = None
 
 
 def _errors(
@@ -151,7 +151,12 @@ def _errors(
         if field == "auto_escalate_delay_s":
             return ["auto_escalate_delay_s must be a non-negative int"]
         if field == "reviewers":
-            return ["reviewers must be a list of {bot: LOGIN} or {check: NAME}"]
+            needs = next((e["msg"] for e in errors if "needs `replies: true`" in e["msg"]), None)
+            if needs is not None:
+                return [f"reviewers: {needs.removeprefix('Value error, ')}"]
+            return [
+                "reviewers must be a list of {bot: LOGIN, replies, resolve_fixed} or {check: NAME}"
+            ]
         return [f"{field} must be a positive int"]
     return []
 

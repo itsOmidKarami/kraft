@@ -1,7 +1,7 @@
 import { useReason } from "../../ui/Reason";
 import { ADD_NOTE, WRITE_FIRST } from "../../ui/reasons";
 import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
-import { nameOf } from "../../board/rowText";
+import { mrRefText, nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -9,6 +9,7 @@ import { act, cancelPreview, type Done } from "../../item/actions";
 import { rejectTarget } from "../../item/graph";
 import { standingNode } from "../../item/cursor";
 import { retryBody } from "../../item/paths";
+import { neverStarted } from "../../item/status";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -88,7 +89,7 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
   cancel: {
     title: CANCEL_THIS_ITEM,
-    help: () => "The run stops where it is. Everything it produced is kept, and a cancelled item stays cancelled.",
+    help: (i) => (neverStarted(i) ? "Nothing was made yet, so there is nothing to keep. A cancelled item stays cancelled." : "The run stops where it is. Everything it produced is kept, and a cancelled item stays cancelled."),
     placeholder: GOES_IN_THE_RUN_LOG,
     label: "Cancel item",
     danger: true,
@@ -119,7 +120,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
 
   const flagLabel =
     kind === "escalate" && (item.escalation_threads?.length ?? 0) > 0 ? "Start a new thread"
-    : kind === "cancel" && preview?.mr?.state === "open" ? `Also close !${preview.mr.ref} on the forge`
+    : kind === "cancel" && preview?.mr?.state === "open" ? `Also close ${mrRefText({ number: preview.mr.ref, url: preview.mr.url })} on the forge`
     : kind === "complete" ? "Also close its beads"
     : null;
   const target = spec.target?.(item) ?? null;
@@ -167,7 +168,9 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {flagLabel && <div className="ph-list"><SwitchRow label={flagLabel} on={flag} onChange={setFlag} /></div>}
         {kind === "cancel" && preview && (
           <Facts rows={[
-            ["keeps", `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ""}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ""} and the run log`],
+            // A never-started item has no branch or worktree to keep: the preview
+            // still names the ones it would have had, so the screen must not read it.
+            ["keeps", neverStarted(item) ? "Nothing was made yet." : `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ""}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ""} and the run log`],
             ["spend", `${usd(preview.spend.spent_usd)} stays on the ledger`],
           ]} />
         )}

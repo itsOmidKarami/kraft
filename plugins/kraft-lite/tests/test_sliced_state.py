@@ -294,7 +294,7 @@ def test_a_rewind_to_before_implementation_retires_the_slices(walk, node, mode, 
     # Sliced again, from a new proposal, at the next chain_revision_approval.
     walk.to(tmp_path, "chain_revision_approval")
     kl_cli(tmp_path, "gate")
-    again = walk.plan(mode=mode, slices=[{"key": "z", "title": "Zeta", "tasks": [1]}])
+    again = walk.plan(mode=mode, slices=[{"key": "z", "title": "Zeta", "tasks": [1, 2, 3, 4, 5]}])
     kl_cli(tmp_path, "approve", "--slices", str(walk.write_plan(tmp_path, again)))
     assert [e["key"] for e in kl_cli(tmp_path, "slices")["slices"]] == ["z"]
     assert kl_cli(tmp_path, "state")["sliced"]["mode"] == mode

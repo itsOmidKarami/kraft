@@ -153,6 +153,11 @@ _CLI_PACKAGES = {
 }
 
 
+# Under the 1800s marker on the test below, which also covers its setup and run;
+# a healthy build (apt-get and npm install) is under a minute.
+_BUILD_TIMEOUT_S = 1200
+
+
 def _cli_image(cli: str, harness_id: str) -> str:
     """An image holding `harness_id`'s CLI, built once and kept."""
     tag = f"localhost/kraft-e2e-{harness_id}:latest"
@@ -164,9 +169,16 @@ def _cli_image(cli: str, harness_id: str) -> str:
         " curl && rm -rf /var/lib/apt/lists/*\n"
         f"RUN npm install -g {_CLI_PACKAGES[harness_id]}\n"
     )
-    built = subprocess.run(
-        [cli, "build", "-t", tag, "-"], input=containerfile, capture_output=True, text=True
-    )
+    try:
+        built = subprocess.run(
+            [cli, "build", "-t", tag, "-"],
+            input=containerfile,
+            capture_output=True,
+            text=True,
+            timeout=_BUILD_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{cli} build of {tag} took over {_BUILD_TIMEOUT_S}s (a throttled registry?)")
     assert built.returncode == 0, built.stderr[-2000:]
     return tag
 

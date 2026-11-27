@@ -8,7 +8,7 @@ import { PNG } from "pngjs";
 /**
  * The docs screenshots taken from the dashboard demo, one test per picture. Each writes
  * `.github/assets/<name>.png` (SHOTS_OUT moves them). The demo's sample data is fixed, so a retake
- * changes a picture only where the screen changed. frontend/README.md lists where each one is shown.
+ * changes a picture only where the screen changed. frontend/SCREENSHOTS.md lists where each one is shown.
  */
 
 const OUT = process.env.SHOTS_OUT

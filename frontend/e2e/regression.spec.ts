@@ -58,8 +58,8 @@ test("library: a component lists the chains that use it, and links to them", asy
 
 test("harnesses: a harness lists the tasks it runs, and links to them", async ({ page }) => {
   await page.goto("/settings/harnesses");
-  await page.getByRole("region", { name: "claude" }).getByRole("link", { name: /^default › implementation\.main\.implement\. Open in Chains$/ }).click();
-  await expect(page).toHaveURL(/\/templates\/chains\/default\/nodes\/implementation$/);
+  await page.getByRole("region", { name: "claude" }).getByRole("link", { name: /^default › spec\.main\.author\. Open in Chains$/ }).click();
+  await expect(page).toHaveURL(/\/templates\/chains\/default\/nodes\/spec$/);
 });
 
 test("policy: a cap edited and published", async ({ page }) => {

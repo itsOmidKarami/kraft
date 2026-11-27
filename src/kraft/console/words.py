@@ -174,6 +174,26 @@ def queued_verb_words(verb: str) -> str:
     return _QUEUED_VERB.get(verb) or node_words(verb)
 
 
+#: `rowText.ts`'s `mrRefText`: a merge request's number with its forge's
+#: sign, from the URL `mr_ref` carries.
+_PULL = re.compile(r"/pull/\d+(?:[/?#]|$)")
+
+
+def mr_ref_text(ref: dict | None) -> str:
+    """`mrRefText`: `#N` on GitHub (`/pull/N`), `!N` on GitLab
+    (`/-/merge_requests/N`). A URL that says neither keeps the old `!` —
+    the sign GitLab uses and the one every existing fixture already reads —
+    rather than guessing a forge from the host."""
+    ref = ref or {}
+    return f"{'#' if _PULL.search(ref.get('url') or '') else '!'}{ref['number']}"
+
+
+def _mr_ref(payload: dict, key: str) -> str:
+    """`mr_ref_text` for an event payload: the old lone `!` when the number is missing."""
+    number = payload.get(key)
+    return mr_ref_text({"number": number, "url": payload.get("url")}) if number is not None else "!"
+
+
 def _tail(row: dict, stop: dict, node: str, now: float) -> str:
     # An item with no node to name reads without "at ...", and without a leading separator.
     where = f" at {node}" if node else ""
@@ -192,7 +212,8 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
                 case "cap" | "budget" | "checkout":
                     return _first_sentence(reason) if reason else f"waiting for you{where}"
                 case _:
-                    return _or(reason, f"waiting for you{where}")
+                    # A reason in paragraphs (the fix-loop judge's) is still one row.
+                    return " ".join(reason.split()) if reason else f"waiting for you{where}"
         case "failed":
             return f"failed{where}"
         case "paused":
@@ -225,7 +246,7 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
             return "escalation running"
         case "done":
             mr = row.get("mr_ref")
-            return f"merged !{mr['number']}" if mr else "completed"
+            return f"merged {mr_ref_text(mr)}" if mr else "completed"
         case "cancelled":
             return "cancelled"
         case _:
@@ -529,6 +550,9 @@ QUIET = frozenset(
         "permission_decision",
         "external_wait_observed",
         "findings_measured",
+        "reply_round_started",
+        "reply_send_started",
+        "base_move_held",
         "run_forked",
         "cap_counters_reset",
         "session_reattached",
@@ -703,13 +727,13 @@ def event_line(
         case "work_item_restored":
             return "restored"
         case "mr_opened":
-            return f"MR !{_s(p.get('number'))} opened"
+            return f"MR {_mr_ref(p, 'number')} opened"
         case "mr_closed":
             by = p.get("by")
             closer = f" by {_s(by)}" if by and by != "cancel" else ""
-            return f"MR !{_s(p.get('ref'))} closed{closer}"
+            return f"MR {_mr_ref(p, 'ref')} closed{closer}"
         case "mr_reopened":
-            return f"MR !{_s(p.get('ref'))} reopened"
+            return f"MR {_mr_ref(p, 'ref')} reopened"
         case "merge_refused_unreviewed":
             if p.get("source") == "forge":
                 where = (

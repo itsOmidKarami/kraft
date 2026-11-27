@@ -250,6 +250,9 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys,
         "run",
         lambda self, *a, **k: pytest.fail("started anyway"),
     )
+    # The address probe also exits (with no stderr) when anything answers the test's port;
+    # that is another test's concern, and the port is not what this one pins (Kraft-qamc5).
+    monkeypatch.setattr(cli.admin, "_refuse_if_addr_taken", lambda *a: None)
     with pytest.raises(SystemExit):
         cli.admin._serve()
     assert "already running" in capsys.readouterr().err

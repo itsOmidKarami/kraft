@@ -29,26 +29,39 @@ export const models = {
   },
 };
 
-type Scope = { paths: string[]; command: string; targeted_command?: string };
-/** `a/**, b/** => pytest -q => pytest --lf; c/** => npm test` ↔ `Repo.test_scopes`: paths, the
- *  full command, and optionally the command that runs only what a change affects. The second
- *  arrow needs spaces around it, so a command holding a bare `=>` stays whole. */
+type Scope = { paths: string[]; command: string; targeted_command?: string; concurrency_group?: string };
+// A space after the `]`: a path such as `[slug]/**` or `[a-z]*.py` is never read as a group.
+const GROUP = /^\[([a-z][a-z0-9_-]*)\]\s+/;
+/** `[heavy] a/**, b/** => pytest -q => pytest --lf; c/** => npm test` ↔ `Repo.test_scopes`: an
+ *  optional `[group]` (the scope's `concurrency_group`), paths, the full command, and optionally
+ *  the command that runs only what a change affects. The second arrow needs spaces around it, so
+ *  a command holding a bare `=>` stays whole. */
 export const scopes = {
   show: (v: unknown) =>
     ((v as Scope[] | null) ?? [])
-      .map((s) => `${s.paths.join(", ")} => ${s.command}${s.targeted_command ? ` => ${s.targeted_command}` : ""}`)
+      .map(
+        (s) =>
+          `${s.concurrency_group ? `[${s.concurrency_group}] ` : ""}${s.paths.join(", ")} => ${s.command}${s.targeted_command ? ` => ${s.targeted_command}` : ""}`,
+      )
       .join("; "),
   parse: (text: string): Parsed => {
     const out: Scope[] = [];
-    for (const part of text.split(";").map((s) => s.trim()).filter(Boolean)) {
+    for (const whole of text.split(";").map((s) => s.trim()).filter(Boolean)) {
+      const group = GROUP.exec(whole);
+      const part = group ? whole.slice(group[0].length) : whole;
       const at = part.indexOf("=>");
       const paths = at < 0 ? [] : items(part.slice(0, at));
       const rest = at < 0 ? "" : part.slice(at + 2).trim();
       const more = /\s=>(\s|$)/.exec(rest);
       const command = more ? rest.slice(0, more.index).trim() : rest;
       const targeted = more ? rest.slice(more.index + more[0].length).trim() : null;
-      if (!paths.length || !command || targeted === "") return { error: `"${part}" is not paths => command.` };
-      out.push(targeted ? { paths, command, targeted_command: targeted } : { paths, command });
+      if (!paths.length || !command || targeted === "") return { error: `"${whole}" is not paths => command.` };
+      out.push({
+        paths,
+        command,
+        ...(targeted ? { targeted_command: targeted } : {}),
+        ...(group ? { concurrency_group: group[1] } : {}),
+      });
     }
     return { value: out.length ? out : null };
   },

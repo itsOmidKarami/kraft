@@ -63,7 +63,8 @@ async def apply_approval(
 
     One function, two doors: the `POST .../approve` endpoint (a human) and
     `kraft.executor.gates.review_gates` (an agent's `approve` verdict), which reaches it
-    through the `on_approve` callback `_launch_approval` hands the executor.
+    through the callback built by `deps._on_approve(st)` and passed to each
+    executor launch as `on_approve`.
     The same rule `apply_rejection` already enforces for the other verdict:
     an agent's approval must have exactly the effects a person's would.
 
@@ -205,6 +206,11 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
     return None
 
 
+#: `X-Kraft-Client` values that mean a coding agent, not a person: the MCP server tags itself
+#: `mcp`; the `kraft` CLI tags a call from an agent's shell `agent-shell` (client.transport).
+ASSISTANT_CLIENTS = ("mcp", "agent-shell")
+
+
 def _decided_by(request: Request) -> str:
     """Which of three kinds of caller made this gate decision (Kraft-s7c04.43).
 
@@ -223,9 +229,11 @@ def _decided_by(request: Request) -> str:
       reaching the API through MCP carries both headers, and what it *is*
       outranks how it connected.
     * `assistant` -- a session reaching Kraft through the MCP server
-      (`mcp.serve_stdio` tags its own process). Not a worker deciding about its
-      own artifact, and not a person either.
-    * `human` -- a browser, or `kraft item approve` typed at a terminal.
+      (`mcp.serve_stdio` tags its own process) or a `kraft` CLI call from a
+      coding agent's shell (`client.transport.agent_shell`). Not a worker
+      deciding about its own artifact, and not a person either.
+    * `human` -- a browser, or `kraft item approve` typed at a person's own
+      terminal.
 
     Deliberately not keyed on the MCP bearer token: `client.transport.http`
     attaches it to every call it makes, CLI included, so it cannot tell an
@@ -233,7 +241,7 @@ def _decided_by(request: Request) -> str:
     """
     if request.headers.get("x-kraft-session-id"):
         return "agent"
-    if request.headers.get("x-kraft-client") == "mcp":
+    if request.headers.get("x-kraft-client") in ASSISTANT_CLIENTS:
         return "assistant"
     return "human"
 
@@ -311,9 +319,12 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> bool:
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove | None = None):
+    """Approve the gate the item is waiting at so the chain moves on. For the final review,
+    pass `head` to approve exactly that revision."""
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     _gate_or_404(gate_nodes(st, row), gate)
     if held := held_refusal(row):
@@ -451,6 +462,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     nodes = gate_nodes(st, row)
     _gate_or_404(nodes, gate)

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { dialogOpen, isTextField, useShortcutRows, type ShortcutRow } from "../keys";
 import { showToast } from "../ui/Toast";
 import type { ReviewOutcome, ReviewThread } from "../../types";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { ItemHeader } from "../item/header/ItemHeader";
@@ -25,7 +25,8 @@ import { byNodes, inPageOrder, inTreeOrder, stepThread, threadPosition, tree, un
 import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
-import { useReviewPlace } from "./url";
+import { readReview, useReviewPlace } from "./url";
+import { RoundReview } from "./RoundReview";
 import { useArtifact, useCompare, useExpanded, useShownHead, useThreads, useViewed } from "./useReview";
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
@@ -39,6 +40,7 @@ const REVIEW_KEYS: ShortcutRow[] = [{ keys: ["]", "["], does: "Next or previous 
  *  review that sends them (W8, spec §6.4). */
 export function ReviewPage() {
   const { id = "" } = useParams();
+  const { search } = useLocation();
   const loaded = useItem(id);
   const setPageItem = usePageItem((s) => s.set);
   const item = loaded.state === "ready" ? loaded.item : null;
@@ -49,6 +51,9 @@ export function ReviewPage() {
   if (loaded.state === "loading") return <div className="review-page" aria-busy="true" />;
   if (loaded.state === "missing")
     return <Placeholder label="Work item not found" note={`There is no work item ${id}. It may have been removed.`} />;
+  // `?round=`: a past round of a gate, read as it was, in place of the review: no comparison is read for it.
+  const at = readReview(new URLSearchParams(search), loaded.item);
+  if (at.round && at.gate) return <RoundReview item={loaded.item} gate={at.gate} round={at.round} version={loaded.version} reload={loaded.reload} />;
   return <Review item={loaded.item} version={loaded.version} reload={loaded.reload} />;
 }
 

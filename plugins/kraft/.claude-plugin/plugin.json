@@ -1,13 +1,18 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "kraft",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Drive Kraft from an agent session: file work, read the board, act on gates, recover stopped work.",
   "license": "Apache-2.0",
   "author": {
     "name": "Omid Karami",
     "url": "https://github.com/itsOmidKarami"
   },
+  "homepage": "https://kraft-sdlc.dev/guides/day-to-day/agent-integration",
+  "repository": "https://github.com/itsOmidKarami/kraft",
+  "documentationUrl": "https://kraft-sdlc.dev",
+  "supportUrl": "https://github.com/itsOmidKarami/kraft/issues",
+  "privacyPolicyUrl": "https://kraft-sdlc.dev/project/data-and-privacy",
   "skills": [
     "./skills"
   ],

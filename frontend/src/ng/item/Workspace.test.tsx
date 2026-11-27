@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +38,70 @@ describe("Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: /auto_review.*reviewer task/ }));
     expect(where()).toBe("/work-items/w1/nodes/plan_approval?sel=plan_approval.auto_review");
     expect(screen.getByRole("complementary", { name: "auto_review pane" })).toBeInTheDocument();
+  });
+
+  it("opens a gate on the round the URL names, with its note, and 'latest ↩' goes back to the newest", async () => {
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const gate_rounds = { plan_approval: [round(1, { outcome: "rejected", note: "Cover the invalidation story", sent_to: "plan" }), round(2)] };
+    mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds } as never);
+    expect(document.querySelector(".gateview-said")).toHaveTextContent("Cover the invalidation story");
+    await userEvent.click(screen.getByRole("button", { name: "latest ↩" }));
+    expect(where()).toBe("/work-items/w1/nodes/plan_approval");
+    expect(document.querySelector(".gateview-said")).toBeNull();
+  });
+
+  // The canvas previews a round's note; the drawer holds it whole, and gives focus back to the button that opened it.
+  it("opens a round's whole note in the document drawer from Read the note, and returns focus to the button", async () => {
+    const note = "Cover the `invalidation` story.\n\nAlso say what a **blob_sha** change does mid-query.";
+    const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const calls = stubFetch();
+    mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note, sent_to: "plan" }), round(2)] } } as never);
+    const preview = document.querySelector(".gateview-said")!;
+    expect(preview).toHaveTextContent("invalidation");
+    expect(preview).not.toHaveTextContent("blob_sha");
+    const before = calls.length;
+    const button = screen.getByRole("button", { name: "Read the note" });
+    // A press that leaves focus where it was (Safari does not focus a pressed button): the drawer is told where to return it.
+    fireEvent.click(button);
+    expect(button).not.toHaveFocus();
+    const drawer = await screen.findByRole("dialog", { name: "plan_approval · round 1 note" });
+    expect(drawer).toHaveTextContent(/changes requested · assistant · .+/);
+    expect(within(drawer).getByText("blob_sha").tagName).toBe("STRONG");
+    expect(within(drawer).getByText("invalidation").tagName).toBe("CODE");
+    expect(calls.length).toBe(before);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "plan_approval · round 1 note" })).toBeNull();
+    expect(button).toHaveFocus();
+  });
+
+  describe("a gate pane's rounds", () => {
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const waiting = {
+      pending_gate: "plan_approval", current_node_id: "plan_approval", display_status: "needs_you", gate_artifact: ".x/plan.md",
+      gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note: "redo it", sent_to: "plan" }), round(2, { outcome: "pending", by: null, ended_at: null })] },
+    };
+
+    it.each([
+      ["the current, waiting round has it", "/work-items/w1/nodes/plan_approval", true],
+      ["a past round has no decision footer", "/work-items/w1/nodes/plan_approval?pass=1", false],
+    ])("%s", (_name, path, footer) => {
+      mount(path, waiting as never);
+      const pane = screen.getByRole("complementary", { name: "plan_approval pane" });
+      expect(within(pane).queryByRole("button", { name: "Approve" }) !== null).toBe(footer);
+      expect(within(pane).queryByRole("button", { name: "Request changes…" }) !== null).toBe(footer);
+    });
+
+    it("a gate the newest round of which a person sent back, and which isn't waiting, says so in the pane's subtitle", () => {
+      const sentBack = { current_node_id: "plan", gate_rounds: { plan_approval: [round(1, { outcome: "rejected", by: "human", note: "redo it", sent_to: "plan" })] } };
+      mount("/work-items/w1/nodes/plan_approval", sentBack as never);
+      expect(within(screen.getByRole("complementary", { name: "plan_approval pane" })).getByText("gate node · changes requested · you")).toBeInTheDocument();
+    });
+
+    it("a History click from the chain overview opens the gate on that round", async () => {
+      mount("/work-items/w1?sel=plan_approval", waiting as never);
+      await userEvent.click(within(screen.getByRole("complementary", { name: "plan_approval pane" })).getByRole("button", { name: /^Round 1/ }));
+      expect(where()).toBe("/work-items/w1/nodes/plan_approval?pass=1");
+    });
   });
 
   it("opens on the chain's pane, and a node click selects it in the URL", async () => {

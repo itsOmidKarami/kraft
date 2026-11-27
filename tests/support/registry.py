@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from kraft.worker import kit
+from support.sandbox_image import PULL_TIMEOUT_S
 
 #: registry:2, by its multi-arch index digest.
 IMAGE = (
@@ -104,8 +105,12 @@ class Registry:
         subprocess.run([self.cli, "rm", "-f", self.container], capture_output=True)
 
 
-def _run(cli: str, *args: str) -> str:
-    done = subprocess.run([cli, *args], capture_output=True, text=True)
+def _run(cli: str, *args: str, timeout: float = 30) -> str:
+    # Bounded so a stuck runtime fails the test; pytest-timeout would exit the worker.
+    try:
+        done = subprocess.run([cli, *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f"{cli} {' '.join(args)}: took over {timeout}s") from None
     assert done.returncode == 0, f"{cli} {' '.join(args)}: {done.stderr.strip()}"
     return done.stdout.strip()
 
@@ -117,7 +122,7 @@ def _insecure(cli: str) -> tuple[str, ...]:
 
 
 def pull(cli: str, ref: str) -> None:
-    _run(cli, "pull", "-q", *_insecure(cli), ref)
+    _run(cli, "pull", "-q", *_insecure(cli), ref, timeout=PULL_TIMEOUT_S)
 
 
 def _self_signed(directory: Path) -> tuple[Path, Path]:

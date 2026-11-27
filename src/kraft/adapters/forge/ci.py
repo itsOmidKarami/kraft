@@ -5,10 +5,21 @@ for it is `kraft.waits`' -- nothing here sleeps.
 
 from __future__ import annotations
 
+import fnmatch
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kraft.adapters.forge.models import MR, CIStatus, Forge
+
+
+def is_publish_job(job_name: str, patterns: Sequence[str]) -> bool:
+    """Whether `job_name` matches one of a repo's `post_merge_publish_jobs`
+    globs. Case-insensitive; a `workflow / job` name is also tried by its last
+    segment, because GitHub reports some check names that way."""
+    name = job_name.lower()
+    candidates = {name, name.rsplit(" / ", 1)[-1]}
+    return any(fnmatch.fnmatchcase(c, p.lower()) for c in candidates for p in patterns)
 
 
 async def render_ci(
@@ -122,9 +133,13 @@ def is_infra_red(ci: CIStatus) -> bool:
     `failure_reason=None` instead, which is not a member of `_INFRA_REASONS`,
     so the `all(...)` below reads it as code-red by default. Only a
     *successful* read that confirms no job ran returns the real empty tuple
-    this function treats as infra.
+    this function treats as infra. A cancelled job with no steps is separately
+    treated as infra evidence: a downstream summary failure can be the only red
+    check after a runner never started.
     """
     if not ci.failed_jobs:
+        return True
+    if any(j.failure_reason == "cancelled_no_steps" for j in ci.failed_jobs):
         return True
     return all(j.failure_reason in _INFRA_REASONS for j in ci.failed_jobs)
 

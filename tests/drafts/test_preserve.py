@@ -373,3 +373,90 @@ def test_a_rewrite_that_would_not_read_back_is_refused(monkeypatch, tail, why):
     monkeypatch.setattr(preserve, "_keep_flow_lines", lambda _text, out: out + tail)
     with pytest.raises(preserve.RewriteError, match=why):
         preserve.rewrite("a: 1\n", {"a": 2})
+
+
+TASKS = """\
+nodes:
+  # the node
+  - id: feedback
+    kind: exec
+    tasks:
+      # the task
+      - id: review
+        kind: forge
+        target: mr.automated_review
+        # who we wait for
+        reviewers: [{bot: a}]
+        policy: {total_time_cap_minutes: 10}
+      # the sibling
+      - id: other
+        kind: forge
+        target: mr.ci
+"""
+
+
+def _after(text: str, line: str) -> str:
+    """The line after the first that is `line`, stripped."""
+    lines = [x.strip() for x in text.splitlines()]
+    return lines[lines.index(line) + 1]
+
+
+def test_a_template_rewrite_keeps_comments_by_entry_id_and_new_keys_in_place():
+    data = yaml.safe_load(TASKS)
+    review = data["nodes"][0]["tasks"][0]
+    data["nodes"][0]["tasks"][0] = {
+        **{k: v for k, v in review.items() if k not in ("reviewers", "policy")},
+        "config": {"reviewers": review["reviewers"]},
+        "policy": review["policy"],
+    }
+    written = preserve.rewrite(TASKS, data, identity_keys=("path", "id"), place_new_keys=True)
+    assert _after(written, "# the node") == "- id: feedback"
+    assert _after(written, "# the task") == "- id: review"
+    assert _after(written, "# who we wait for") == "config:"
+    assert _after(written, "# the sibling") == "- id: other"
+    assert "policy: {total_time_cap_minutes: 10}" in written
+
+
+#: The shipped library's shape: `wait` last in the component, a blank line,
+#: then the next component's own documentation.
+LIBRARY = """\
+tasks:
+  await_review:
+    kind: forge
+    target: mr.automated_review
+    policy:
+      total_time_cap_minutes: 30
+    wait:
+      grace_period: 60s
+      polling:
+        initial_interval: 30s
+
+  # Describes the MR.
+  describe_mr:
+    kind: agent
+    prompt: x
+
+  last:
+    kind: forge
+    target: mr.ci
+"""
+
+
+def test_a_key_added_at_the_end_leaves_the_next_components_comments_with_it():
+    data = yaml.safe_load(LIBRARY)
+    review = data["tasks"]["await_review"]
+    review["wait"].pop("grace_period")
+    review["config"] = {"grace_period": "60s"}
+    # Last in its component too, with only a blank line before the next.
+    data["tasks"]["describe_mr"]["model"] = "m"
+    written = preserve.rewrite(LIBRARY, data, identity_keys=("path", "id"), place_new_keys=True)
+    lines = written.splitlines()
+    at = lines.index("  # Describes the MR.")
+    assert lines[at - 3 : at + 2] == [
+        "    config:",
+        "      grace_period: 60s",
+        "",
+        "  # Describes the MR.",
+        "  describe_mr:",
+    ]
+    assert lines[lines.index("  last:") - 1] == ""

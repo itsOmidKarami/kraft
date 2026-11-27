@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildScenario, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { buildScenario, gateRoundsOf, t, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { ngDryRun } from "../e2e/contract/mocks/ngBoard";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
@@ -75,8 +75,8 @@ describe("transitions", () => {
       [["gate_approved", { gate: "final_review", by: "human" }, "final_review"], ["node_completed", { node_id: "final_review" }, "final_review"]]],
     ["reject goes back to the gate's reject_to", "needs-gate", (T, id) => T.reject(id, "final_review", "too vague"), { status: "active", display_status: "running", pending_gate: null, current_node_id: "implementation", attempts: [] },
       [["gate_rejected", { gate: "final_review", note: "too vague", node: "implementation", by: "human", verdict: "reject" }, "implementation"]]],
-    ["reject with no reject_to goes back to the exec node before the gate", "needs-gate", noRejectTo, { status: "active", current_node_id: "summary" },
-      [["gate_rejected", { node: "summary" }, "summary"]]],
+    ["reject with no reject_to goes back to the exec node before the gate", "needs-gate", noRejectTo, { status: "active", current_node_id: "work_item_summary" },
+      [["gate_rejected", { node: "work_item_summary" }, "work_item_summary"]]],
     ["pause stops the node's running session", "running", (T, id) => T.pause(id), { status: "paused", display_status: "paused" },
       [["pause_requested", { sessions: [expect.any(String)] }, null], ["worker_session_paused", { session_id: expect.any(String) }, null]]],
     ["resume runs a paused item again, its steer taken", "paused", (T, id, b) => ((b.item.pending_steer_context = "look at the race"), T.resume(id)), { status: "active", display_status: "running", current_node_id: "verification", pending_steer_context: null },
@@ -92,27 +92,28 @@ describe("transitions", () => {
       [["rewind_requested", { target: "implementation", note: "redo the cache" }, "implementation"], ["work_item_resumed", { steer: "redo the cache\n\nand bound it" }, null]]],
     ["retry honours a pending rewind", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }, "implementation"), T.retry(id)), { status: "active", current_node_id: "implementation" },
       [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }, "implementation"], ...forked("local_review")]],
-    ["a cancelled rewind is not honoured", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.append(id, "rewind_cancelled", { review_id: "r1" }), T.retry(id)), { current_node_id: "merge_request" },
-      [["rewind_requested"], ["rewind_cancelled"], ["work_item_retried", { node_id: "merge_request", steer: null }], ...forked()]],
+    ["a cancelled rewind is not honoured", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.append(id, "rewind_cancelled", { review_id: "r1" }), T.retry(id)), { current_node_id: "draft_merge_request" },
+      [["rewind_requested"], ["rewind_cancelled"], ["work_item_retried", { node_id: "draft_merge_request", steer: null }], ...forked()]],
+    // The failed sample's thread already holds the automatic turn that followed its stop: a person's turn is the next.
     ["escalate, retry, pause and resume: the retry stops the turn", "failed", (T, id) => (T.escalate(id, "look"), T.retry(id), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
-      [...turnStarted(), ["worker_session_paused"], ["work_item_retried"], ...forked(), ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
+      [...turnStarted({ turn: 2 }, undefined, 2), ["worker_session_paused"], ["work_item_retried"], ...forked(), ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
     ["escalate at a gate, approve, pause and resume: the approval stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.approve(id, "final_review"), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
-      [...turnStarted(), ["pause_requested", { sessions: [expect.any(String)] }], ["worker_session_paused"], ["gate_approved"], ["node_completed"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
+      [...turnStarted({ thread: 1, turn: 1 }), ["pause_requested", { sessions: [expect.any(String)] }], ["worker_session_paused"], ["gate_approved"], ["node_completed"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
     ["escalate at a gate, then reject: the rejection stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.reject(id, "final_review", "no")), { status: "active", escalation_threads: [expect.objectContaining({ status: "paused" })] },
-      [...turnStarted(), ["pause_requested"], ["worker_session_paused"], ["gate_rejected"]]],
+      [...turnStarted({ thread: 1, turn: 1 }), ["pause_requested"], ["worker_session_paused"], ["gate_rejected"]]],
     ["a thread no session stands for holds nothing up, and goes", "paused", (T, id, b) => ((b.item.escalation_threads = [{ thread: 1, session_id: "f".repeat(32), turns: 1, status: "running", ended_at: null }]), T.resume(id)), { status: "active", escalation_threads: [] },
       [["work_item_resumed"]]],
-    ["an end stops an escalation turn on another node too", "failed", (T, id, b) => (T.escalate(id, "look"), (b.item.current_node_id = "summary"), T.end(id, "cancel", "dup")), { status: "abandoned", escalation_threads: [expect.objectContaining({ status: "paused" })] },
-      [...turnStarted(), ["worker_session_paused"], ["work_item_cancelled", { node_id: "summary" }], ["work_item_abandoned"]]],
+    ["an end stops an escalation turn on another node too", "failed", (T, id, b) => (T.escalate(id, "look"), (b.item.current_node_id = "work_item_summary"), T.end(id, "cancel", "dup")), { status: "abandoned", escalation_threads: [expect.objectContaining({ status: "paused" })] },
+      [...turnStarted({ turn: 2 }, undefined, 2), ["worker_session_paused"], ["work_item_cancelled", { node_id: "work_item_summary" }], ["work_item_abandoned"]]],
     ["abandon twice reclaims again with no second event", "failed", (T, id) => (T.abandon(id), T.abandon(id)), { status: "abandoned" }, [["work_item_abandoned", {}, null]]],
-    ["retry runs a stopped item on its node", "failed", (T, id) => T.retry(id, "use the new token"), { status: "active", display_status: "running", stop: null, current_node_id: "merge_request" },
-      [["work_item_retried", { node_id: "merge_request", steer: "use the new token", escalated: false }, "merge_request"], ...forked()]],
-    ["skip passes the node it stands on", "failed", (T, id) => T.skip(id, "merge_request", "opened by hand"), { status: "active", display_status: "running", stop: null },
-      [["node_skipped", { node_id: "merge_request", gate: null, note: "opened by hand" }, "merge_request"]]],
+    ["retry runs a stopped item on its node", "failed", (T, id) => T.retry(id, "use the new token"), { status: "active", display_status: "running", stop: null, current_node_id: "draft_merge_request" },
+      [["work_item_retried", { node_id: "draft_merge_request", steer: "use the new token", escalated: false }, "draft_merge_request"], ...forked()]],
+    ["skip passes the node it stands on", "failed", (T, id) => T.skip(id, "draft_merge_request", "opened by hand"), { status: "active", display_status: "running", stop: null },
+      [["node_skipped", { node_id: "draft_merge_request", gate: null, note: "opened by hand" }, "draft_merge_request"]]],
     ["skip passes a pending gate", "needs-gate", (T, id) => T.skip(id, "final_review"), { status: "active", display_status: "running", pending_gate: null },
       [["node_skipped", { node_id: "final_review", gate: "final_review", note: null }, "final_review"]]],
-    ["skip passes one task by path", "failed", (T, id) => T.skip(id, "merge_request.open.open_draft"), { status: "active", display_status: "running" },
-      [["scope_skipped", { path: "merge_request.open.open_draft", note: null }, null]]],
+    ["skip passes one task by path", "failed", (T, id) => T.skip(id, "draft_merge_request.open.open"), { status: "active", display_status: "running" },
+      [["scope_skipped", { path: "draft_merge_request.open.open", note: null }, null]]],
     ["cancel ends it abandoned, its session stopped", "running", (T, id) => T.end(id, "cancel", "superseded"), { status: "abandoned", display_status: "cancelled" },
       [["worker_session_paused", {}, null], ["work_item_cancelled", { reason: "superseded", node_id: "verification" }, "verification"], ["work_item_abandoned", {}, null]]],
     ["complete ends it completed", "running", (T, id) => T.end(id, "complete", "landed elsewhere"), { status: "completed", display_status: "done" },
@@ -121,14 +122,25 @@ describe("transitions", () => {
     ["archive files an ended item away", "kraft-3a90", (T, id) => T.archive(id), { status: "completed", display_status: "archived", archived_by: "you", archived_at: AT },
       [["work_item_archived", { by: "you" }, null]]],
     ["restore puts it back under Done", "kraft-9a02", (T, id) => T.restore(id), { status: "completed", display_status: "done", archived_at: null }, [["work_item_restored", {}, null]]],
-    ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
-      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"], ...forked()]],
+    ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, current_step: 1, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
+      // Stopped before its code review, past its first step with no fix cycle run: the retry goes on at that step (`_stopped_step`).
+      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"],
+        ["run_forked", { scope: "step", path: "verification.review", reopened: [], preserved: [] }], ["cap_counters_reset", { by: "human", counters: {} }]]],
+    // The step cursor (`current_step`): written as a step's task starts (`set_current_step`), kept by re-entering the node
+    // the item stands on and reset by entering another (`store.enter_node`), reset by a rejection (`stand_at`), and set by
+    // a retry to where its fork starts (`RunFork.start`; a step retry's is the raise below). Each from a step it was not.
+    ["a task's session records its step", "running", (T, id, b) => ((b.item.current_step = 0), T.createSession(id, "verification", "verification.review.code_review")), { current_step: 1 },
+      [["worker_session_created", { hook_point: "verification.review.code_review" }, "verification"]]],
+    ["entering the node it stands on keeps its step", "running", (T, id, b) => ((b.item.current_step = 1), T.enterNode(id, "verification")), { current_step: 1 }, [["node_started", { node_id: "verification" }, "verification"]]],
+    ["entering another node starts at its first step", "running", (T, id, b) => ((b.item.current_step = 1), T.enterNode(id, "work_brief")), { current_node_id: "work_brief", current_step: 0 }, [["node_started", { node_id: "work_brief" }, "work_brief"]]],
+    ["a rejection starts its target at its first step", "needs-gate", (T, id, b) => ((b.item.current_step = 1), T.reject(id, "final_review", "too vague")), { current_node_id: "implementation", current_step: 0 }, [["gate_rejected"]]],
+    ["a node retry starts at its first step", "failed", (T, id, b) => ((b.item.current_step = 1), T.retry(id)), { current_step: 0 }, [["work_item_retried"], ...forked()]],
     ["escalate starts a turn in a new thread", "failed", (T, id) => T.escalate(id, "look at the token", true), { status: "needs_human", display_status: "escalated" },
-      turnStarted({ message: "look at the token", auto: false, thread: 1, turn: 1 }, "merge_request")],
+      turnStarted({ message: "look at the token", auto: false, thread: 2, turn: 1 }, "draft_merge_request", 2)],
     ["stop escalation ends the turn, the item as it stopped", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id)), { status: "needs_human", display_status: "failed" },
-      [...turnStarted({ turn: 1 }, "merge_request"), ["worker_session_paused", { session_id: expect.any(String) }, null]]],
+      [...turnStarted({ turn: 2 }, "draft_merge_request", 2), ["worker_session_paused", { session_id: expect.any(String) }, null]]],
     ["a stopped escalation takes the next turn", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id), T.escalate(id, "again")), { display_status: "escalated" },
-      [...turnStarted({ turn: 1 }), ["worker_session_paused"], ...turnStarted({ message: "again", thread: 1, turn: 2 }, undefined, 2)]],
+      [...turnStarted({ turn: 2 }, undefined, 2), ["worker_session_paused"], ...turnStarted({ message: "again", thread: 1, turn: 3 }, undefined, 3)]],
     ["a title edit", "running", (T, id) => T.patch(id, { title: "Cache embeddings by hash" }), { title: "Cache embeddings by hash", display_status: "running" },
       [["work_item_title_edited", { title: "Cache embeddings by hash" }, null]]],
     ["a description edit", "running", (T, id) => T.patch(id, { description: "Bound the cache." }), { description: "Bound the cache." },
@@ -207,22 +219,22 @@ describe("transitions", () => {
 
 describe("the rate-limit poller's count", () => {
   /** `n` relaunches the poller wrote on `node`. */
-  const relaunched = (T: Transitions, id: string, n: number, node = "verification") => {
+  const relaunched = (T: Transitions, id: string, n: number, node = "implementation") => {
     for (let k = 0; k < n; k++) T.append(id, "work_item_retried", { node_id: node, loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false });
   };
-  const stopped = (n: number) => ({ type: "work_item_needs_human", payload: { node_id: "verification", reason: `rate_limit retries exhausted after ${n} attempt(s)`, kind: "cap" } });
+  const stopped = (n: number) => ({ type: "work_item_needs_human", payload: { node_id: "implementation", reason: `rate_limit retries exhausted after ${n} attempt(s)`, kind: "cap" } });
   // Each row's cap is the count it should read, so the poll stops and its reason says the count.
   it.each<[string, (T: Transitions, id: string) => void, number]>([
-    // kraft-e410's row says 2 of 5: the two relaunches its events hold.
+    // kraft-e410 (docs_only, so on implementation) says 2 of 5: the two relaunches its events hold.
     ["the sample's two relaunches", () => {}, 2],
     ["more relaunches on its node, read off its events", (T, id) => relaunched(T, id, 3), 5],
     // The counter is never reset: a stop past the retries is a bump too, and a person's retry is none.
     ["a stop past its retries, then a person's retry", (T, id) => {
       relaunched(T, id, 3);
-      T.append(id, "work_item_needs_human", { node_id: "verification", reason: "rate_limit retries exhausted after 5 attempt(s)", kind: "cap" });
-      T.append(id, "work_item_retried", { node_id: "verification", loop: null, steer: "try again", escalated: false, seeded: false });
+      T.append(id, "work_item_needs_human", { node_id: "implementation", reason: "rate_limit retries exhausted after 5 attempt(s)", kind: "cap" });
+      T.append(id, "work_item_retried", { node_id: "implementation", loop: null, steer: "try again", escalated: false, seeded: false });
     }, 6],
-    ["another node's relaunches", (T, id) => relaunched(T, id, 5, "implementation"), 2],
+    ["another node's relaunches", (T, id) => relaunched(T, id, 5, "spec"), 2],
   ])("%s", (_name, setup, count) => {
     const { S, T } = fresh();
     const id = idOf(S, "kraft-e410");
@@ -262,7 +274,7 @@ describe("refusals", () => {
     ["approve, a node that is not a gate", "needs-gate", (T, id) => T.approve(id, "verification"), 404, "unknown gate 'verification'"],
     ["approve, an open must-fix", "needs-gate", (T, id) => T.approve(id, "final_review"), 409, "must-fix review threads are not resolved: th-must, th-two", { mustFix: ["th-must", "th-two"] }],
     ["approve, an ended item", "done", (T, id) => T.approve(id, "final_review"), 409, "work item is completed; its chain does not run again"],
-    ["reject forward, past the gate", "needs-gate", (T, id) => T.reject(id, "final_review", "no", "release"), 400, "cannot reject to 'release': not a node of this chain before 'final_review'"],
+    ["reject forward, past the gate", "needs-gate", (T, id) => T.reject(id, "final_review", "no", "post_merge_ci"), 400, "cannot reject to 'post_merge_ci': not a node of this chain before 'final_review'"],
     ["pause, a paused item", "paused", (T, id) => T.pause(id), 409, "work item is paused, not running"],
     ["resume, a running item", "running", (T, id) => T.resume(id), 409, "work item is active: it is running, so pause it first"],
     ["resume, at a gate", "needs-gate", (T, id) => T.resume(id), 409, "work item is waiting at its final_review gate, not paused: approve or reject it (kraft item approve ID, or kraft item reject ID --note ...)"],
@@ -271,9 +283,9 @@ describe("refusals", () => {
     ["retry, a paused item", "paused", (T, id) => T.retry(id), 409, "work item is paused, not stopped: resume it instead, or skip what it would run"],
     ["retry, a running item", "running", (T, id) => T.retry(id), 409, "work item is not stopped"],
     ["retry, never started", "kraft-f5d3", (T, id) => T.retry(id), 409, "work item has no current node to retry"],
-    ["skip, an ended item", "done", (T, id) => T.skip(id, "release"), 409, "work item is completed, cannot skip"],
-    ["skip, another node", "failed", (T, id) => T.skip(id, "release"), 409, "path: 'release' is not the node the item stands on ('merge_request') or its pending gate"],
-    ["skip, an escalation turn running", "failed", (T, id) => T.skip(id, "merge_request"), 409, "an escalation turn (SESSION) is already running", escalated],
+    ["skip, an ended item", "done", (T, id) => T.skip(id, "post_merge_ci"), 409, "work item is completed, cannot skip"],
+    ["skip, another node", "failed", (T, id) => T.skip(id, "post_merge_ci"), 409, "path: 'post_merge_ci' is not the node the item stands on ('draft_merge_request') or its pending gate"],
+    ["skip, an escalation turn running", "failed", (T, id) => T.skip(id, "draft_merge_request"), 409, "an escalation turn (SESSION) is already running", escalated],
     ["cancel, no reason", "running", (T, id) => T.end(id, "cancel", "  "), 422, "reason: a terminal action needs a reason"],
     ["cancel, an ended item", "done", (T, id) => T.end(id, "cancel", "dup"), 409, "work item is already completed"],
     ["abandon, a running item", "running", (T, id) => T.abandon(id), 409, "work item is active; pause it before abandoning"],
@@ -371,7 +383,7 @@ describe("the review doors", () => {
   it.each([
     ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "gate_reopened", "run_forked", "cap_counters_reset", "review_submitted"], "implementation"],
     ["a running item at the target reruns it", "kraft-91bc", "verification", "rerun", "active", ["rewind_requested", "pause_requested", "worker_session_paused", "work_item_resumed", "review_submitted"], "verification"],
-    ["a paused item waits for it", "kraft-4e19", "implementation", "queued", "paused", ["rewind_requested", "review_submitted"], "verification"],
+    ["a paused item waits for it", "kraft-4e19", "spec", "queued", "paused", ["rewind_requested", "review_submitted"], "implementation"],
   ])("with no gate pending, request changes: %s", async (_name, bead, node, action, status, types, at) => {
     const { S, call } = server();
     const id = idOf(S, bead);
@@ -428,7 +440,33 @@ describe("samples and answers as the server shapes them", () => {
 
   it("a node retry answers the node as its path", async () => {
     const { S, call } = server();
-    expect((await call("POST", `/work-items/${idOf(S, "kraft-b108")}/retry`, {})).body).toMatchObject({ node_id: "merge_request", path: "merge_request" });
+    expect((await call("POST", `/work-items/${idOf(S, "kraft-b108")}/retry`, {})).body).toMatchObject({ node_id: "draft_merge_request", path: "draft_merge_request" });
+  });
+  // `_stopped_step`: a plain retry after a cap or budget stop past a node's first step reruns that step, the first attempt
+  // of its task; at the first step, or once the node's fix loop has run, the whole node.
+  it.each<[string, string, (b: ItemBundle) => void, string, number]>([
+    ["a spend stop before the code review, raised", "kraft-58e2", () => {}, "verification.review", 1],
+    ["a time cap at the code review", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "cap" }; }, "verification.review", 1],
+    ["a spend stop at the node's first step", "kraft-58e2", (b) => { b.item.current_step = 0; }, "verification", 2],
+    ["a spend stop after a fix cycle", "kraft-58e2", (b) => { b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }); }, "verification", 2],
+    // A rejection that re-runs the node gives its fix rounds back (`counters.reset_fix_loops`): no fix has run since.
+    ["a spend stop after a fix cycle and a rejection that re-ran the node", "kraft-58e2", (b) => {
+      b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }, { ...b.events.at(-1)!, type: "gate_rejected", payload: { gate: "local_review", note: "again", node: "implementation", by: "human", verdict: "reject" } });
+    }, "verification.review", 1],
+    ["a spend stop after a fix cycle and a rejection to a node after it", "kraft-58e2", (b) => {
+      b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }, { ...b.events.at(-1)!, type: "gate_rejected", payload: { gate: "local_review", note: "again", node: "work_brief", by: "human", verdict: "reject" } });
+    }, "verification", 2],
+    // Only a cap or a spend stop says nothing about the steps passed: any other stop reruns the node.
+    ["a stuck stop at its second step", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "stuck" }; }, "verification", 2],
+    ["a failed stop at its second step", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "failed" }; }, "verification", 2],
+    // A rewind names its own path: the whole node it points at, even the one the item stopped in.
+    ["a spend stop with a rewind pending", "kraft-58e2", (b) => { b.events.push({ ...b.events.at(-1)!, type: "rewind_requested", payload: { review_id: "r1", target: "verification", note: "redo it" } }); }, "verification", 2],
+  ])("%s retries %s at its stopped step", async (_name, bead, setup, path, attempt) => {
+    const { S, call } = server();
+    const b = S.bundles[idOf(S, bead)];
+    setup(b);
+    const r = b.item.stop.kind === "budget" ? await call("POST", `/work-items/${b.item.id}/budget/raise`, { budget_usd: 40 }) : await call("POST", `/work-items/${b.item.id}/retry`, {});
+    expect([r.status, r.body.path, r.body.attempt, b.events.filter((e) => e.type === "run_forked").at(-1)?.payload.path]).toEqual([200, path, attempt, path]);
   });
 
   it("the spend-capped sample says so in its stop, its last event and its spend", () => {
@@ -436,58 +474,60 @@ describe("samples and answers as the server shapes them", () => {
     const b = S.bundles[idOf(S, "kraft-58e2")];
     expect(b.item.stop).toMatchObject({ kind: "budget", scope: "work_item" });
     expect(b.item.stop.facts).toEqual({});
-    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "verification", reason: "Spend cap reached · $5.00 of $5.00", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
+    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "verification", reason: "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
     const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
     expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
-    // A spend cap interrupts nothing: the session that spent the last of it ran to its end, then the walk stopped.
+    // A spend cap interrupts nothing: the agent that spent the last of it ran to its end, verification's tests (no agent,
+    // no spend) ran, and the walk stopped on verification before its code review launched. Its stop's task, attempt and
+    // step are the node's latest session's, the tests' (`board._stop_task_and_attempt`, `_step_of`), as are the row's.
     expect(b.sessions.filter((s) => s.status !== "done")).toEqual([]);
-    const last = b.sessions.at(-1);
-    expect([last.hook_point, last.attempt, last.session_summary_ref, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification.review.code_review", 2, `.engineering/sessions/${last.id}.md`, "verification.review.code_review", 2]);
+    const agent = b.sessions.filter((s) => s.model).at(-1);
+    expect([agent.hook_point, agent.session_summary_ref, b.sessions.slice(b.sessions.indexOf(agent) + 1).map((s) => s.hook_point)]).toEqual(["implementation.main.implement", `items/${b.item.id}/sessions/${agent.id}/out/summary.md`, ["verification.tests.test_changed_scopes", "verification.tests.test_changed_scopes"]]);
+    expect([b.item.current_node_id, b.item.stop.node, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification", "verification", "verification.tests.test_changed_scopes", 1]);
+    expect([b.item.summary.step, b.item.step]).toEqual([{ index: 1, count: 2 }, { index: 1, count: 2, name: "tests", task: "test_changed_scopes" }]);
   });
 
   it.each([
     // A time cap stops its session (`session_exited`, capped_out); a spend cap, a stuck fix loop and a question let the
     // attempt finish first. Each exit reports the agent's usage.
-    ["kraft-7d21, stopped by its running-time cap", "kraft-7d21", "capped_out"],
-    ["kraft-58e2, stopped by its spend cap", "kraft-58e2", "done"],
-    ["kraft-2c77, stuck, its fix loop making no progress", "kraft-2c77", "done"],
-    ["kraft-a3f0, stopped on its agent's question", "kraft-a3f0", "done"],
-  ])("%s: its last attempt's exit is on the timeline before the stop, and Recent has it ended", (_name, bead, status) => {
+    ["kraft-7d21, stopped by its running-time cap", "kraft-7d21", "implementation.main.implement", "capped_out"],
+    ["kraft-58e2, stopped by its spend cap", "kraft-58e2", "implementation.main.implement", "done"],
+    // Its last attempt is the repair that changed nothing.
+    ["kraft-2c77, stuck, its fix loop making no progress", "kraft-2c77", "verification.fix_loop.main.repair", "done"],
+    ["kraft-a3f0, stopped on its agent's question", "kraft-a3f0", "verification.review.code_review", "needs_context"],
+  ])("%s: its last attempt's exit is on the timeline before the stop, and Recent has it ended", (_name, bead, hook, status) => {
     const { S } = server();
     const b = S.bundles[idOf(S, bead)];
-    const last = b.sessions.filter((s) => s.hook_point === "verification.review.code_review").at(-1);
+    const last = b.sessions.filter((s) => s.hook_point === hook).at(-1);
+    const node = hook.split(".")[0];
     const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === last.id)!;
     const stop = b.events.filter((e) => e.type === "work_item_needs_human").at(-1)!;
     expect(last.status).toBe(status);
-    expect(exit.payload).toEqual({ session_id: last.id, status, wall_ms: last.wall_ms, model: "claude-sonnet-4-5", tokens_in: last.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: last.tokens_out, cost_usd: last.cost_usd });
+    expect(exit.payload).toEqual({ session_id: last.id, status, wall_ms: last.wall_ms, model: "claude-sonnet-5-5", tokens_in: last.tokens_in, tokens_cache_write: last.tokens_cache_write, tokens_cache_read: last.tokens_cache_read, tokens_out: last.tokens_out, cost_usd: last.cost_usd });
     expect([last.exited_at, exit.seq < stop.seq]).toEqual([exit.created_at, true]);
-    expect(recent(b.events as any).map((l) => l.line)).not.toContain("a session is running on verification");
+    expect(recent(b.events as any).map((l) => l.line)).not.toContain(`a session is running on ${node}`);
   });
 
   it.each([
     // A person's stop ends the running attempt with `worker_session_paused`, never an exit: `store.pause_work_item`
     // after the pause it names the session in, `store.end_work_item` before the end.
-    ["kraft-4e19, paused", "kraft-4e19", ["pause_requested", "worker_session_paused"]],
-    ["kraft-7c40, paused, then queued on resume", "kraft-7c40", ["pause_requested", "worker_session_paused"]],
-    ["kraft-b2e7, paused, then blocked on resume", "kraft-b2e7", ["pause_requested", "worker_session_paused"]],
-    ["kraft-88ca, cancelled", "kraft-88ca", ["worker_session_paused", "work_item_cancelled", "work_item_abandoned"]],
-  ])("%s: its stopped attempt is paused on the timeline as the store writes it, and Recent has it ended", (_name, bead, order) => {
+    // docs_only, so on implementation.
+    ["kraft-4e19, paused", "kraft-4e19", "implementation.main.implement", ["pause_requested", "worker_session_paused"]],
+    ["kraft-7c40, paused, then queued on resume", "kraft-7c40", "verification.review.code_review", ["pause_requested", "worker_session_paused"]],
+    ["kraft-b2e7, paused, then blocked on resume", "kraft-b2e7", "verification.review.code_review", ["pause_requested", "worker_session_paused"]],
+    ["kraft-88ca, cancelled", "kraft-88ca", "verification.review.code_review", ["worker_session_paused", "work_item_cancelled", "work_item_abandoned"]],
+  ])("%s: its stopped attempt is paused on the timeline as the store writes it, and Recent has it ended", (_name, bead, hook, order) => {
     const { S } = server();
     const b = S.bundles[idOf(S, bead)];
-    const last = b.sessions.filter((s) => s.hook_point === "verification.review.code_review").at(-1);
-    const ends = b.events.filter((e) => e.payload.session_id === last.id && e.type !== "worker_session_started");
+    const last = b.sessions.filter((s) => s.hook_point === hook).at(-1);
+    const ends = b.events.filter((e) => e.payload.session_id === last.id && e.type !== "worker_session_created" && e.type !== "worker_session_started");
     expect([last.status, ends.map((e) => [e.type, e.payload]), last.exited_at]).toEqual(["paused", [["worker_session_paused", { session_id: last.id }]], ends[0]?.created_at]);
     // No writer sets a paused row's wall time: it is its stamps' span (`_common.session_wall_ms`).
     expect(last.wall_ms).toBe(Date.parse(last.exited_at) - Date.parse(last.started_at));
     // `toBe` passes NaN against NaN: a span of missing stamps would slip through without this.
     expect(last.wall_ms).toBeGreaterThan(0);
     expect(b.events.filter((e) => order.includes(e.type)).map((e) => [e.type, e.type === "pause_requested" ? e.payload.sessions : undefined])).toEqual(order.map((t) => [t, t === "pause_requested" ? [last.id] : undefined]));
-    expect(recent(b.events as any).map((l) => l.line)).not.toContain("a session is running on verification");
-  });
-
-  it("kraft-a3f0's escalation turns count their attempts as `store.create_session` does", () => {
-    const { S } = server();
-    expect(S.bundles[idOf(S, "kraft-a3f0")].sessions.filter((s) => s.hook_point === "escalation").map((s) => s.attempt)).toEqual([1, 2]);
+    expect(recent(b.events as any).map((l) => l.line)).not.toContain(`a session is running on ${hook.split(".")[0]}`);
   });
 });
 
@@ -510,7 +550,7 @@ describe("a created item", () => {
     const detail = (await call("GET", `/work-items/${id}`)).body;
     // The chain the composer's dry run showed: docs_only, less what the spec covers.
     const nodes = (ngDryRun(body).body as { nodes: { id: string }[] }).nodes.map((n) => n.id);
-    expect(nodes).toEqual(["implementation", "work_brief", "merge_request"]);
+    expect(nodes).toEqual(["implementation", "work_brief", "draft_merge_request"]);
     expect(detail).toMatchObject({
       id, title: "Cache embeddings by hash", description: "Bound it.", display_status: shown, worker_sessions: [],
       chain_definition: { template_id: "docs_only" }, effective_chain: { template_id: "docs_only" },
@@ -539,7 +579,33 @@ describe("a created item", () => {
     sample.item.title = "edited"; sample.item.budget_cap.spent_usd = 99; sample.sessions.length = 0;
     const id = (await call("POST", "/work-items", { title: "fresh" })).body.id;
     const detail = (await call("GET", `/work-items/${id}`)).body;
-    expect([detail.title, detail.budget_cap.spent_usd, detail.chain_definition.nodes.length]).toEqual(["fresh", 0, 15]);
+    expect([detail.title, detail.budget_cap.spent_usd, detail.chain_definition.nodes.length]).toEqual(["fresh", 0, 19]);
+  });
+
+  it.each([
+    // Each chain the composer lists, its nodes and its fix loops' caps: the frozen loop's attempts, the policy's wall clock.
+    ["default", 19, { verification: { attempts: 2, wall_clock_s: 3600 }, merge_request_feedback: { attempts: 3, wall_clock_s: 3600 } }],
+    ["quick-task", 2, {}],
+    ["docs_only", 5, {}],
+  ])("the composer, the dry run and a new item read one list: %s", async (chain, count, caps) => {
+    const { call } = server();
+    const listed = (await call("GET", "/templates/chains")).body.find((c: any) => c.id === chain);
+    const dry = (await call("POST", "/work-items?dry_run=true", { title: "x", chain_template: chain })).body;
+    expect([listed.nodes.length, dry.nodes.map((n: any) => n.id), dry.caps.nodes]).toEqual([count, listed.nodes.map((n: any) => n.id), caps]);
+    const id = (await call("POST", "/work-items", { title: "x", chain_template: chain })).body.id;
+    const detail = (await call("GET", `/work-items/${id}`)).body;
+    // The new item freezes its own template's chain, every node of it.
+    expect(JSON.parse(detail.materialized_chain).chain.nodes.map((n: any) => n.id)).toEqual(listed.nodes.map((n: any) => n.id));
+  });
+
+  it("refuses a chain the server has no template for, filing nothing", async () => {
+    const { S, call } = server();
+    const had = S.ngBoard.length;
+    // `deps.resolve_chain_or_422`: the resolver's own words, the chains it knows listed as Python prints a list.
+    const refused = { status: 422, body: { detail: "chain 'nope': no chain 'nope' in this library; known chains: ['default', 'quick-task', 'docs_only', 'team-default']" } };
+    expect(await call("POST", "/work-items", { title: "x", chain_template: "nope" })).toEqual(refused);
+    expect(await call("POST", "/work-items?dry_run=true", { title: "x", chain_template: "nope" })).toEqual(refused);
+    expect(S.ngBoard.length).toBe(had);
   });
 
   it("is filed in the empty scenario too", async () => {
@@ -630,5 +696,72 @@ describe("a chain draft, kept for the server's life", () => {
     await call("POST", "/publish");
     const after = (await call("GET")).body;
     expect([after.draft, after.result.changes, (await call("POST", "/undo")).status]).toEqual([false, [], 409]);
+  });
+});
+
+describe("gate_rounds on the item", () => {
+  it("shows a rejection's round, with its note, the moment the door settles", () => {
+    const { S, T } = fresh();
+    const id = idOf(S, "needs-gate");
+    const before = S.bundles[id].item.gate_rounds.final_review ?? [];
+    T.reject(id, "final_review", "too vague");
+    const rounds = S.bundles[id].item.gate_rounds.final_review;
+    expect(rounds).toHaveLength(Math.max(before.length, 1));
+    expect(rounds.at(-1)).toMatchObject({ outcome: "rejected", by: "human", note: "too vague", sent_to: "implementation", ended_at: AT });
+  });
+
+  // After the reject cap nothing is pending, so a skip of the gate carries `gate: null` and only the node (`lifecycle`).
+  it.each([
+    ["a skip after the cap, naming the gate by its node, is a round of its own", "g", ["rejected", "skipped"]],
+    ["a skip of a node that is no gate is no round", "verification", ["rejected"]],
+  ])("%s", (_name, node, outcomes) => {
+    const at = (type: string, payload: Record<string, unknown>) => ({ seq: 1, work_item_id: "w", type, node_id: "g", payload, created_at: AT }) as never;
+    const rounds = gateRoundsOf([at("gate_requested", { gate: "g" }), at("gate_rejected", { gate: "g", by: "human", note: "no", node: "plan" }), at("node_skipped", { node_id: node, gate: null, note: null })]);
+    expect(rounds.g.map((r) => r.outcome)).toEqual(outcomes);
+    expect(Object.keys(rounds)).toEqual(["g"]);
+  });
+
+  it("the demo's final-review item has a rejected review round, and the threads endpoint answers with the same window", async () => {
+    const { S, call } = server();
+    const id = idOf(S, "needs-gate");
+    const read = async (n: number) => await call("GET", `/work-items/${id}/threads?gate=final_review&round=${n}`);
+    await call("GET", `/work-items/${id}/threads`); // seeds the list the counts read
+    const [one, two] = S.bundles[id].item.gate_rounds.final_review;
+    expect([one.outcome, one.review?.outcome, one.threads.total, two.outcome]).toEqual(["rejected", "request_changes", 2, "pending"]);
+    expect((await read(1)).body).toHaveLength(one.threads.total);
+    expect((await read(2)).body).toHaveLength(two.threads.total);
+    expect((await read(2)).body.map((t: { id: string }) => t.id)).not.toContain("th-draft");
+    expect((await read(9)).status).toBe(404);
+    expect((await call("GET", `/work-items/${id}/threads?round=1`)).status).toBe(400);
+  });
+
+  it("the demo's round-1 threads quote their code, each line led by its diff mark, on the lines they sit on", async () => {
+    const { S, call } = server();
+    const { body } = await call("GET", `/work-items/${idOf(S, "needs-gate")}/threads?gate=final_review&round=1`);
+    expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["th-r1-must", "th-r1-q"]);
+    for (const t of body) {
+      const lines = t.quote.split("\n");
+      expect(lines.every((l: string) => /^[ +-]/.test(l))).toBe(true);
+      // One line for each line of the range: what a thread on those lines quotes.
+      expect(lines).toHaveLength(t.end_line - t.start_line + 1);
+    }
+  });
+
+  it("a round holds what was made after the previous one ended, up to and including its own end", () => {
+    const at = (type: string, payload: Record<string, unknown>, minute: number) => ({ seq: minute, work_item_id: "w", type, node_id: "g", payload, created_at: t(minute) }) as never;
+    const thread = (id: string, minute: number, over: Record<string, unknown> = {}) => ({ id, gate: "g", created_at: t(minute), label: "nit", state: "open", draft: false, comments: [{ body: id }], ...over });
+    const rounds = gateRoundsOf(
+      [at("gate_requested", { gate: "g" }, 1), at("gate_rejected", { gate: "g", by: "human", note: "no", node: "plan" }, 5), at("gate_requested", { gate: "g" }, 6)],
+      [thread("at-the-end", 5), thread("after", 6), thread("a-draft", 6, { draft: true })],
+      [{ id: "rv", gate: "g", outcome: "comment", submitted_at: t(5) }],
+    );
+    expect(rounds.g.map((r) => [r.threads.total, r.first_threads.map((x) => x.id), r.review?.id ?? null])).toEqual([[1, ["at-the-end"], "rv"], [1, ["after"], null]]);
+  });
+
+  it("gives the long item's plan gate its rejected round first, then its approval", () => {
+    const S = buildScenario("long");
+    const rounds = Object.values(S.bundles).map((b) => b.item.gate_rounds.plan_approval).find((r) => r?.length === 2);
+    expect(rounds?.map((r: { outcome: string }) => r.outcome)).toEqual(["rejected", "approved"]);
+    expect(rounds?.[0].note).toMatch(/invalidation story/);
   });
 });

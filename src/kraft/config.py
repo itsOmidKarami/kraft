@@ -212,6 +212,66 @@ def write_preserving(path: str | Path, data: dict) -> None:
         write_yaml(path, data)
 
 
+#: Beside a template file: the file as it was before Kraft first wrote it in the
+#: `config:` form. Written once and never overwritten; deleted with its file
+#: when a publish deletes or renames that chain.
+PRE_CONFIG = ".pre-config"
+KEPT_ANCHORS = "kept in the old form: this file uses YAML anchors, which Kraft does not rewrite"
+KEPT_UNSAFE = "kept in the old form: Kraft could not rewrite it safely"
+KEPT_NO_BACKUP = "kept in the old form: Kraft could not keep a copy of the file on disk first"
+
+
+def write_template(path: str | Path, text: str) -> tuple[str, str | None]:
+    """Write a chain or library file Kraft saves, in the `config:` form
+    (`kraft-saves-templates-in-the-config-form`): the text written, and why it
+    was kept in the old form, if it was. A save is never refused for the lift."""
+    from kraft.drafts import preserve
+
+    path = Path(path)
+    backup = path.with_name(path.name + PRE_CONFIG)
+    lifted = _flat_template(text)
+    written, warning = text, None
+    try:
+        old = path.read_text() if path.is_file() else None
+        if old is not None and _flat_template(old) is not None and not backup.exists():
+            write_text(backup, old)
+    except (OSError, UnicodeDecodeError):
+        # No copy of the file on disk: never rewrite it, never refuse the save.
+        lifted, warning = None, (KEPT_NO_BACKUP if lifted is not None else None)
+    if lifted is not None:
+        try:
+            if _uses_anchors(text):
+                warning = KEPT_ANCHORS
+            else:
+                written = preserve.rewrite(
+                    text, lifted, identity_keys=("path", "id"), place_new_keys=True
+                )
+        except Exception:  # noqa: BLE001 -- any failure writes the text as given
+            written, warning = text, KEPT_UNSAFE
+    write_text(path, written)
+    if warning:
+        logger.warning("%s: %s", path, warning)
+    return written, warning
+
+
+def _flat_template(text: str) -> dict | None:
+    """`text`'s mapping in the `config:` form, or None when it holds no flat key."""
+    from kraft.templates.models import lift_tasks
+
+    try:
+        data = safe_load(text)
+    except (yaml.YAMLError, ValueError):
+        return None
+    return data if isinstance(data, dict) and lift_tasks(data) else None
+
+
+def _uses_anchors(text: str) -> bool:
+    """`safe_load` expands anchors and `<<` invisibly; the event stream shows them."""
+    return any(
+        isinstance(e, yaml.AliasEvent) or getattr(e, "anchor", None) for e in yaml.parse(text)
+    )
+
+
 # ── repos ────────────────────────────────────────────────────────────────────
 
 REPOS_DEFAULT: dict = {"repos": []}
@@ -229,15 +289,20 @@ class TestScope(BaseModel):
     #: the changed paths, and runs only the tests the change affects.
     #: `RepoEntry._scope_commands_name_one_scope` checks the whole table.
     targeted_command: StrictStr | None = Field(default=None, min_length=1)
+    #: Scopes naming the same group run one at a time on the local worker, across every repo
+    #: and item (`local_link._Row.take`): a suite that fills the machine on its own. The same
+    #: rule as `kraft.templates.environment.Identifier`, which imports this module.
+    concurrency_group: StrictStr | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]*$")
 
     @model_serializer(mode="wrap")
-    def _omit_an_unset_targeted_command(self, handler: SerializerFunctionWrapHandler) -> dict:
+    def _omit_unset_optionals(self, handler: SerializerFunctionWrapHandler) -> dict:
         """A scope without one is written as it was read: Settings re-saves
         what `load_repos` returns, and a `targeted_command: null` is not what
         the operator wrote."""
         data = handler(self)
-        if data.get("targeted_command") is None:
-            data.pop("targeted_command", None)
+        for key in ("targeted_command", "concurrency_group"):
+            if data.get(key) is None:
+                data.pop(key, None)
         return data
 
     # Deliberately does *not* synthesize a `["**"]` scope from a legacy
@@ -395,6 +460,12 @@ class RepoEntry(BaseModel):
     #: waiting on checks that never come (Kraft-9efnk.12). Opt-in: an absent
     #: key waits, as before.
     ci_checks: bool = True
+    #: Failed-job name globs (`fnmatch`, case-insensitive) that are publish
+    #: jobs, such as a deploy to Pages. A red post-merge pipeline whose every
+    #: failed job matches still files the follow-up bead but pauses no item
+    #: (`merge_watch`). Opt-in: an absent key or `[]` means no job is a
+    #: publish job, so any red post-merge pipeline pauses items as before.
+    post_merge_publish_jobs: list[Annotated[str, Field(min_length=1)]] = []
     #: Take changes to this repository's accepted repo library without a
     #: person, when nothing but text changed (`addons.repo_library.check_all`).
     #: Never a first load.
@@ -483,8 +554,10 @@ class RepoEntry(BaseModel):
             (f"test_scopes[{i}]", s.command, s.targeted_command)
             for i, s in enumerate(self.test_scopes or ())
         ]
+        groups: list[str | None] = [s.concurrency_group for s in self.test_scopes or ()]
         if not rows and self.test_command:
             rows.append(("test_command", self.test_command, None))
+            groups.append(None)
         setups: set[str] = set()
         for name, area in self.areas.items():
             if area.get("setup"):
@@ -492,6 +565,7 @@ class RepoEntry(BaseModel):
             for i, scope in enumerate((area.get("verification") or {}).get("test_scopes", ())):
                 where = f"areas.{name}.verification.test_scopes[{i}]"
                 rows.append((where, scope["command"], scope.get("targeted_command")))
+                groups.append(scope.get("concurrency_group"))
 
         def refuse(where: str, message: str) -> ValueError:
             return ValueError(f"repos.yaml: {self.path}: {where}: {message}")
@@ -520,6 +594,13 @@ class RepoEntry(BaseModel):
                     where,
                     f"scopes sharing the command {command!r} must share their targeted_command",
                 )
+        group_of: dict[str, str | None] = {}
+        for (where, command, _), group in zip(rows, groups, strict=True):
+            if group_of.setdefault(command_key(command), group) != group:
+                raise refuse(
+                    where,
+                    f"scopes sharing the command {command!r} must share their concurrency_group",
+                )
         owner_of_targeted: dict[str, str] = {}
         for (where, command, _), key in zip(rows, targeted_keys, strict=True):
             if key is None:
@@ -533,6 +614,22 @@ class RepoEntry(BaseModel):
             if key in setups:
                 raise refuse(where, f"targeted_command {key!r} is also an area's setup")
         return self
+
+    def concurrency_group_of(self, command: str) -> str | None:
+        """The `concurrency_group` of the scope whose `command` or `targeted_command` is
+        `command` (a session's recorded command), or None. Scopes sharing a command share
+        their group (`_scope_commands_name_one_scope`), so the first match is the answer."""
+        key = command_key(command)
+        scopes = [s.model_dump() for s in self.test_scopes or ()] + [
+            scope
+            for area in self.areas.values()
+            for scope in (area.get("verification") or {}).get("test_scopes") or []
+        ]
+        for scope in scopes:
+            commands = (scope["command"], scope.get("targeted_command"))
+            if any(c and command_key(c) == key for c in commands):
+                return scope.get("concurrency_group")
+        return None
 
     @field_validator("intent_dir")
     @classmethod

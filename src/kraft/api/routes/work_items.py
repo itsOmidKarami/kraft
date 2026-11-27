@@ -425,6 +425,7 @@ def _one_off_approval(request: Request, body: NewWorkItem, record: dict) -> dict
 
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
+    """File a work item. It is created paused unless `autostart` is set."""
     st = request.app.state
     if st.invalid_policy:
         # Spec §9: a malformed policy.yaml makes the process refuse work, same
@@ -1312,6 +1313,7 @@ _CHAIN_FIXED = store.STARTING_REFUSAL
 
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
+    """Revise a work item that has not started: its title, description, chain or attachments."""
     st = request.app.state
     # The fields `kraft` guards with `_forbid_self_action`, plus the budget: a
     # worker raising its own dollar cap is the same self-action. Title and
@@ -1326,6 +1328,22 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         deps.forbid_self_action(st, request, wid, escalation_may=not spending)
     # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
     row = deps._live_work_item_row(st, wid)
+    if (
+        any(
+            f is not None
+            for f in (
+                body.chain_template,
+                body.one_off_chain,
+                body.agent_overrides,
+                body.node_overrides,
+                body.policy,
+                body.attachments,
+            )
+        )
+        or "budget_usd" in body.model_fields_set
+    ):
+        # The chain, overrides and policy a person's session would be running under.
+        await deps.refuse_if_taken_over(st, wid)
     fields_set = body.model_fields_set
     if (
         body.title is None

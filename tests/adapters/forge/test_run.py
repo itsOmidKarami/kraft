@@ -213,7 +213,6 @@ async def test_open_mr_reuses_an_open_mr_for_the_branch(run_forge):
 
     assert list(fake.opened) == [7], "it opened a second merge request for one branch"
     assert fake.pushed == ["kraft/w1"]
-    assert fake.bodies["kraft/w1"], "the description was not rewritten from the branch head"
     assert "reusing !7" in run_forge.log("x5")
     assert run_forge.events("mr_opened") == [{"number": 7, "url": "http://fake.forge/7"}]
 
@@ -239,7 +238,6 @@ async def test_open_mr_uses_the_authored_title_labels_and_description(run_forge,
     assert fake.opened_titles[number] == "Authored title"
     assert fake.opened_meta[number].labels == ("release::minor",)
     assert fake.opened_bodies[number].startswith("## What this introduces")
-    fake.bodies["kraft/w1"] = "edited"
     await run_forge(fake, "sync_mr", "x9")
     assert fake.bodies["kraft/w1"].startswith("## What this introduces"), "sync_mr republishes it"
 
@@ -382,7 +380,11 @@ class _Recording(forge.FakeForge):
     ids=["ci_poll-pushes-then-polls", "sync_mr-pushes-describes", "merge-pushes-first"],
 )
 async def test_a_node_pushes_before_it_acts_on_the_head(run_forge, tmp_path, handler, expected):
-    fake = await _opened(_Recording(ci_states=["success"]), tmp_path)
+    fake = _Recording(ci_states=["success"])
+    await run_forge(fake, "open_mr", "b0")  # a description Kraft wrote, so sync may replace it
+    _write_meta(tmp_path, "")
+    fake.order.clear()
+    fake.pushed.clear()
 
     assert await run_forge(fake, handler, "b1") == ("done", "done")
 

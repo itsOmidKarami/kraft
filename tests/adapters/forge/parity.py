@@ -10,19 +10,23 @@ from typing import Any
 
 from kraft.adapters import forge
 from kraft.adapters.forge.models import Forge
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import as_reviewers
 
 BR = "kraft/abc"
 SINCE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+def reviewer(**kw):
+    return as_reviewers([kw])[0]
+
+
 def review(**kw):
-    return lambda f, r: f.automated_review(repo=r, branch=BR, reviewers=(AutomatedReview(**kw),))
+    return lambda f, r: f.automated_review(repo=r, branch=BR, reviewers=(reviewer(**kw),))
 
 
 def feedback(**kw):
     return lambda f, r: f.reviewer_feedback(
-        repo=r, branch=BR, reviewers=(AutomatedReview(**kw),), since=SINCE
+        repo=r, branch=BR, reviewers=(reviewer(**kw),), since=SINCE
     )
 
 

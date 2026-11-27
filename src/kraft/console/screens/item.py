@@ -74,6 +74,20 @@ class Item(ChainTab, MenuActions, View):
         Binding("pageup", "scroll('page_up')", "page up", show=False),
         Binding("home", "scroll('home')", "top", show=False),
         Binding("end", "scroll('end')", "end", show=False),
+        Binding(
+            "left_curly_bracket,shift+left_square_bracket",
+            "diff_file(-1)",
+            "previous file",
+            show=False,
+            key_display="{",
+        ),
+        Binding(
+            "right_curly_bracket,shift+right_square_bracket",
+            "diff_file(1)",
+            "next file",
+            show=False,
+            key_display="}",
+        ),
         # Arrows and Tab are what people try first; the brackets stay. One
         # footer entry (←'s); →'s blank key_display keeps `?` from listing it twice.
         # ← closes an open node and switches tabs otherwise: two bindings, so
@@ -616,6 +630,8 @@ class Item(ChainTab, MenuActions, View):
             return bool(self._menu_entries())
         if action == "session":
             return self.tab == "log" and len(self._sessions()) > 1
+        if action == "diff_file":
+            return self.tab == "diff" and not self._dead
         if (chain_says := self.check_chain_action(action)) is not None:
             return chain_says
         return True
@@ -635,6 +651,17 @@ class Item(ChainTab, MenuActions, View):
             # Its own group: a live line arriving meanwhile must not cancel it.
             self.run_worker(self._activity_older, group="older", exclusive=True)
         getattr(self._pane(), f"scroll_{how}")(animate=False)
+
+    def action_diff_file(self, step: int) -> None:
+        """`{` and `}` on the Diff: the previous or next file's drawn header."""
+        log = self.query_one("#diff", RichLog)
+        # RichLog wraps long lines: payload line numbers are not scroll rows.
+        rows = [n for n, line in enumerate(log.lines) if line.text.startswith("diff --git ")]
+        if step < 0:
+            rows.reverse()
+        target = next((row for row in rows if (row - log.scroll_y) * step > 0), None)
+        if target is not None:
+            log.scroll_to(y=target, animate=False, immediate=True)
 
     def on_click(self, event: events.Click) -> None:
         """A click on a tab's name opens it."""

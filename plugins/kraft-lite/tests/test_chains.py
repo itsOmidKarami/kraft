@@ -152,6 +152,27 @@ def test_lookup(tmp_path, layout, instance, source):
             kl_chains.resolve(root, env, "quick-task")
 
 
+#: Kraft's seed for a new home, comments dropped (the parity test writes Kraft's own).
+THIN_SEED = "id: {id}\nextends: kraft-default:{id}\n"
+
+
+@pytest.mark.parametrize("ref", ["default", "quick-task", "kraft-default:quick-task"])
+def test_a_stock_kraft_home_resolves_through_the_bundled_library(tmp_path, ref):
+    """Thin chains over `kraft-default` are the bundled chains, bare component names
+    and all; a repo library names no add-on here (Kraft's lists the ones it uses)."""
+    seed = {id: THIN_SEED.format(id=id) for id in ("default", "quick-task")}
+    env = {"KRAFT_CONFIG_DIR": str(write_library(tmp_path / "config", "tasks: {}\n", seed))}
+    write_library(tmp_path / ".kraft", "", {"default": THIN_SEED.format(id="default")})
+
+    chain = kl_chains.resolve(tmp_path, env, ref)
+
+    assert (chain["id"], chain["source"]) == (ref, "user")
+    assert chain["nodes"] == kl_chains.resolve_bundled(ref.split(":")[-1])["nodes"]
+    assert "kraft-default:default" not in {e["id"] for e in kl_chains.available(tmp_path, env)}
+    with pytest.raises(kl_chains.ChainError, match="a repo library's kraft-default:default"):
+        kl_chains.resolve(tmp_path, env, "repo:default")
+
+
 @pytest.mark.parametrize(
     ("repo_chains", "expected"),
     [
@@ -169,27 +190,12 @@ def test_default_ref(tmp_path, repo_chains, expected):
 
 
 #: The bundled `default` chain's nodes, in order.
-DEFAULT_IDS = [
-    "spec",
-    "spec_approval",
-    "plan",
-    "plan_approval",
-    "chain_revision",
-    "chain_revision_approval",
-    "implementation",
-    "verification",
-    "work_brief",
-    "local_review",
-    "describe_merge_request",
-    "draft_merge_request",
-    "merge_request_feedback",
-    "work_item_summary",
-    "final_review",
-    "mark_ready",
-    "external_approval",
-    "merge",
-    "post_merge_ci",
-]
+DEFAULT_IDS = """
+    spec spec_approval plan plan_approval chain_revision chain_revision_approval
+    implementation verification work_brief local_review describe_merge_request
+    draft_merge_request merge_request_feedback work_item_summary final_review
+    mark_ready external_approval merge post_merge_ci
+""".split()
 
 
 def test_resolve_bundled_default(tmp_path):
@@ -429,13 +435,23 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
         ),
         pytest.param(
             {"c": "extends: team:base\n"},
-            "add-on references are not supported by Kraft Lite: team:base",
+            "add-on references are not supported by Kraft Lite, except kraft-default: team:base",
             id="addon_reference_refused",
         ),
         pytest.param(
             {"c": _task_chain("{id: t, extends: worker, steering: ['team:tidy']}")},
-            "add-on references are not supported by Kraft Lite: team:tidy",
+            "add-on references are not supported by Kraft Lite, except kraft-default: team:tidy",
             id="addon_steering_refused",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, kind: builtin, ref: kraft.mr_rebase, suite: all}")},
+            "a.main.t.suite: must be one of",
+            id="suite_unknown",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, extends: worker, suite: full}")},
+            "a.main.t.suite: only kraft.verify_changed_test_scopes takes a suite",
+            id="suite_on_an_agent_task",
         ),
         pytest.param(
             {"c": _task_chain("{id: t, kind: builtin, ref: kraft.nope}")},
@@ -692,6 +708,11 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             {"c": _reviewed("auto_review_mode: checks_frist")},
             "g.auto_review_mode: must be 'decides' or 'checks_first', not 'checks_frist'",
             id="reviewer_mode_unknown",
+        ),
+        pytest.param(
+            {"c": _reviewed("artifact_required: true")},
+            "g: artifact_required needs an artifact",
+            id="required_artifact_unnamed",
         ),
     ],
 )

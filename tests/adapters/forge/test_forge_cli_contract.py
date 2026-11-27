@@ -22,7 +22,7 @@ from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import BotReviewer, CheckReviewer
 from kraft.forges import ForgeAccount, TokenSource
 
 from . import api_outputs, outputs
@@ -172,16 +172,16 @@ _BY_BRANCH = {
         repo=r, branch="kraft/abc", mr=forge.MR(0, ""), labels=("x",)
     ),
     "bot_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),)
+        repo=r, branch="kraft/abc", reviewers=(BotReviewer(bot="b"),)
     ),
     "check_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),)
+        repo=r, branch="kraft/abc", reviewers=(CheckReviewer(check="c"),)
     ),
     "bot_feedback": lambda f, r: f.reviewer_feedback(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),), since=_SINCE
+        repo=r, branch="kraft/abc", reviewers=(BotReviewer(bot="b"),), since=_SINCE
     ),
     "check_feedback": lambda f, r: f.reviewer_feedback(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),), since=_SINCE
+        repo=r, branch="kraft/abc", reviewers=(CheckReviewer(check="c"),), since=_SINCE
     ),
 }
 
@@ -201,6 +201,11 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
             outputs.PIPELINES: outputs.GLAB_CI_SUCCESS,
             "api graphql": json.dumps(_NO_THREADS),
             "api*/pulls -X POST*": json.dumps({"number": 7, "html_url": "u"}),
+            # The bot reads page these lists, so a `{}` default is not one.
+            "api*issues/7/comments*": "[]",
+            "api*pulls/7/reviews*": "[]",
+            "api*merge_requests/7/notes*": "[]",
+            "api*merge_requests/7/discussions*": "[]",
         },
     )
 
@@ -585,9 +590,14 @@ def test_gh_reviewer_feedback_payload_shapes():
     )  # fmt: skip
     assert "errors" not in data
     for thread in data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]:
-        assert {"id", "isResolved", "comments"} <= thread.keys()
+        assert {"id", "isResolved", "isOutdated", "viewerCanReply", "viewerCanResolve"} <= (
+            thread.keys()
+        )
         for note in thread["comments"]["nodes"]:
             assert {"author", "body", "path", "line", "originalLine", "updatedAt"} <= note.keys()
+            assert {"id", "fullDatabaseId", "createdAt", "state", "replyTo"} <= note.keys()
+            assert {"pullRequestReview"} <= note.keys()
+            assert note["author"] is None or "__typename" in note["author"]
 
 
 @pytest.mark.e2e("glab")
@@ -613,4 +623,4 @@ def test_glab_reviewer_feedback_payload_shapes():
     for discussion in api(f"projects/:id/merge_requests/{iid}/discussions?per_page=100"):
         assert {"id", "notes"} <= discussion.keys()
         for note in discussion["notes"]:
-            assert {"author", "body", "resolvable", "updated_at"} <= note.keys()
+            assert {"id", "author", "body", "resolvable", "created_at", "updated_at"} <= note.keys()

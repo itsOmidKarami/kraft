@@ -16,13 +16,3 @@ export function useListLoad() {
   useEffect(refresh, [refresh]);
   return { load, refresh, offline: useOffline().offline };
 }
-
-/** A half-minute clock for the rows' ages. */
-export function useNow() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
-}

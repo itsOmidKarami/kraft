@@ -304,14 +304,22 @@ export function passList(item: ItemDetail, node: string, picked?: number): Round
 
 /** One row per round that ran, oldest first: its dot and what became of it. A round the loop moved on from was
  *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (blue)
- *  while the node is the one the run stands on, else done (green). */
+ *  while a live item stands on the node, paused (no dot) or cancelled (red) when the item standing on it is,
+ *  else done (green). */
 function roundList(item: ItemDetail, node: ApiNode, { first = 1, latest, total }: { first?: number; latest: number; total?: number }, selected: number): Rounds {
   const halted = !!stopOn(item, node.id);
   const rows = Array.from({ length: latest - first + 1 }, (_, i): RoundRow => {
     const n = first + i;
     if (n < latest) return { n, tone: "bad", outcome: "sent to the fix loop" };
     if (halted) return { n, tone: "bad", outcome: "stopped · needs you" };
-    if (standsOn(item, node.id)) return { n, tone: "run", outcome: "running" };
+    if (standsOn(item, node.id)) {
+      // The item still stands on the node after it ends or pauses; only a live item's round is running.
+      const status = item.display_status;
+      if (status === "paused") return { n, outcome: "paused" };
+      if (status === "cancelled") return { n, tone: "bad", outcome: "cancelled" };
+      if (status === "archived") return { n, outcome: "archived" };
+      if (status !== "done") return { n, tone: "run", outcome: "running" };
+    }
     return { n, tone: "ok", outcome: "done" };
   });
   return { rows, selected, latest, total };

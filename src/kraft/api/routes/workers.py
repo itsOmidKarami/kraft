@@ -207,6 +207,7 @@ def _serve_command(st, token: str) -> tuple[str, str]:
 
 @api_router.get("/workers")
 async def list_workers(request: Request):
+    """The registered worker machines with their capacity and state."""
     _forbid_sessions(request)
     rows = [_remote_row(request, r) for r in request.app.state.workers_hub.snapshot()]
     if (local := _local_row(request)) is not None:
@@ -216,6 +217,7 @@ async def list_workers(request: Request):
 
 @api_router.post("/workers", status_code=201)
 async def add_worker(body: AddWorker, request: Request):
+    """Register a worker machine; a dial-in worker's token is returned once."""
     _forbid_sessions(request)
     st = request.app.state
     try:
@@ -281,6 +283,7 @@ def _edit_fields(name: str, body: EditWorker) -> dict:
 
 @api_router.patch("/workers/{name}")
 async def edit_worker(name: str, body: EditWorker, request: Request):
+    """Change a worker's capacity, repos, groups or address; only the fields given change."""
     _forbid_sessions(request)
     st = request.app.state
     changes = _edit_fields(name, body)
@@ -354,6 +357,7 @@ async def rotate_worker_token(name: str, request: Request):
 
 @api_router.delete("/workers/{name}")
 async def remove_worker(name: str, request: Request):
+    """Remove a worker; refused while a step runs on it."""
     _forbid_sessions(request)
 
     def remove(current: registry.WorkersFile) -> registry.WorkersFile:

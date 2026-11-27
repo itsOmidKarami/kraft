@@ -11,6 +11,7 @@ schema shows up as content without a line of code here.
 
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import re
@@ -28,6 +29,7 @@ from kraft.addons.load import InstalledAddon
 from kraft.addons.update import LIMITS, as_installed
 from kraft.config import bounded_yaml
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+from kraft.templates.models import lift_tasks
 
 _MERGES = ("mr.merge", "mr.mark_ready")
 _GATE_FIELDS = ("chain_finalized", "skippable", "reject_to", "artifact_required")
@@ -204,7 +206,9 @@ def _facts(extracted: Extracted | None, ancestors: Sequence[InstalledAddon] = ()
         return _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
     declared = json.loads(extracted.files[manifest.ADDON_JSON][1])
     name = declared.get("name", "addon")
-    library = _yaml(extracted, "library.yaml")
+    # Compared in the `config:` form, so moving a forge key there is no change.
+    library = copy.deepcopy(_yaml(extracted, "library.yaml"))
+    lift_tasks(library)
     chains: dict[str, object] = {}
     lists: dict[str, list[str]] = {}
     order: dict[str, list[tuple[str, str]]] = {}
@@ -330,17 +334,6 @@ def _how(old: object, new: object) -> str:
     return f"{old!r} -> {new!r}"
 
 
-def _named(reviewers: object) -> object:
-    """A `reviewers` list as written: each entry's `bot` or `check`, without the
-    other key the loaded model fills in as None."""
-    if not isinstance(reviewers, list):
-        return reviewers
-    return [
-        {k: v for k, v in r.items() if v is not None} if isinstance(r, Mapping) else r
-        for r in reviewers
-    ]
-
-
 def _chain_change(
     path: str, old: object, new: object, was: _Facts, now: _Facts, names: Collection[str]
 ) -> tuple[str, str]:
@@ -404,7 +397,8 @@ def _chain_change(
         return "content", f"{where}: skill {_how(old, new)}"
     if last == "reviewers":
         # Who the review wait reads decides whose feedback reaches the fix loop.
-        return "reach", f"{where}: reviewers {_how(_named(old), _named(new))}"
+        # Said of the task, as before `reviewers` moved under `config`.
+        return "reach", f"{where.removesuffix('.config')}: reviewers {_how(old, new)}"
     if last in _INPUTS or last == "steering":
         return "content", f"{where}: {last} {_how(old, new)}"
     return "content", f"{path}: {_how(old, new)}"

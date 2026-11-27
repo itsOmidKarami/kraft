@@ -15,6 +15,7 @@ import pytest
 from rich.logging import RichHandler
 from support import api as api_support
 from support import harness, real_binaries, server
+from support.env_scrub import kraft_names_to_scrub
 from support.fake_beads import Bd, FakeBeads
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
@@ -24,11 +25,12 @@ from kraft import client as kraft_client
 from kraft import db
 from kraft.paths import RunDirs
 
-#: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
-#: `support.local_worker`: the in-process local worker every test starts its sessions through.
-#: `support.redaction`: every test starts with no secret registered with `kraft.redact`.
+#: `rig`, `rig_offline`: a server and a machine in one process. `local_worker`: the in-process
+#: worker every session runs in. `redaction`: no registered secret. `agent_shell`: outside one.
 pytest_plugins = [
-    f"support.{m}" for m in ("rig_fixtures", "local_worker", "redaction", "forge_probe")
+    f"support.{m}"
+    for m in ("rig_fixtures", "local_worker", "redaction", "agent_shell", "forge_probe")
+    + ("basetemp", "reply_spacing")
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -425,12 +427,6 @@ def _fresh_process_state(monkeypatch):
     httpx_logger.setLevel(level)
 
 
-#: The `KRAFT_*` read once, at collection or import, which a per-test scrub
-#: cannot touch and must not hide: `pytest_collection_modifyitems` reads the
-#: first two, `support.fake_beads` and the `fake_beads` fixture the third.
-_SUITE_SWITCHES = frozenset({"KRAFT_E2E", "KRAFT_E2E_REQUIRE", "KRAFT_TEST_REAL_BD"})
-
-
 @pytest.fixture(autouse=True)
 def _isolated_kraft_home(request, tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
@@ -446,11 +442,12 @@ def _isolated_kraft_home(request, tmp_path, tmp_path_factory, monkeypatch):
     (`api/startup.py`), so an inherited `KRAFT_HOST=0.0.0.0` turns every
     `client` into the locked-down posture, and the fake agent, `worker_env`
     and the rest read their own names lazily. Every one but the suite's own
-    switches goes, rather than a list that reopens the leak one name at a
-    time. Scrubbed at the start of the test, so a value a test or its own
-    fixture sets on purpose (`api_client(host=...)`) still applies.
+    switches and the `KRAFT_E2E_*` scratch-forge inputs goes, rather than a
+    list that reopens the leak one name at a time. Scrubbed at the start of the
+    test, so a value a test or its own fixture sets on purpose
+    (`api_client(host=...)`) still applies.
     """
-    for name in [k for k in os.environ if k.startswith("KRAFT_") and k not in _SUITE_SWITCHES]:
+    for name in kraft_names_to_scrub(os.environ):
         monkeypatch.delenv(name)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     # Nor a real `kraft admin start` on the default port 8765: a test that

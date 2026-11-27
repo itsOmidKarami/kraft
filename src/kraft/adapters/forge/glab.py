@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import replace
@@ -16,23 +17,31 @@ from kraft.adapters.forge.models import (
     MR,
     CIState,
     CIStatus,
+    DescriptionRevision,
     DropCause,
     FailedJob,
     ForgeError,
+    ForgeNote,
+    ForgeThread,
     HeadMoved,
     Job,
     Label,
+    MergeBusy,
     MergedMR,
     MRDetails,
     MRRef,
     Pipeline,
+    Posted,
     QueueRead,
     QueueState,
     ReviewerFeedback,
     ReviewResult,
 )
-from kraft.adapters.forge.transport import CliTransport, Transport
+from kraft.adapters.forge.replies import facts
+from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
+
+logger = logging.getLogger(__name__)
 
 #: The system notes GitLab writes when someone approves or withdraws approval.
 _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request")
@@ -46,13 +55,66 @@ _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request
 #: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
 #: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
 #: person cancelled with no successor is `ci.render_ci`'s "abandoned".
-def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -> ReviewerFeedback:
-    """One bot's part of the merge request's notes and discussions."""
+def _glab_notes(notes: list[dict]) -> tuple[ForgeNote, ...]:
+    """A discussion's notes, a system note ("changed this line") left out."""
+    return tuple(
+        ForgeNote(
+            id=str(n.get("id") or ""),
+            rest_id=str(n.get("id") or ""),
+            author=str((n.get("author") or {}).get("username") or ""),
+            author_type=None,
+            body=n.get("body") or "",
+            created_at=n.get("created_at") or "",
+            updated_at=n.get("updated_at") or "",
+        )
+        for n in notes
+        if not n.get("system")
+    )
+
+
+def _glab_thread(d: dict, iid: int, locked: bool) -> ForgeThread:
+    raw = d.get("notes") or []
+    first = raw[0] if raw else {}
+    where = first.get("position") or {}
+    resolvable = [n for n in raw if n.get("resolvable")]
+    return ForgeThread(
+        id=str(d["id"]),
+        mr=iid,
+        resolved=bool(resolvable) and all(n.get("resolved") for n in resolvable),
+        outdated=False,  # GitLab's discussions API does not say
+        can_reply=not locked,
+        can_resolve=bool(resolvable),
+        file=where.get("new_path") or where.get("old_path"),
+        line=where.get("new_line") or where.get("old_line"),
+        notes=_glab_notes(raw),
+    )
+
+
+def _posted(answer: dict) -> Posted:
+    return Posted(
+        (str(answer["id"]),), str(answer.get("created_at") or ""), answer.get("body") or ""
+    )
+
+
+def _bot_feedback(
+    reviewer, notes: list[dict], discussions: list[dict], since, kraft: facts.Kraft | None = None
+) -> ReviewerFeedback:
+    """One bot's part of the merge request's notes and discussions. Given `kraft`,
+    no note of a discussion Kraft has posted in, diff or not, is activity or a
+    summary: that is Kraft's conversation, not the bot reviewing the push."""
     bot = reviewer.bot
 
     def mine(note: dict) -> bool:
         return mr_ops.same_login(str((note.get("author") or {}).get("username", "")), bot)
 
+    talk = [
+        d
+        for d in discussions
+        if kraft is not None
+        and (d["id"] in kraft.threads or kraft.talks_in(_glab_notes(d.get("notes") or [])))
+    ]
+    talk_notes = {str(n.get("id")) for d in talk for n in d.get("notes") or []}
+    talk_ids = {d["id"] for d in talk}
     summaries: list[dict] = []
     seen: list[datetime | None] = []
     for n in notes:
@@ -60,6 +122,8 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
         # note: GitLab's approvals list says who approved, not when.
         if n.get("system") and mine(n) and n.get("body") in _APPROVAL_NOTES:
             seen.append(mr_ops.forge_time(n.get("updated_at")))
+            continue
+        if str(n.get("id")) in talk_notes:
             continue
         # A system note ("added 1 commit") and an inline one (a discussion's,
         # read below) are not the bot's summary.
@@ -79,7 +143,8 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
     threads: list[dict] = []
     for d in discussions:
         thread = d.get("notes") or []
-        seen += [mr_ops.forge_time(n.get("updated_at")) for n in thread if mine(n)]
+        if d["id"] not in talk_ids:
+            seen += [mr_ops.forge_time(n.get("updated_at")) for n in thread if mine(n)]
         resolvable = [n for n in thread if n.get("resolvable")]
         if (
             thread
@@ -103,6 +168,7 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
                             ),
                         ]
                     ),
+                    "notes": _glab_notes(thread),
                 }
             )
     return ReviewerFeedback(reviewer, mr_ops.newest(seen), tuple(summaries), tuple(threads))
@@ -130,9 +196,10 @@ _MERGE_ATTEMPTS = 3
 _MERGE_RETRY_DELAY = 6.0
 
 #: glab's merge request vocabulary (`glab mr list -F json`, glab 1.117.0).
-#: 'locked' is an open merge request with discussion locked, so it is open
-#: here; anything unrecognised is 'closed', which fails the merge node loudly
-#: rather than guessing in the one direction that cannot be walked back.
+#: 'locked' is an open merge request GitLab is merging right now (its docs: "short-lived
+#: and transitional"), so it is open here; anything unrecognised is 'closed', which
+#: fails the merge node loudly rather than guessing in the one direction that cannot
+#: be walked back.
 _GLAB_MR_STATES: dict[str, str] = {
     "opened": "open",
     "locked": "open",
@@ -190,8 +257,58 @@ _ENQUEUE_NOTES = (
 )
 
 
+#: Every note on a merge request, oldest first, with the description text a
+#: "changed the description" note links. Free tiers included; REST has no route.
+_DESCRIPTION_NOTES_QUERY = """
+query($id: MergeRequestID!, $after: String) {
+  mergeRequest(id: $id) {
+    notes(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        system createdAt author { bot }
+        systemNoteMetadata { action descriptionVersion { id description } }
+      }
+    }
+  }
+}
+"""
+
+
+def _description_saves(notes: list) -> tuple[DescriptionRevision, ...]:
+    """Each save of the description, newest first, from a merge request's notes:
+    a `description` note's linked text, and a `task` note (a checkbox tick, which
+    links none) as a save of unknown text. Empty on any shape it cannot vouch for,
+    so the description stays as it is. Raises on a missing field."""
+    saves: list[DescriptionRevision] = []
+    last = None
+    for note in notes:
+        at = mr_ops.forge_time(note["createdAt"])
+        if at is None or (last is not None and at < last):
+            return ()
+        last = at
+        if not note["system"]:
+            continue
+        meta = note["systemNoteMetadata"]
+        if not meta or not isinstance(meta["action"], str):
+            return ()  # a system note that cannot say what it changed
+        if meta["action"] not in ("description", "task"):
+            continue
+        text = None
+        if meta["action"] == "description":
+            text = (meta["descriptionVersion"] or {}).get("description")
+            if not isinstance(text, str) or not text:
+                return ()
+        saves.append(DescriptionRevision(text, (note["author"] or {}).get("bot") is True))
+    return tuple(reversed(saves))
+
+
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
+
+    #: What `open_mr` appends to the body it created with: GitLab keeps a creation
+    #: text in a version no note links, so Kraft's own text would never be found in
+    #: the history a bot's later save is read from (`_mark_open`).
+    open_marker = mr_ops.OPEN_MARKER
 
     def __init__(self, transport: Transport | None = None):
         self._injected = transport
@@ -248,7 +365,22 @@ class GlabCli(mr_ops.CliWaits):
             "POST", "projects/:id/merge_requests", fields=fields
         )
         data = resp.json()
-        return MR(number=int(data["iid"]), url=str(data["web_url"]))
+        mr = MR(number=int(data["iid"]), url=str(data["web_url"]))
+        await self._mark_open(repo, mr.number, body)
+        return mr
+
+    async def _mark_open(self, repo: Path, iid: int, body: str) -> None:
+        """Write `body` again with `open_marker`, so it is a version a note links.
+        Only over Kraft's own text, never a person's edit made since the create, and
+        best-effort: the body is live either way, and Kraft's next rewrite links it."""
+        path = f"projects/:id/merge_requests/{iid}"
+        try:
+            live = str((await self._api(repo, path) or {}).get("description") or "")
+            if mr_ops.body_hash(live) == mr_ops.body_hash(body):
+                marked = {"description": body + self.open_marker}
+                await self._api(repo, path, method="PUT", fields=marked)
+        except ForgeError as exc:
+            logger.warning("!%s: left the description unmarked: %s", iid, exc)
 
     async def _user_id(self, repo: Path, username: str) -> str:
         if username == "@me":  # glab's spelling for the authenticated user (user.go:16-19)
@@ -257,6 +389,76 @@ class GlabCli(mr_ops.CliWaits):
         if not users or len(users) != 1:  # glab errors on anything but exactly one
             raise ForgeError(f"GitLab has {len(users or [])} users named {username!r}, not 1")
         return str(users[0]["id"])
+
+    async def viewer(self, *, repo: Path) -> str:
+        user = await self._api(repo, "user")
+        login = user.get("username") if isinstance(user, dict) else None
+        if not login:
+            raise ForgeError(f"GET user: answered without a username: {user!r:.200}")
+        return str(login)
+
+    async def read_thread(self, *, repo: Path, branch: str, thread_id: str) -> ForgeThread | None:
+        mr = await self._mr(repo, branch)
+        try:
+            found = await self._api(
+                repo, f"projects/:id/merge_requests/{mr['iid']}/discussions/{thread_id}"
+            )
+        except ForgeError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if not isinstance(found, dict) or not found.get("id"):
+            return None
+        return _glab_thread(found, int(mr["iid"]), bool(mr.get("discussion_locked")))
+
+    async def reply_to_thread(self, *, repo: Path, thread: ForgeThread, body: str) -> Posted:
+        answer = await self._api(
+            repo,
+            f"projects/:id/merge_requests/{thread.mr}/discussions/{thread.id}/notes",
+            method="POST",
+            fields={"body": body},
+        )
+        return _posted(answer)
+
+    async def resolve_thread(self, *, repo: Path, thread: ForgeThread) -> None:
+        await self._api(
+            repo,
+            f"projects/:id/merge_requests/{thread.mr}/discussions/{thread.id}",
+            method="PUT",
+            fields={"resolved": True},
+        )
+
+    async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
+        mr = await self._mr(repo, branch)
+        rows = await self._paged(
+            repo,
+            f"projects/:id/merge_requests/{mr['iid']}/notes",
+            pages=mr_ops.BOT_PAGES,
+            strict=True,
+        )
+        # A discussion's notes are `DiscussionNote` or `DiffNote`: not top-level.
+        return _glab_notes([r for r in rows if not r.get("type")])
+
+    async def upsert_comment(
+        self, *, repo: Path, branch: str, note_id: str | None, body: str
+    ) -> Posted:
+        # A plain note, never a discussion: a resolvable one would block a merge that
+        # requires resolved threads.
+        iid = (await self._mr(repo, branch))["iid"]
+        base = f"projects/:id/merge_requests/{iid}/notes"
+        if note_id is None:
+            answer = await self._api(repo, base, method="POST", fields={"body": body})
+        else:
+            answer = await self._api(repo, f"{base}/{note_id}", method="PUT", fields={"body": body})
+        return _posted(answer)
+
+    async def delete_note(
+        self, *, repo: Path, branch: str, note: ForgeNote, in_thread: bool
+    ) -> None:
+        iid = (await self._mr(repo, branch))["iid"]
+        await self._api(
+            repo, f"projects/:id/merge_requests/{iid}/notes/{note.rest_id}", method="DELETE"
+        )
 
     async def _mr(self, repo: Path, branch: str = "") -> dict:
         """The merge request on `branch`, an open one first (the checkout's when none is
@@ -314,6 +516,36 @@ class GlabCli(mr_ops.CliWaits):
 
     async def mr_body(self, *, repo: Path, branch: str) -> str:
         return str((await self._mr(repo, branch)).get("description") or "")
+
+    async def mr_description_history(
+        self, *, repo: Path, branch: str
+    ) -> tuple[DescriptionRevision, ...]:
+        """From the merge request's notes over GraphQL (`_description_saves`). Empty,
+        so a person's, when the notes run past `BOT_PAGES` pages or come back in a
+        shape it does not know."""
+        mr = await self._mr(repo, branch)
+        notes: list = []
+        try:
+            variables: dict[str, Field] = {"id": f"gid://gitlab/MergeRequest/{int(mr['id'])}"}
+            for _ in range(mr_ops.BOT_PAGES):
+                data = await self._transport(repo).graphql(_DESCRIPTION_NOTES_QUERY, variables)
+                page = data["mergeRequest"]["notes"]
+                notes += page["nodes"]
+                info = page["pageInfo"]
+                if info["hasNextPage"] is False:
+                    return _description_saves(notes)
+                cursor = info["endCursor"]
+                if (
+                    info["hasNextPage"] is not True
+                    or not cursor
+                    or cursor == variables.get("after")
+                ):
+                    return ()
+                variables = {**variables, "after": cursor}
+            return ()
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            logger.debug("description history: an answer it cannot read: %r", exc)
+            return ()
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge (`_merge_view`)."""
@@ -745,16 +977,22 @@ class GlabCli(mr_ops.CliWaits):
         detail += tuple(f"job {b.name}: failed ({b.failure_reason})" for b in bridges)
         return detail, (*failed_jobs, *bridges)
 
-    async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
+    async def _bot_review(
+        self, repo: Path, branch: str, bot: str, *, replies: bool = False
+    ) -> ReviewResult:
         """GitLab has no review state: `bot`'s unresolved discussions are
         actionable, one finding each; its approval is clean; neither yet is
-        pending."""
+        pending. `replies` changes nothing: there is no review a reply comes
+        wrapped in."""
         # ponytail: an approval is not tied to a head here -- a project that
         # keeps approvals across pushes lets an old approval settle a new head.
         mr = await self._mr(repo, branch)
         iid = mr["iid"]
-        discussions = await self._api(
-            repo, f"projects/:id/merge_requests/{iid}/discussions", fields={"per_page": 100}
+        discussions = await self._paged(
+            repo,
+            f"projects/:id/merge_requests/{iid}/discussions",
+            pages=mr_ops.BOT_PAGES,
+            strict=True,
         )
         findings = tuple(
             f"{(n.get('position') or {}).get('new_path')}:"
@@ -825,28 +1063,38 @@ class GlabCli(mr_ops.CliWaits):
         return ReviewResult("pending", detail=f"{check}: {status}")
 
     async def reviewer_feedback(
-        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        reviewers: Reviewers,
+        since: datetime,
+        kraft: facts.Kraft | None = None,
     ) -> list[ReviewerFeedback]:
         """What each of `reviewers` has said on the merge request, in order. The
         merge request, and for the bots its notes and discussions, are read once
         however many reviewers there are. GitLab has no review object, so a bot's
-        summaries are its top-level notes."""
+        summaries are its top-level notes. `kraft` leaves Kraft's conversation out
+        of the bots' activity (`_bot_feedback`)."""
         mr = await self._mr(repo, branch)
         notes = discussions = []
         if any(r.bot is not None for r in reviewers):
-            # ponytail: one page of 100 of each -- paginate if an MR ever has more.
-            notes = await self._api(
-                repo, f"projects/:id/merge_requests/{mr['iid']}/notes", fields={"per_page": 100}
+            notes = await self._paged(
+                repo,
+                f"projects/:id/merge_requests/{mr['iid']}/notes",
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
-            discussions = await self._api(
+            discussions = await self._paged(
                 repo,
                 f"projects/:id/merge_requests/{mr['iid']}/discussions",
-                fields={"per_page": 100},
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
         out = []
         for r in reviewers:
             if r.bot is not None:
-                out.append(_bot_feedback(r, notes, discussions, since))
+                out.append(_bot_feedback(r, notes, discussions, since, kraft))
                 continue
             latest = await self._latest_status(repo, mr, r.check)
             status = None if latest is None else str(latest.get("status"))
@@ -946,6 +1194,9 @@ class GlabCli(mr_ops.CliWaits):
             # nodes, so the branch names it. Passing a literal 0 would target a
             # merge request that does not exist.
             data = await self._view(repo, branch, mr.number)
+            if data.get("state") == "locked":
+                # GitLab is merging it now: an earlier ask whose answer was lost.
+                raise MergeBusy(f"!{data.get('iid')} is locked")
             if data.get("draft"):  # mrutils.go:61-63: glab refuses a draft before any PUT
                 raise ForgeError(f"cannot merge !{data['iid']}: still a draft")
             pipeline = data.get("head_pipeline") or data.get("pipeline")
@@ -1046,6 +1297,19 @@ class GlabCli(mr_ops.CliWaits):
             method="POST",
             fields={"auto_merge": "true", "sha": head},
         )
+
+    async def requires_resolved_threads(self, *, repo: Path, base: str) -> bool | None:
+        """GitLab's rule is the project's, whatever the branch."""
+        try:
+            project = await self._api(repo, "projects/:id")
+        except ForgeError:
+            return None
+        value = (
+            project.get("only_allow_merge_if_all_discussions_are_resolved")
+            if isinstance(project, dict)
+            else None
+        )
+        return value if isinstance(value, bool) else None
 
     async def _train_enabled(self, repo: Path) -> bool:
         """Whether the project merges through a merge train: both

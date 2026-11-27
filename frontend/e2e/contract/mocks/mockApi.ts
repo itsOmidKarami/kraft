@@ -1,12 +1,15 @@
 import { NG_CHAINS, NG_EXTENDING_CHAIN, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { inTreeOrder, tree } from "../../../src/ng/review/model";
-import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, subagentList, WORKERS_FIXTURE, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, gateRoundsOf, roundWindows, searchFor, subagentList, within, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
+import { chainKinds, docBody, pendingDoc, producedBy, written } from "./ngContent";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
+import { ago, NG_NOW } from "./clock";
+import { analyticsOf } from "./ngAnalytics";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -117,7 +120,7 @@ function libraryState() {
     view() {
       return {
         area: "library", key: "library", draft: drafted, files: { "library.yaml": state.text }, base: { "library.yaml": "9f2c".padEnd(64, "0") },
-        updated_at: drafted ? "2026-10-01T09:12:00Z" : null,
+        updated_at: drafted ? ago(90) : null,
         result: {
           model: { "library.yaml": clone(model) }, resolved: null, sources: {}, warnings: [], yaml_error: undefined,
           extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
@@ -195,7 +198,7 @@ const chainView = (key: string) => {
 };
 /** The keys `drafts._view` sends that the recorded views predate: no add-on, the published file (the shipped chain),
  *  and the closed sets the editors pick from (`catalogue.choices`). */
-const served = (v: any) => ({ addon: null, addon_library: null, published: { [`chains/${v.key}.yaml`]: DRAFTS.published.text }, ...v, result: { choices: DRAFTS.choices, ...v.result } });
+const served = (v: any) => ({ addon: null, addon_library: null, published: { [`chains/${v.key}.yaml`]: DRAFTS.published.text }, ...v, ...(v.updated_at ? { updated_at: ago(90) } : {}), result: { choices: DRAFTS.choices, ...v.result } });
 /** Block YAML of a mapping, for the fragment route's mock answer only (the server writes the real one). */
 const yamlOf = (v: unknown, ind = ""): string => {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
@@ -299,6 +302,20 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   const itemDrafts = new Map<string, any[]>();
   // Always answering: a shell cell may open Policy (a built page), and the shipped UI never asks for /drafts/(repos|policy|intake).
   const areas = makeAreas();
+  /** The ids of the items the board lists, archived ones last. */
+  const board = () => (opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id));
+  /** A machine's steps as the board's sessions hold them (`routes/workers.py`): the local worker runs each running session
+   *  that names no runner and has a process (`running_local_sessions`); another machine, each pending or running session
+   *  that names it (`live_sessions_on`). */
+  const onBoard = (w: (typeof WORKERS_FIXTURE)[number]) => {
+    const held = board().flatMap((id) => S.bundles[id].sessions.filter((s) => w.mode === "local"
+      ? s.status === "running" && s.runner == null && (s.pid ?? S.bundles[id].events.find((e) => e.type === "worker_session_started" && e.payload.session_id === s.id)?.payload.pid) != null
+      : ["pending", "running"].includes(s.status) && s.runner === w.name).map(() => id));
+    if (w.mode === "local") return { ...w, slots_used: held.length };
+    const holders = [...new Set(held)].map((id) => ({ id, title: S.bundles[id].item.title, steps: held.filter((x) => x === id).length }));
+    // shortcut: a held machine keeps its fixture's wording, true of one step of one item; no demo session names a runner.
+    return { ...w, slots_used: held.length, holders, remove_blocked: holders.length ? w.remove_blocked : null };
+  };
 
   const viewedMarks = new Set<string>();
   const lib = opts.ngLibrary ? libraryState() : null;
@@ -312,14 +329,23 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   // ux2-W8: review threads per item, seeded for a needs-gate item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
-  const threadsOf = (wid: string) =>
-    (threads[wid] ??= ([
+  const threadsOf = (wid: string) => {
+    if (threads[wid]) return threads[wid];
+    const seeded = ([
       ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
       // In the review tree's order, so the seeded threads land on the file shown first.
       ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
         ? ngThreads(wid, inTreeOrder(tree(compareFor(wid, S.variant).files as never)).map((f) => f.path))
         : []),
-    ] as any[]).map((t) => ({ quote: null, start_side: null, ...t })));
+    ] as any[]).map((t) => ({ quote: null, start_side: null, ...t }));
+    threads[wid] = seeded;
+    // The counts in each round read this same list (`gateRoundsOf`), so the endpoint and the item agree.
+    const b = S.bundles[wid];
+    if (b) b.item.gate_rounds = gateRoundsOf(b.events, seeded, b.reviews ?? []);
+    return seeded;
+  };
+  /** A document's text, as GET /documents/{id} answers it: what something wrote, its item's own (ngContent.ts), or the sample's. */
+  const textOf = (d: any): string => S.docText?.[d.document_id] ?? (S.bundles[d.work_item_id]?.content ? docBody(S.bundles[d.work_item_id], d) : documentDetail(d.document_id, [d]).content);
   const findThread = (tid: string) => Object.values(threads).flat().find((t) => t.id === tid);
   const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
   const mustFix = (wid: string) => threadsOf(wid).filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id);
@@ -415,7 +441,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       return json(limit !== undefined ? page.slice(0, limit) : page);
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
-      return json({ work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
+      // What a pending gate is about is listed too, before approval indexes it, in place of an earlier approval's copy.
+      const b = S.bundles[m[1]];
+      const pending = b && pendingDoc(b, new Date(opts.now?.() ?? NG_NOW).toISOString());
+      const docs = (S.docs[m[1]] ?? []).filter((d) => d.path !== pending?.path);
+      return json({ work_item_id: m[1], documents: pending ? [pending, ...docs] : docs });
     }
     // An item the walk never entered has no base_ref stamped yet (`artifacts`): its diff is the server's empty answer
     // for that, and its comparison the 409 that comes before any worktree check. One that ran and has no worktree any
@@ -430,10 +460,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/work-items\/([^/]+)\/(diff|compare)$/)) && gone(m[1])) return json({ detail: "this work item's worktree was removed from disk" }, 404);
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) {
       const ws = ["1", "true"].includes(q.get("ignore_whitespace") ?? "");
-      return json({ ignore_whitespace: ws, diff_max_bytes: 1_000_000, worktree_path: S.bundles[m[1]]?.item.worktree_path ?? `/Users/dev/.kraft/run/worktrees/${m[1]}`, ...diffFor(m[1], S.variant) });
+      return json({ ignore_whitespace: ws, diff_max_bytes: 1_000_000, worktree_path: S.bundles[m[1]]?.item.worktree_path ?? `/Users/dev/.kraft/run/worktrees/${m[1]}`, ...diffFor(m[1], S.variant, S.bundles[m[1]]) });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
-      return json(compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
+      return json(compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks, S.bundles[m[1]]));
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/viewed$/)) && (method === "PUT" || method === "DELETE")) {
       const file = q.get("file") ?? "";
@@ -494,7 +524,18 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* ux2-W8: review threads and comments, kept for the test's life */
     if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
       const list = threadsOf(m[1]);
-      if (method === "GET") return json(list);
+      if (method === "GET") {
+        // `?gate=&round=`: the threads that round's count covers (`store.threads_in_round`), drafts out.
+        const round = q.get("round");
+        if (round === null) return json(list);
+        const gate = q.get("gate");
+        if (!gate) return json({ detail: "round needs gate" }, 400);
+        const bundle = S.bundles[m[1]];
+        const rounds = gateRoundsOf(bundle?.events ?? [], list, bundle?.reviews ?? [])[gate] ?? [];
+        const w = roundWindows(rounds)[Number(round) - 1];
+        if (!w) return json({ detail: `${gate} has no round ${round}` }, 404);
+        return json(list.filter((t) => t.gate === gate && !t.draft && within(w, t.created_at)));
+      }
       const b = req.json() ?? {};
       const id = `th-new${seq++}`;
       const t = { id, work_item_id: m[1], gate: S.bundles[m[1]]?.item.pending_gate ?? null, node_id: b.node_id ?? null, file_path: b.file_path ?? null, side: b.side ?? null, start_side: b.start_side ?? null, quote: b.quote ?? null, start_line: b.start_line ?? null, end_line: b.end_line ?? null, anchor_sha: b.anchor_sha ?? "9c8d7e6", label: b.label ?? null, state: "open", resolved_at: null, created_at: "2026-09-13T10:09:00.000Z", draft: true,
@@ -557,15 +598,23 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/artifact$/))) {
       const b = S.bundles[m[1]];
-      return b ? json(artifactFor(b.item, S.variant)) : json({ detail: "no artifact" }, 404);
+      return b ? json(artifactFor(b.item, S.variant, b)) : json({ detail: "no artifact" }, 404);
     }
     // A document a task produced, by its kind (`produces`), and one attached at intake: the gate artifact's text.
     if ((m = p.match(/^\/work-items\/([^/]+)\/(artifacts|attachments)\/([^/]+)$/))) {
       const b = S.bundles[m[1]];
       if (!b) return json({ detail: "unknown work item" }, 404);
       const [, wid, where, kind] = m;
-      const a = artifactFor(b.item, S.variant);
-      const title = `${kind[0].toUpperCase()}${kind.slice(1)}: ${b.item.title}`;
+      // A kind no task of the item's chain produces and no gate decides is a 404 (`_produced_path`).
+      if (where === "artifacts" && b.content && !chainKinds(b).has(kind)) return json({ detail: `no task of this work item produces '${kind}'` }, 404);
+      // One its chain names but no node has written yet: no file, nothing indexed.
+      if (where === "artifacts" && b.content && !written(b, kind)) return json({ detail: `this work item has no ${kind}` }, 404);
+      // An item with content (ngContent.ts) has each kind's own text; the rest read the gate artifact's.
+      const own = b.content && docBody(b, { kind: `${kind}s` });
+      // Front matter is stripped, and a title it names wins over the heading (`_worktree_document`).
+      const [, fm, body] = /^---\n([\s\S]*?)\n---\n\n?([\s\S]*)$/.exec(own || "") ?? [];
+      const a = own ? { content: body ?? own } : artifactFor(b.item, S.variant);
+      const title = /^title: (.*)$/m.exec(fm ?? "")?.[1] ?? (own && /^# (.*)$/m.exec(own)?.[1]) ?? `${kind[0].toUpperCase()}${kind.slice(1)}: ${b.item.title}`;
       if (where === "artifacts") return json({ work_item_id: wid, kind, path: `items/${wid}/docs/${kind}.md`, absolute_path: `/Users/dev/.kraft/run/items/${wid}/docs/${kind}.md`, title, content: a.content, truncated: false });
       const att = (b.item.attachments ?? []).find((x: { kind: string }) => x.kind === kind);
       if (!att) return json({ detail: `this work item has no ${kind} attached` }, 404);
@@ -583,9 +632,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         beads: b.beads ?? [],
       });
     }
-    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
-      return json({ id: `${m[1]}-dup`, status: "paused" }, 201);
-    }
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) return send(T.duplicate(m[1]));
     /* the item chain draft (B15, ux2-W11): none unless `opts.itemDraft` seeds the running item's; then a small stateful server */
     if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
       const b = S.bundles[m[1]];
@@ -600,8 +647,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const marked = ops.map((op) => ({ ...op, passed: draftPassed(op, nodes, cur) }));
         const problems = draftProblems(marked);
         const live = marked.filter((op, i) => !op.passed && !problems.some((x) => x.op === i));
-        const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
-        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, nodes: null, unforked: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
+        const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 20 };
+        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, nodes: null, unforked: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? ago(90) : null };
       };
       if (method === "DELETE") { const had = stored().length > 0; itemDrafts.set(m[1], []); return had ? { status: 204 } : json({ detail: "this work item has no draft" }, 404); }
       if (method === "PUT") { itemDrafts.set(m[1], req.json()?.ops ?? []); return json(answer(stored())); }
@@ -654,7 +701,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const list = subagentList(bundle?.logs[m[2]] ?? [], status);
       if (!m[3]) return json({ session_id: m[2], status, subagents: list });
       const one = list.find((a) => a.id === m![3]);
-      return one ? json({ ...one, prompt: `Look through the repository for ${one.description.toLowerCase()} and report what you find.`, answer: one.summary }) : json({ detail: "no such sub-agent in this session's log" }, 404);
+      return one ? json({ ...one, prompt: `${one.description}, and report what you find.`, answer: one.summary }) : json({ detail: "no such sub-agent in this session's log" }, 404);
     }
 
     /* logs: jsonl, plain text, SSE tail */
@@ -673,8 +720,15 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
 
     /* documents & search */
     if (p === "/search") {
-      const all = Object.values(S.docs).flat();
-      return json(searchFor(q.get("q") ?? "", all, S.variant));
+      // The board's documents, where the board is the ng one (the older samples' otherwise): what a visitor can open.
+      // `limit: int`: FastAPI refuses one that is not an integer before the route runs, as a validation error. Pydantic's
+      // lax int takes underscores between digits and a fraction of zeros (`3_0` is 30, `1.0` is 1).
+      const lim = q.get("limit");
+      if (lim != null && !/^\s*[-+]?\d+(_\d+)*(\.0+)?\s*$/.test(lim)) return json({ detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer, unable to parse string as an integer", input: lim }] }, 422);
+      if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
+      const ids = board();
+      return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
+        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: lim == null ? undefined : Number(lim.replace(/_/g, "")) }));
     }
     if ((m = p.match(/^\/documents\/([^/]+)\/open$/))) return json({ document_id: m[1], path: ".engineering/specs/x.md", editor: "code" });
     if ((m = p.match(/^\/documents\/([^/]+)$/))) {
@@ -682,7 +736,16 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const id = decodeURIComponent(m[1]);
       const own = S.docText?.[id];
       // A summary with no front matter has nothing in `metadata` (`ingest.split_front_matter`), and no source times.
-      return json(own != null ? { ...documentDetail(id, all), content: own, metadata: {}, source_created_at: null, source_updated_at: null } : documentDetail(id, all));
+      if (own != null) return json({ ...documentDetail(id, all), content: own, metadata: {}, source_created_at: null, source_updated_at: null });
+      // A pending gate's document, by its synthetic id: the file again, nothing indexed about it (`_get_pending_gate_document`).
+      const [, wid] = /^gate:([^:]+):/.exec(id) ?? [];
+      const pending = wid && S.bundles[wid] && pendingDoc(S.bundles[wid], new Date(opts.now?.() ?? NG_NOW).toISOString());
+      if (wid) return pending && pending.document_id === id
+        ? json({ id, ...Object.fromEntries(["repo", "source_kind", "kind", "title", "path", "indexed_at"].map((k) => [k, pending[k]])), content: docBody(S.bundles[wid], pending), metadata: {}, source_created_at: null, source_updated_at: null, links: [] })
+        : json({ detail: "unknown document" }, 404);
+      const d = all.find((x) => x.document_id === id);
+      const b = d && S.bundles[d.work_item_id];
+      return json(b?.content ? documentDetail(id, all, docBody(b, d), d.source_kind === "artifact" ? producedBy(b, d.kind.replace(/s$/, "")) : undefined) : documentDetail(id, all));
     }
     if (p === "/beads/search") return json({ query: q.get("q"), beads: [
       { id: "kraft-a4js", title: "Gate card findings list pushes the split off-screen", status: "open", issue_type: "bug" },
@@ -703,7 +766,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (hs) {
       if (p === "/harnesses") return json(PROVIDER_STATUS);
       if (p === "/policy") return json({ ...policy(), maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
-      if (p === "/drafts") return json([{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: "2026-10-01T09:12:00Z" }]);
+      if (p === "/drafts") return json([{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: ago(90) }]);
       if ((m = p.match(/^\/drafts\/harnesses\/harnesses(?:\/(undo|publish|ops|rebase|fragment))?$/))) {
         if (method === "DELETE") return { status: 204 };
         if (m[1] === "ops") {
@@ -804,7 +867,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (method === "DELETE") return { status: 204 };
       if (action === "fragment") return json({ path: url.searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") return json({ published: [name], result: { ...result, changes: [] } });
-      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: ago(90), result };
       if (action === "ops") return json({ ...view, ops: (req.json()?.ops ?? []).map((o: { op: string }) => ({ op: o.op })) });
       return json(view);
     }
@@ -812,7 +875,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     // `addon`, `providers` and `problem_details` came after the recording: none from an add-on, each provider's model.
     if (p === "/harnesses/profiles" && method === "GET") return json({ ...DRAFTS.harnesses, agent_profiles: DRAFTS.harnesses.agent_profiles.map((a: any) => ({ addon: null, problem_details: [], providers: Object.fromEntries(Object.entries(a.model).map(([n, model]) => [n, { model, effort: null }])), ...a })) });
     if (p === "/harnesses/providers") return json(DRAFTS.providers);
-    if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
+    if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: ago(90) }))]);
     // `_chain_summary`'s other keys: no add-on, no description, it resolves, no node linked to a library component.
     // Also `team-default`, a chain that extends `default` (NG_EXTENDING_CHAIN): its draft view is a real server's too.
     if (p === "/templates/chains") return json(opts.ngBoard ? [...NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, extends: null, extended_by: c.id === "default" ? [NG_EXTENDING_CHAIN.id] : [], ...c })), clone(NG_EXTENDING_CHAIN)] : st.templates);
@@ -887,10 +950,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/notify/test") return json({ at: new Date().toISOString(), status: 200, ms: 388, error: null });
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
-    if (p === "/analytics") return json(S.analytics);
+    // The default sample's board answers its own analytics, as the server derives them; the variants keep their fixture.
+    if (p === "/analytics") return json(opts.ngBoard === true && S.variant === "default" ? analyticsOf(board().map((id) => S.bundles[id]), q, opts.now?.() ?? NG_NOW) : S.analytics);
     const fg = forges(method, p, req.json());
     if (fg) return fg[0] === 204 ? { status: 204 } : json(fg[1], fg[0]);
-    if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE });
+    if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE.map(onBoard) });
     // The Add, Edit, Remove and rotate-token answers, plausible and not kept: the list reads the fixture again.
     if (p === "/workers" && method === "POST") {
       const b = req.json() ?? {};

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario } from "./mocks/fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
@@ -148,7 +148,7 @@ const ROWS: Row[] = [
   },
   {
     name: "logs: a task that has not run shows a Log tab saying there is no log yet",
-    run: async (p) => { await app(p, item("running", "/nodes/verification?sel=verification.review.automated_review&tab=log")); await expect(p.getByRole("tab", { name: "Log" }).or(p.getByRole("button", { name: "Log", exact: true })).first()).toBeVisible({ timeout: 2000 }); await expect(p.getByText(/No log (yet|for this attempt)/)).toBeVisible(); },
+    run: async (p) => { await app(p, item("running", "/nodes/work_brief?sel=work_brief.main.author&tab=log")); await expect(p.getByRole("tab", { name: "Log" }).or(p.getByRole("button", { name: "Log", exact: true })).first()).toBeVisible({ timeout: 2000 }); await expect(p.getByText(/No log (yet|for this attempt)/)).toBeVisible(); },
   },
 
   {
@@ -235,7 +235,7 @@ const ROWS: Row[] = [
   {
     name: "gate: clicking a gate's auto_review opens its own task pane with attempts and Log, and no Skip or Retry",
     run: async (p) => {
-      await app(p, item("needs-gate", "/nodes/final_review"), { tweak: withReviewer });
+      await app(p, item("needs-gate", "/nodes/final_review"));
       await p.getByRole("button", { name: /auto_review/ }).first().click(); await pause(p, 600);
       expect(p.url()).toContain("sel=final_review.auto_review");
       await expect(p.getByRole("tab", { name: "Log" }).first()).toBeVisible();
@@ -312,9 +312,11 @@ const ROWS: Row[] = [
     name: "item page: a finished item's Recent reads its gate and its end once each (CG-4)",
     run: async (p) => {
       await app(p, item("done"));
+      // Four nodes ran after the gate (post_merge_ci's waits among them): its line is with the earlier ones.
+      await p.getByRole("button", { name: /^Show \d+ earlier$/ }).click();
       await expect(p.getByText("approve final review · approved by you")).toBeVisible();
       await expect(p.getByText(/^approve final review finished/)).toHaveCount(0);
-      await expect(p.getByText(/^release finished/)).toHaveCount(1);
+      await expect(p.getByText(/^post merge ci finished/)).toHaveCount(1);
     },
   },
   {
@@ -358,11 +360,23 @@ const ROWS: Row[] = [
     },
   },
   {
+    // An item-wide time cap: the one an item override raises, so the one whose stop names a limit.
     name: "stop: a time-capped item names its limit and offers Raise cap [decided]",
     run: async (p) => {
-      await app(p, item("capped"), { tweak: withCapLimit });
-      await expect(p.getByText("Running time hit its 8h cap.")).toBeVisible();
+      let minutes = 0;
+      await app(p, item("capped"), { tweak: (S) => { minutes = withCapLimit(S); } });
+      await expect(p.getByText(`The work item hit its time cap of ${minutes} minutes.`)).toBeVisible();
       await expect(p.getByRole("button", { name: "Raise cap" }).first()).toBeVisible();
+    },
+  },
+  {
+    // A task's time cap: what the server answers names no limit, so there is nothing to raise here, only the config to open.
+    name: "stop: a task's time cap names the task and offers Open config, not Raise cap",
+    run: async (p) => {
+      await app(p, item("capped"));
+      await expect(p.getByText("`implementation.main.implement` hit its time cap of 120 minutes.")).toBeVisible();
+      await expect(p.getByRole("button", { name: "Open config" }).first()).toBeVisible();
+      await expect(p.getByRole("button", { name: "Raise cap" })).toHaveCount(0);
     },
   },
 ];

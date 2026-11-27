@@ -10,6 +10,8 @@ describe("Policy sections", () => {
     expect(sectionOfKey(KEYS.daily.key)).toBe("limits");
     expect(sectionOfKey(KEYS.attemptsMax.key)).toBe("loops");
     expect(sectionOfKey(KEYS.loopWall.key)).toBe("loops");
+    expect(sectionOfKey("defaults.reply_rounds_per_head")).toBe("loops");
+    expect(sectionOfKey(KEYS.replyTimeoutMax.key)).toBe("loops");
     expect(sectionOfKey(KEYS.concurrent.key)).toBe("housekeeping");
     expect(sectionOfKey(KEYS.relaunch.key)).toBe("housekeeping");
     expect(sectionOfKey(KEYS.forge.key)).toBe("housekeeping");
@@ -24,6 +26,7 @@ describe("Policy sections", () => {
 
   it("places a problem by the key it names, else by its group", () => {
     expect(sectionOfProblem({ scope: "limits", field: "maxima.max_attempts" })).toBe("loops");
+    expect(sectionOfProblem({ scope: "limits", field: "maxima.reply_cap_per_thread" })).toBe("loops");
     expect(sectionOfProblem({ scope: "limits", field: "defaults.tasks.time_cap_minutes" })).toBe("limits");
     expect(sectionOfProblem({ scope: "limits", field: null, path: "default" })).toBe("limits");
     expect(sectionOfProblem({ scope: "housekeeping", field: "archive.after_days" })).toBe("housekeeping");

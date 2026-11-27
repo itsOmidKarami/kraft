@@ -385,7 +385,9 @@ async def test_a_walk_hands_the_writers_variable_to_the_wait(
             }
         ],
     }
-    wait = forge_node("wait", "ci.pipeline", pipeline="$PIPELINE_ID", reads=["emit.main.emit"])
+    wait = forge_node(
+        "wait", "ci.pipeline", config={"pipeline": "$PIPELINE_ID"}, reads=["emit.main.emit"]
+    )
     it = await item_on([emit, wait])
     fake = fake_of(pipe())
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)

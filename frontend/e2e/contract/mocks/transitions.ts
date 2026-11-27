@@ -1,8 +1,12 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, hex, logLines, serverKeys, type ItemBundle, type Scenario } from "./fixtures";
+import { commandLog, documentsFor, gateRoundsOf, hex, logLines, serverKeys, sessionLog, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
+import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
+import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, runningS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
+import { ownFailure } from "./nodeRecipe";
+import { changedFiles, isLate, itemDocs, mergeDocs, mrOf, planOf } from "./ngContent";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -83,10 +87,52 @@ const ADMITS: Record<string, readonly string[]> = {
   archive: ["completed", "abandoned"],
 };
 
-/** The board's row of an item: the item, its `stop` without facts, task or attempt (W4's list). */
+/** The board's row of an item: the item, its `stop` without facts, task or attempt (W4's list), and its plan progress
+ *  without the task list (`board._board_progress`). */
 export function listRow(item: any) {
   const s = item.stop;
-  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason } : null };
+  const p = item.progress;
+  // The detail's `limit` is read against the chain; the row only says there is one to raise (`board._list_stop`).
+  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason, ...(s.limit ? { raisable: true } : {}) } : null,
+    progress: p ? { current: p.current, total: p.total, title: p.title } : null };
+}
+
+/** `board._stop_task_and_attempt`: the hook point and attempt of `node`'s latest session that is not an escalation turn. */
+export function stopTaskOf(sessions: any[], node: string | null): { task: string | null; attempt: number | null } {
+  const s = [...sessions].reverse().find((x) => x.node_id === node && x.hook_point !== "escalation");
+  return { task: s?.hook_point ?? null, attempt: s?.attempt ?? null };
+}
+/** `board._step_of(..., with_task=True)`: the step of `node` that `task` is in, where the node has more than one. */
+export function stepOf(nodes: any[], node: string | null, task: string | null) {
+  const steps: string[][] = nodes.find((n) => n.id === node)?.steps ?? [];
+  const at = steps.findIndex((g) => g.includes(task ?? ""));
+  if (steps.length < 2 || at < 0) return null;
+  const [, name, leaf] = String(task).split(".");
+  return { index: at + 1, count: steps.length, name, task: leaf };
+}
+
+/** The index of the step of `node` that holds `path` (a task, or a step's `node.step`), or -1. */
+export const stepIndex = (nodes: any[], node: string | null, path: string) =>
+  ((nodes.find((n) => n.id === node)?.steps ?? []) as string[][]).findIndex((g) => g.some((t) => t === path || t.startsWith(`${path}.`)));
+
+/** `lifecycle._stopped_step`: a plain retry after a cap or budget stop goes on at the step the item was in
+ *  (`current_step`, written as each step starts), not its node's first: running out of time or money says nothing about
+ *  the steps already passed. Null, the whole node, at its first step (a gate has none), and once its fix loop has run,
+ *  since a fix can break what an earlier step passed. shortcut: a fix loop's counter is read as a fix cycle since the
+ *  last fork (a person's retry clears it) with no rejection after it that re-runs the node (`counters.reset_fix_loops`
+ *  clears it too), and a loop cap's `capped` stop is not modelled; read the counters if the demo grows one. */
+function stoppedStep(b: ItemBundle): string | null {
+  const it = b.item;
+  if (!["cap", "budget"].includes(it.stop?.kind) || !it.current_step) return null;
+  const nodes: any[] = it.chain_definition?.nodes ?? [];
+  const node = nodes.find((n) => n.id === it.current_node_id);
+  const steps: string[][] = node?.steps ?? [];
+  if (!node || it.current_step >= steps.length) return null;
+  const run = sinceFork(b.events);
+  const fixed = run.map((e) => e.type === "fix_cycle_started" && e.payload.node_id === node.id).lastIndexOf(true);
+  const rerun = (e: any) => e.type === "gate_rejected" && nodes.findIndex((n) => n.id === e.payload.node) <= nodes.indexOf(node);
+  if (node.fix_loop && fixed >= 0 && !run.slice(fixed).some(rerun)) return null;
+  return steps[it.current_step][0].split(".").slice(0, 2).join(".");
 }
 
 /** `lifecycle.not_paused`: what resume says to an item that is not paused. */
@@ -125,6 +171,27 @@ export interface TransitionOptions {
 
 export type Transitions = ReturnType<typeof transitions>;
 
+/** `progress.for_item`: while the item holds its slot (active) on its implementation node, where its plan stands, the
+ *  task its implementer last reported starting this run (`run_state`) or the one after the last its commits name,
+ *  whichever is further (`combine`); none on a chain with no plan, in a rework run a gate's rejection sent back
+ *  (`is_rework`), or once it stops, pauses or moves on (`active_implementation_node`). */
+export function progressOf(b: ItemBundle) {
+  const it = b.item;
+  const plan = planOf(it.materialized_chain ?? "", b.content);
+  if (it.status !== "active" || it.current_node_id !== "implementation" || !plan.length) return null;
+  const ev = b.events;
+  const last = (hit: (e: (typeof ev)[number]) => boolean) => ev.map(hit).lastIndexOf(true);
+  const done = last((e) => e.type === "node_completed" && e.payload.node_id === "implementation");
+  const rejected = done < 0 ? -1 : last((e) => e.type === "gate_rejected");
+  if (rejected > done && ev.slice(rejected + 1).find((e) => e.type === "node_started")?.payload.node_id === "implementation") return null;
+  const run = ev.slice(last((e) => e.type === "node_started" && e.payload.node_id === "implementation") + 1);
+  const told = Number(run.filter((e) => e.type === "plan_progress").at(-1)?.payload.task ?? 0);
+  // Each finished task's file is committed under its task's number (ngContent.ts `contentDiff`).
+  const committed = b.content ? changedFiles(b).filter((f) => !isLate(f)).length : 0;
+  const current = Math.min(plan.length, Math.max(told, committed + 1));
+  return { current, total: plan.length, title: plan[current - 1], tasks: plan.map((title, k) => ({ n: k + 1, title, state: k + 1 < current ? "done" : k + 1 === current ? "current" : "pending" })) };
+}
+
 export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const now = o.now ?? (() => new Date().toISOString());
   let seq = Math.max(4242, ...Object.values(S.bundles).flatMap((b) => b.events.map((e) => e.seq)));
@@ -144,9 +211,13 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     const named = payload.node_id ?? payload.node;
     const e: Ev = { seq: ++seq, work_item_id: id, type, payload, node_id: node_id !== undefined ? node_id : typeof named === "string" ? named : null, created_at: now() };
     S.bundles[id].events.push(e as ItemBundle["events"][number]);
+    // A report moves the plan's progress at once: the walk writes it through no door that settles.
+    if (type === "plan_progress") track(S.bundles[id]);
     o.onEvent?.(e);
     return e;
   };
+  /** The item's plan progress as its events now say, on an item that runs a frozen chain (the older samples keep theirs). */
+  const track = (b: ItemBundle) => { if (b.item.materialized_chain) b.item.progress = progressOf(b); };
   /** A session id no session in the scenario has. */
   const sessionId = () => {
     const taken = new Set(Object.values(S.bundles).flatMap((b) => b.sessions.map((s) => s.id)));
@@ -158,8 +229,14 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const liveTurn = (b: ItemBundle) => liveThread({ escalation_threads: escalationThreads(b.sessions) });
   const settle = (item: any) => {
     item.escalation_threads = escalationThreads(S.bundles[item.id].sessions);
+    item.gate_rounds = gateRoundsOf(S.bundles[item.id].events, S.bundles[item.id].threads ?? [], S.bundles[item.id].reviews ?? []);
+    item.scope_runs = scopeRunsOf(item.materialized_chain, S.bundles[item.id].sessions, item.scope_runs);
     item.display_status = displayStatus(item);
+    track(S.bundles[item.id]);
     item.updated_at = now();
+    // The indexer files what the item's nodes and sessions have written by now.
+    const b = S.bundles[item.id];
+    if (b.content) S.docs[item.id] = mergeDocs(S.docs[item.id], itemDocs(b), S.docText);
     return item;
   };
   /** The item, or `deps._work_item_row`'s 404; `live` also refuses an ended one (`deps._live_work_item_row`). */
@@ -175,18 +252,25 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const stopSessions = (b: ItemBundle): string[] => {
     // `store.running_sessions_for_node`: the current node's, and an escalation turn's on any node.
     const live = b.sessions.filter((s) => (s.node_id === b.item.current_node_id || s.hook_point === "escalation") && LIVE_SESSION_STATUSES.includes(s.status));
-    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    for (const s of live) cutOff(b, s);
     return live.map((s) => s.id);
+  };
+  /** `s` marked paused, and, an agent's on an item with content, its log as it stood then: its first sub-agent still at
+   *  work, the rest done inside the time it ran. */
+  const cutOff = (b: ItemBundle, s: any) => {
+    Object.assign(s, { status: "paused", exited_at: now() });
+    const wall_ms = Math.max(0, Date.parse(s.exited_at) - Date.parse(s.started_at ?? s.created_at));
+    if (b.content && isAgentSession(b.item.materialized_chain, s.hook_point, !!s.model)) b.logs[s.id] = logLines(s.id, 12, false, { content: b.content, hook: s.hook_point, status: "running", wall_ms });
   };
   /** `store.running_sessions_under`: the live sessions of a task or step, marked paused. */
   const stopUnder = (b: ItemBundle, scope: string): string[] => {
     const live = b.sessions.filter((s) => (s.hook_point === scope || String(s.hook_point).startsWith(`${scope}.`)) && LIVE_SESSION_STATUSES.includes(s.status));
-    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    for (const s of live) cutOff(b, s);
     return live.map((s) => s.id);
   };
-  /** `store.forks.fork_run` for a retry of `target`: every gate from it on that stands approved is reopened, then the
-   *  run forks, then (a person's retry) the span's counters reset. */
-  const fork = (b: ItemBundle, target: string) => {
+  /** `store.forks.fork_run` for a retry of `target`, or of one of its steps (`step`, `node.step`): every gate from it on
+   *  that stands approved is reopened, then the run forks, then (a person's retry) the span's counters reset. */
+  const fork = (b: ItemBundle, target: string, step: string | null = null) => {
     const id = b.item.id;
     const nodes: any[] = b.item.chain_definition?.nodes ?? [];
     const from = Math.max(0, nodes.findIndex((n) => n.id === target));
@@ -199,7 +283,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       append(id, "gate_reopened", { gate: n.id, reason: "retry" }, n.id);
     }
     const parent = [...b.events].reverse().find((e) => e.type === "run_forked")?.payload.fork ?? null;
-    append(id, "run_forked", { fork: hex(800_000 + ++forks), parent, scope: "node", path: target, reopened, preserved: [] });
+    append(id, "run_forked", { fork: hex(800_000 + ++forks), parent, scope: step ? "step" : "node", path: step ?? target, reopened, preserved: [] });
     append(id, "cap_counters_reset", { by: "human", counters: {} });
   };
   /** `store.complete_node`: once per node per run fork. */
@@ -275,7 +359,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const target = nodes[to].id;
       stopLive(x.b, true);
       run(it);
-      Object.assign(it, { fix_target: null, attempts: [], current_node_id: target });
+      Object.assign(it, { fix_target: null, attempts: [], current_node_id: target, current_step: 0 });
       append(id, "gate_rejected", { gate, note, node: target, by: "human", verdict: "reject" });
       return ok(settle(it));
     },
@@ -315,9 +399,11 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         // The next attempt of the node's own last task, waiting to start (an escalation turn is not one).
         const node = it.current_node_id;
         const last = b.sessions.filter((s) => s.node_id === node && s.hook_point !== "escalation").at(-1);
+        const hook = last?.hook_point ?? node;
         b.sessions.push({
-          id: sessionId(), work_item_id: id, node_id: node, hook_point: last?.hook_point ?? node, status: "pending",
+          id: sessionId(), work_item_id: id, node_id: node, hook_point: hook, status: "pending",
           attempt: (last?.attempt ?? 0) + 1, round: last?.round ?? 0, thread: 1, model: last?.model ?? null, head_sha: last?.head_sha ?? null,
+          harness: isAgentSession(it.materialized_chain, hook, !!last?.model) ? "claude" : null, command: last?.command ?? RUNS[taskRun(it.materialized_chain, hook) ?? ""]?.command ?? null,
           created_at: now(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
         });
       }
@@ -339,13 +425,18 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       // Only a live escalation turn is stopped: a person's retry outranks it.
       if (liveTurn(b)) stopLive(b, false);
       if (rewind) it.current_node_id = rewind.target;
-      const attempt = Math.max(0, ...b.sessions.filter((s) => s.node_id === it.current_node_id).map((s) => s.attempt ?? 0)) + 1;
+      // A rewind names its own path, so a stopped step is read only without one (`_stopped_step`).
+      const step = rewind ? null : stoppedStep(b);
+      // `_retry_attempt`: the next attempt of the tasks the retry reruns, the step's or the whole node's.
+      const attempt = Math.max(0, ...b.sessions.filter((s) => s.node_id === it.current_node_id && (!step || String(s.hook_point).startsWith(`${step}.`))).map((s) => s.attempt ?? 0)) + 1;
       run(it);
       append(id, "work_item_retried", { node_id: it.current_node_id, loop: null, steer, escalated: false, seeded: false });
-      fork(b, it.current_node_id);
+      fork(b, it.current_node_id, step);
+      // The fork starts at the retried node's first step, or at the retried step (`RunFork.start`).
+      it.current_step = step ? stepIndex(it.chain_definition?.nodes ?? [], it.current_node_id, step) : 0;
       settle(it);
-      // A node retry's `path` is the node (`ChainPath`); only a restart of the whole item has none.
-      return ok({ id, node_id: it.current_node_id, path: it.current_node_id, loop: null, steer, attempt });
+      // A node retry's `path` is the node, a step retry's the step (`ChainPath`); only a restart of the whole item has none.
+      return ok({ id, node_id: it.current_node_id, path: step ?? it.current_node_id, loop: null, steer, attempt });
     },
     /** POST /work-items/{id}/skip: the node it stands on (or its pending gate), or one task or step of it by path. */
     skip(id: string, path?: string | null, note: string | null = null): Result {
@@ -465,8 +556,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const sid = sessionId();
       // `store.create_session` counts the attempt by node and hook point.
       const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === "escalation").length + 1;
-      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null });
-      b.logs[sid] = [...(b.logs[from.id] ?? [])];
+      // An agent's turn whatever the task it was asked about was: its row is not the last session's (a test command's has no model).
+      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null, model: MODEL, harness: "claude", command: null });
+      b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: "escalation", status: "running" });
       // `escalate.dispatch`: the message first, then the turn's session, born and launched as every agent task's is.
       append(id, "escalation_message", { session_id: sid, message: message.trim(), auto: false, thread, turn }, node);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: "escalation", round: 0, attempt, thread });
@@ -537,14 +629,12 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const b = clone(blank);
       const chain = body.chain_template ?? "default";
       const nodes = clone((dry.body as { nodes: any[] }).nodes);
-      const keep = new Set(nodes.map((n) => n.id));
-      const frozen = JSON.parse(b.item.materialized_chain);
-      frozen.chain.nodes = frozen.chain.nodes.filter((n: any) => keep.has(n.id));
       const at = now();
       Object.assign(b.item, {
         id, title: String(body.title).trim(), description: String(body.description ?? "").trim() || null, repo: body.repo ?? b.item.repo,
         chain_template: chain, chain_definition: { template_id: chain, nodes }, effective_chain: { template_id: chain, nodes: clone(nodes) },
-        materialized_chain: JSON.stringify(frozen), bead_id: null, status: body.autostart ? "active" : "paused",
+        // Its template's frozen chain, to the nodes the dry run kept; a chain that extends default (team-default) freezes default's.
+        materialized_chain: frozenOf(chainOf(chain) ? chain : "default", nodes.map((n) => n.id)), bead_id: null, status: body.autostart ? "active" : "paused",
         // Started, it begins at its first node, as a resume of a never-started item does.
         current_node_id: body.autostart ? nodes[0]?.id ?? null : null,
         attachments: body.attachments ?? [], created_at: at,
@@ -562,37 +652,57 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const it = b.item;
       return ok({ id, bead_id: null, status: it.status, chain_definition: it.chain_definition, materialized_chain: it.materialized_chain, current_node_id: it.current_node_id }, 201);
     },
+    /** POST /work-items/{id}/duplicate: a new item filed paused with this one's title, brief, repo, chain and attachments
+     *  (an ended one too: its card says duplicating starts a new one), through the door a new item comes in by. */
+    duplicate(id: string): Result {
+      const x = find(id);
+      if (refused(x)) return x;
+      const { title, description, repo, chain_template, attachments } = x.it;
+      return t.create({ title, description, repo, chain_template, attachments });
+    },
 
     /* The walk's writes: what the executor does to a running item, in the store's order and words. No route calls
        these; the demo's live motion (motion.ts) does. Each refuses an unknown or ended item, as the doors above do. */
 
-    /** `store.enter_node`: the item stands on `node`, its step and plan progress cleared until a session reports. */
+    /** `store.enter_node`: the item stands on `node`, its step cleared until a session starts; its plan progress is
+     *  `progressOf`'s, which `settle` reads again. */
     enterNode(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
       if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
-      // `builtins.ensure_worktree` runs as the walk starts: from here on the item has one.
-      Object.assign(it, { current_node_id: node, step: null, progress: null, worktree_exists: true });
+      // `builtins.ensure_worktree` runs as the walk starts: from here on the item has one. The step cursor survives
+      // re-entering the node it stands on and resets on another (`store.enter_node`).
+      Object.assign(it, { current_node_id: node, current_step: it.current_node_id === node ? it.current_step ?? 0 : 0, step: null, progress: null, worktree_exists: true });
       if (it.summary) it.summary = { ...it.summary, step: null };
       append(id, "node_started", { node_id: node });
       tally(b);
       return ok(settle(it));
     },
     /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. Every task kind has
-     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`. */
-    createSession(id: string, node: string, hookPoint: string): Result {
+     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`.
+     *  `round` is its fix loop's; `run` a scope command other than the task's own (a changed-test-scope pass runs one
+     *  session per command); `noAgent` an agent's task that will end with no agent started (`dispatch.skipped_session`). */
+    createSession(id: string, node: string, hookPoint: string, o: { round?: number; attempt?: number; run?: Run; noAgent?: boolean } = {}): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
-      const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
+      const attempt = o.attempt ?? b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
       const sid = sessionId();
+      const task = hookPoint.split(".").at(-1)!;
+      const agent = isAgentSession(it.materialized_chain, hookPoint);
+      const run = o.run ?? taskRun(it.materialized_chain, hookPoint);
+      const round = o.round ?? 0;
       b.sessions.push({
-        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
+        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round, thread: 1, model: null, head_sha: o.noAgent ? null : it.head_sha ?? null,
+        harness: agent ? "claude" : null, command: (typeof run === "string" ? RUNS[run] : run)?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = logLines(sid, 12, false);
-      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
+      b.logs[sid] = o.noAgent ? [] : agent && b.content ? logLines(sid, 12, false, { content: b.content, hook: hookPoint, status: "running" }) : sessionLog(agent, run, sid, 12, false, "running", task, it.mr_ref?.url);
+      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round, attempt, thread: 1 });
+      // `dispatch` records the step before it runs (`set_current_step`); a fix loop's task is in none.
+      const at = stepIndex(it.chain_definition?.nodes ?? [], node, hookPoint);
+      if (at >= 0) it.current_step = at;
       settle(it);
       return ok({ id, session_id: sid });
     },
@@ -617,35 +727,46 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     },
     /** `store.session_exited`: the session done, with the usage an agent reported on the way out, added to the item's
      *  spend, and the summary it wrote, if it wrote one (`summary`, its `session_summary_ref`). A builtin, forge or
-     *  command task reports none (`usage` null): only its wall time. */
-    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null): Result {
+     *  command task reports none (`usage` null): only its wall time, and `status` (a failed scope command); an agent's
+     *  task that started no agent (`noAgent`) says so in its log. A session still `waiting` on a forge ends too. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_cache_write?: number; tokens_cache_read?: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null, o: { status?: string; noAgent?: boolean } = {}): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
       const s = b.sessions.find((y) => y.id === sid);
       if (!s) return no(404, `unknown session ${sid}`);
-      if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return no(409, `session ${sid} is ${s.status}, not live`);
       const at = now();
       const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      const status = o.status ?? "done";
       // COALESCE: no summary leaves the one already recorded.
       if (summary) s.session_summary_ref = summary;
+      Object.assign(s, { status, exited_at: at, wall_ms });
+      // `caps.running_time` reads the item's sessions again: this one's wall now counts, unless it was a forge wait.
+      if (it.running_time) it.running_time = { ...it.running_time, running_s: runningS(it.materialized_chain, b.sessions) };
       if (!usage) {
-        Object.assign(s, { status: "done", exited_at: at, wall_ms });
-        append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
+        // A command's log has grown to all of its output by the time it ends, the failing run's if it failed.
+        const task = String(s.hook_point).split(".").at(-1)!;
+        if (o.noAgent) b.logs[sid] = [{ n: 1, t: at, src: "stdout", text: "no bot feedback collected; no agent started" }];
+        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = ownFailure(commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task, it.mr_ref?.url), b.content?.files.find(isLate)?.[0]);
+        append(id, "worker_session_exited", { session_id: sid, status, wall_ms });
         settle(it);
         return ok({ id, session_id: sid });
       }
-      Object.assign(s, { status: "done", exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
+      const cache = { tokens_cache_write: usage.tokens_cache_write ?? 0, tokens_cache_read: usage.tokens_cache_read ?? 0 };
+      Object.assign(s, { status, exited_at: at, wall_ms, ...usage, ...cache });
+      // An agent on an item with content: its sub-agents have all answered by now.
+      if (b.content) b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: s.hook_point, status, wall_ms });
       const u = it.usage;
       if (u) {
-        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
+        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_cache_write: (r.tokens_cache_write ?? 0) + cache.tokens_cache_write, tokens_cache_read: (r.tokens_cache_read ?? 0) + cache.tokens_cache_read, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
         const row = u.by_node.find((r: any) => r.node === s.node_id);
         u.total = add(u.total);
         u.by_node = row ? u.by_node.map((r: any) => (r === row ? add(r) : r))
-          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
+          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
       }
       if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
-      append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
+      append(id, "worker_session_exited", { session_id: sid, status, wall_ms, model: usage.model, tokens_in: usage.tokens_in, ...cache, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
       settle(it);
       return ok({ id, session_id: sid });
     },
@@ -699,20 +820,55 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       append(id, "gate_requested", { gate, node_id: gate });
       return ok(settle(it));
     },
-    /** `stops.stop_for_budget`: a spend cap reached before an agent task launches. The item stops on `node`
+    /** `stops.stop_for_budget`: a spend cap reached before `path`, an agent task, launches. The item stops on `node`
      *  (`store.mark_needs_human`, kind `budget`) in `stops.budget_reason`'s words for a work item's cap. */
-    stopForBudget(id: string, node: string): Result {
+    stopForBudget(id: string, node: string, path?: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
-      const { it } = x;
+      const { b, it } = x;
       const spent = it.budget_cap?.spent_usd ?? 0;
       const cap = it.budget_cap?.cap_usd ?? 0;
       const reason = `budget cap reached: ${meter(spent)} spent on this work item, cap ${capUsd(cap)}. Nothing new was started; a running agent was not interrupted.`;
       const budget = { scope: "work_item", spent_usd: spent, cap_usd: cap };
-      // `board._stop` names the cap's scope: `work_item`, the item's own, is the one `/budget/raise` takes.
-      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {}, scope: "work_item" } });
+      // `board._stop` reads its task and attempt off the node's latest session, and names the cap's scope: `work_item`, the
+      // item's own, is the one `/budget/raise` takes. The step is that session's (`board._step_of`).
+      const { task, attempt } = stopTaskOf(b.sessions, node);
+      const step = stepOf(it.chain_definition?.nodes ?? [], node, task);
+      // `dispatch` recorded the step of the task whose launch the cap refused before it checked (`set_current_step`).
+      const at = path ? stepIndex(it.chain_definition?.nodes ?? [], node, path) : -1;
+      if (at >= 0) it.current_step = at;
+      Object.assign(it, { status: "needs_human", step, stop: { kind: "budget", node, task, attempt, resume_at: null, reason, facts: {}, scope: "work_item" } });
+      if (it.summary) it.summary = { ...it.summary, step: step && { index: step.index, count: step.count } };
       append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
       return ok(settle(it));
+    },
+    /** A forge wait's poll that found it pending (`waits.py`): its session `waiting` with the time it has waited, and the
+     *  item waiting on its node until `retryAt`, when its poller re-enters it (`reenter`). An external wait writes no
+     *  stop event and says no reason (`board._stop_payload`). */
+    sessionWaiting(id: string, sid: string, retryAt: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return no(409, `session ${sid} is ${s.status}, not live`);
+      const wall_ms = Math.max(0, Date.parse(now()) - Date.parse(s.started_at ?? s.created_at));
+      // `store.session_exited` stamps a waiting exit as it does any other.
+      Object.assign(s, { status: "waiting", exited_at: now(), wall_ms });
+      b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "waiting", String(s.hook_point).split(".").at(-1)!, it.mr_ref?.url);
+      Object.assign(it, { status: "waiting", retry_at: retryAt, step: null, stop: { kind: "wait", node: s.node_id, task: s.hook_point, attempt: 1, resume_at: retryAt, reason: null, facts: {} } });
+      append(id, "worker_session_exited", { session_id: sid, status: "waiting", wall_ms });
+      append(id, "work_item_waiting", { node_id: s.node_id, retry_at: retryAt });
+      return ok(settle(it));
+    },
+    /** A gate Kraft passes itself, with no request (`chain_revision_unchanged`): approved by `kraft`. The walk then
+     *  completes it (`completeNode`). */
+    selfApprove(id: string, gate: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      if (!(x.it.chain_definition?.nodes ?? []).some((n: any) => n.id === gate && n.kind === "gate")) return no(404, `unknown gate ${py(gate)}`);
+      append(id, "gate_approved", { gate, by: "kraft" }, gate);
+      return ok(settle(x.it));
     },
     /** `store.mark_reentered`: a CI wait (`waiting`) its poller (`waits.py`) re-enters once its `retry_at` passes, back
      *  to active with no event of its own (the walk's `node_started` narrates the re-entry). */
@@ -769,9 +925,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     mrOpened(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
-      const { it } = x;
-      const number = it.mr_ref?.number ?? 150 + mrs++;
-      const url = it.mr_ref?.url ?? `https://github.com/acme/${String(it.repo).split("/").pop()}/pull/${number}`;
+      const { b, it } = x;
+      const number = it.mr_ref?.number ?? b.content?.mr ?? 150 + mrs++;
+      const url = it.mr_ref?.url ?? mrOf(String(it.repo), number).url;
       it.mr_ref = { number, url };
       append(id, "mr_opened", { number, url }, node);
       return ok(settle(it));

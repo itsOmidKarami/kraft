@@ -31,6 +31,14 @@ def _manifest(path: Path, version: str, **extra) -> Path:
     return path
 
 
+def _version(path: Path) -> str:
+    if path.suffix == ".toml":
+        import tomllib
+
+        return tomllib.loads(path.read_text())["version"]
+    return json.loads(path.read_text())["version"]
+
+
 def test_stamp_writes_the_version(tmp_path):
     m = _manifest(tmp_path / "plugin.json", "0.0.0")
     stamp("0.6.0", [m])
@@ -79,7 +87,7 @@ def test_every_shipped_plugin_manifest_is_stamped_and_they_agree():
     shipped |= set(stamp_mod._ROOT.glob("plugins/*/gemini-extension.json"))
     assert any(p.name == "gemini-extension.json" for p in shipped)
     assert shipped <= set(stamp_mod.MANIFESTS), shipped - set(stamp_mod.MANIFESTS)
-    versions = {p: json.loads(p.read_text())["version"] for p in stamp_mod.MANIFESTS}
+    versions = {p: _version(p) for p in stamp_mod.MANIFESTS}
     assert len(set(versions.values())) == 1, versions
 
 
@@ -91,6 +99,20 @@ def test_a_manifest_whose_schema_has_no_version_is_left_unstamped():
     for path in unversioned:
         assert path not in stamp_mod.MANIFESTS
         assert "version" not in json.loads(path.read_text())
+
+
+def test_the_herdr_manifest_is_stamped_on_its_version_line_alone(tmp_path):
+    """Herdr's manifest is TOML and requires a `version`. Only that one line may
+    move: a `[[panes]]` table below it with a `version` key must stay."""
+    src = stamp_mod._ROOT / "plugins" / "herdr" / "herdr-plugin.toml"
+    assert src in stamp_mod.MANIFESTS
+    copy = tmp_path / "herdr-plugin.toml"
+    copy.write_text(src.read_text() + '\n[[actions]]\nid = "x"\nversion = "9.9.9"\n')
+    stamp("1.2.3", [copy])
+    lines = copy.read_text().splitlines()
+    assert lines[:2] == src.read_text().splitlines()[:2]  # the id and name above it are untouched
+    assert 'version = "9.9.9"' in lines
+    assert _version(copy) == "1.2.3"
 
 
 def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):
@@ -130,3 +152,35 @@ def test_the_vscode_lockfile_agrees_with_its_package_json():
     package = json.loads((stamp_mod._ROOT / "vscode" / "package.json").read_text())
     lock = json.loads((stamp_mod._ROOT / "vscode" / "package-lock.json").read_text())
     assert lock["version"] == lock["packages"][""]["version"] == package["version"]
+
+
+def test_the_mcp_registry_entry_is_stamped_in_both_places_and_nothing_else_moves(tmp_path):
+    """server.json carries the version at the top and on its PyPI package. The
+    package version left behind lists a release the registry cannot install."""
+    src = stamp_mod._ROOT / "server.json"
+    assert src in stamp_mod.MANIFESTS
+    copy = tmp_path / "server.json"
+    copy.write_text(src.read_text())
+    stamp("1.2.3", [copy])
+    before, after = json.loads(src.read_text()), json.loads(copy.read_text())
+    assert after["version"] == "1.2.3"
+    assert [p["version"] for p in after["packages"]] == ["1.2.3"]
+    before["version"] = "1.2.3"
+    for package in before["packages"]:
+        package["version"] = "1.2.3"
+    assert after == before
+
+
+def test_the_mcp_registry_entry_names_what_proves_and_starts_it():
+    """The registry checks ownership by finding `mcp-name: <name>` on the PyPI
+    page, which is the README; a client starts the server as `uvx <identifier>`,
+    which needs a command of the package's own name."""
+    import tomllib
+
+    root = stamp_mod._ROOT
+    entry = json.loads((root / "server.json").read_text())
+    assert f"mcp-name: {entry['name']} " in (root / "README.md").read_text()
+    (package,) = entry["packages"]
+    scripts = tomllib.loads((root / "pyproject.toml").read_text())["project"]["scripts"]
+    assert scripts.get(package["identifier"]) == scripts["kraft"]
+    assert [a["value"] for a in package["packageArguments"]] == ["admin", "mcp"]

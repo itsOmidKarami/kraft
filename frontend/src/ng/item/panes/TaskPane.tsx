@@ -1,4 +1,4 @@
-import { elapsed, tokenText, tokenTip, usd } from "../../../format";
+import { elapsed, localTime, tokenText, tokenTip, usd } from "../../../format";
 import type { Subagent, TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
@@ -44,9 +44,6 @@ function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
   const { n, of, many } = turnOf(sessions, at);
   return `turn ${n} of ${of}${many ? ` · thread ${at.thread}` : ""}`;
 }
-
-/** HH:MM in the viewer's time zone. */
-const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
 export const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 

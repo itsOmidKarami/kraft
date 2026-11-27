@@ -27,6 +27,7 @@ from kraft.adapters.forge.transport import (
     _clip,
     _retry_after,
     _sso_url,
+    error_message,
     graphql_reason,
 )
 from kraft.forges import ForgeAccount, origin
@@ -89,6 +90,12 @@ def ssl_context(account: ForgeAccount, *, plus_system: bool = False) -> ssl.SSLC
         _load_ca(*found)  # a CA that cannot be read is refused, not skipped
         ctx.load_verify_locations(found[0])
     return ctx
+
+
+def _no_answer(exc: httpx.HTTPError) -> bool:
+    """A connection that dropped or timed out, not a request httpx refused to make."""
+    dropped = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
+    return isinstance(exc, dropped) and not _is_tls(exc)
 
 
 def _is_tls(exc: BaseException) -> bool:
@@ -205,7 +212,9 @@ class HttpTransport:
                     params = None  # the Location carries its own query
         except TimeoutError:
             raise ForgeError(
-                f"{label}: {shown} did not answer in {self.timeout:g}s", reason="unreachable"
+                f"{label}: {shown} did not answer in {self.timeout:g}s",
+                reason="unreachable",
+                no_answer=True,
             ) from None
         except httpx.HTTPError as exc:
             if _is_tls(exc):
@@ -215,7 +224,9 @@ class HttpTransport:
                     reason="tls",
                 ) from None
             raise ForgeError(
-                f"{label}: cannot reach {shown} ({type(exc).__name__})", reason="unreachable"
+                f"{label}: cannot reach {shown} ({type(exc).__name__})",
+                reason="unreachable",
+                no_answer=_no_answer(exc),
             ) from None
         if blob is None:
             raise AssertionError("unreachable")  # pragma: no cover
@@ -264,6 +275,7 @@ class HttpTransport:
             raise ForgeError(
                 f"{label}: the log download from {shown} did not answer within the time left",
                 reason="unreachable",
+                no_answer=True,
             ) from None
         except httpx.HTTPError as exc:
             why = (
@@ -272,7 +284,9 @@ class HttpTransport:
                 else f"cannot be reached ({type(exc).__name__})"
             )
             raise ForgeError(
-                f"{label}: the log download from {shown} {why}", reason="unreachable"
+                f"{label}: the log download from {shown} {why}",
+                reason="unreachable",
+                no_answer=_no_answer(exc),
             ) from None
 
     async def _call(self, label: str, method: str, url: str, **kw) -> ApiResponse:
@@ -281,8 +295,8 @@ class HttpTransport:
             if resp.status < 400:
                 return resp
             try:
-                message = _clip(str(resp.json().get("message", "")))
-            except (ForgeError, AttributeError):
+                message = _clip(error_message(resp.json()))
+            except ForgeError:
                 message = ""
             reason = reason_for(resp.status, resp.headers, message)
             wait = _retry_after(resp.headers)

@@ -153,6 +153,7 @@ def _view(st) -> dict:
 
 @api_router.get("/harnesses/profiles")
 async def list_harnesses(request: Request):
+    """Every harness profile and the tasks that select each."""
     return _view(request.app.state)
 
 
@@ -238,6 +239,7 @@ async def get_provider(hid: str):
 
 @api_router.get("/harnesses/profiles/{pid}")
 async def get_harness(pid: str, request: Request):
+    """One harness profile as written."""
     found = next((p for p in _view(request.app.state)["profiles"] if p["id"] == pid), None)
     if found is None:
         raise HTTPException(404, f"no harness profile {pid!r}")

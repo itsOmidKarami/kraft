@@ -16,6 +16,7 @@ _BASE = {
     "results": ["done", "done"],
     "sandbox": None,
     "runner": None,
+    "base": None,
 }
 
 
@@ -131,3 +132,6 @@ async def test_dispatching_the_builtin_saves_what_its_command_wrote(item_on, rep
     if saved:
         current = carried.current_generation(carried.store_dir(it.run_dirs, repo))
         assert (current / ".testmondata").read_text() == "db\n"
+        # The round hands the save the commit its branch forks from.
+        assert carried.stored_base(current)
+        assert carried.stored_base(current) == it.row()["base_ref"]

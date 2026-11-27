@@ -30,7 +30,7 @@ def stored(root: Path) -> dict[str, dict]:
     return {r["id"]: r for r in kl.read_jsonl(root / kl.STATE_DIR / "chain.jsonl")}
 
 
-def test_a_whole_chain_walks_to_done(kl_cli, default_chain, tmp_path):
+def test_a_whole_chain_walks_to_done(kl_cli, walk, default_chain, tmp_path):
     kl_cli(tmp_path, "start", "--title", "Add a flag")
 
     for node in default_chain["nodes"]:
@@ -42,6 +42,7 @@ def test_a_whole_chain_walks_to_done(kl_cli, default_chain, tmp_path):
             kl_cli(tmp_path, "approve")
         else:
             assert [s["id"] for s in state["steps"]] == [s["id"] for s in node["steps"]]
+            walk.produce(tmp_path, state)
             kl_cli(tmp_path, "close")
 
     assert kl_cli(tmp_path, "state")["status"] == "done"
@@ -67,6 +68,19 @@ def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
     assert tests["source"] == "default:builtins.kraft.verify_changed_test_scopes"
     assert state["fix_loop"]["judge"]["path"] == "verification.fix_loop.judge"
     assert [s["id"] for s in state["fix_loop"]["steps"]] == ["main"]
+    # The node and each step carry Kraft's `read_only`: the review step is, the tests step is not.
+    assert [(s["id"], s["read_only"]) for s in state["steps"]] == [
+        ("tests", False),
+        ("review", True),
+    ]
+    assert state["read_only"] is False
+    # Kraft's methods are named by path, never inlined: `state` dispatches every task.
+    [review] = state["steps"][1]["tasks"]
+    assert review["source"] == "default:agent (shipped method)"
+    assert str((PLUGIN / "methods" / "code-review.md").resolve()) in review["prompt"]
+    for name in ("code-review", "fix-loop-judge"):
+        body = (PLUGIN / "methods" / f"{name}.md").read_text().split("\n# ", 1)[1]
+        assert json.dumps(body)[1:-1] not in json.dumps(state)  # both JSON-escaped
 
     bindings = tmp_path / ".kraft-lite" / "bindings.yaml"
     bindings.write_text(
@@ -76,6 +90,27 @@ def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
     [tests] = kl_cli(tmp_path, "state")["steps"][0]["tasks"]
     assert (tests["kind"], tests["command"]) == ("subprocess", ["just", "test"])
     assert tests["source"] == "bindings:builtins.kraft.verify_changed_test_scopes"
+
+
+def test_state_reports_a_chain_frozen_before_read_only_as_not_read_only(walk, kl_cli, tmp_path):
+    """A frozen chain written before the key has none: `state` answers False, not a KeyError."""
+    walk.start(tmp_path)
+    walk.to(tmp_path, "verification")
+    [frozen] = (tmp_path / ".kraft-lite" / "chains").glob("*.json")
+    chain = json.loads(frozen.read_text())
+    for node in chain["nodes"]:
+        node.pop("read_only", None)
+        for step in node.get("steps") or ():
+            step.pop("read_only")
+    frozen.write_text(json.dumps(chain))
+
+    state = kl_cli(tmp_path, "state")
+
+    assert state["read_only"] is False
+    assert [(s["id"], s["read_only"]) for s in state["steps"]] == [
+        ("tests", False),
+        ("review", False),
+    ]
 
 
 def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
@@ -95,14 +130,17 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     state = kl_cli(tmp_path, "state")
 
     assert (state["node"], state["kind"], state["steps"]) == ("spec_approval", "gate", [])
+    assert state["produced"] == {"spec": "docs/spec.md"}, "the newest of each kind, for any task"
+    # The shipped default chain checks first at every gate.
+    assert state["gate"].pop("reviewer")["path"] == "spec_approval.auto_review"
     assert state["gate"] == {
         "message": "Review and approve the specification.",
         "artifact": "spec",
         "artifact_path": "docs/spec.md",
         "reject_to": "spec",
         "chain_finalized": False,
+        "artifact_required": False,
         "slice_gate": False,
-        "reviewer": None,
         "review": None,
     }
     [spec] = [r for r in stored(tmp_path).values() if r["title"] == "spec"]
@@ -170,6 +208,106 @@ def test_reject_goes_to_reject_to(walk, kl_cli, tmp_path, chain, gate, flags, re
     at = [n["node"] for n in rows].index(reopened)
     assert {n["status"] for n in rows[at:]} == {"open"}
     assert {n["status"] for n in rows[:at]} == {"closed"}
+
+
+#: A gate on `notes`, which `a` writes; `%s` is its `artifact_required`.
+NOTES_GATE = """\
+    nodes:
+      - {id: a, kind: exec, tasks: [{id: w, kind: agent, prompt: Write notes., produces: notes}]}
+      - {id: g, kind: gate, message: Read the notes., artifact: notes, artifact_required: %s}
+      - {id: b, kind: exec, tasks: [{id: t, kind: agent, prompt: Go on.}]}
+    """
+
+
+@pytest.mark.parametrize(
+    ("chain", "gate", "missing"),
+    [
+        pytest.param("default", "final_review", "the final review document", id="final_gate"),
+        pytest.param("true", "g", "the required document 'notes'", id="artifact_required"),
+        pytest.param("false", "g", None, id="not_required"),
+    ],
+)
+def test_approve_refuses_a_gate_without_its_document(walk, kl_cli, tmp_path, chain, gate, missing):
+    """As Kraft's approve: the final gate, or one that requires its document,
+    is never approved with nothing to read."""
+    ref = repo_chain(tmp_path, "notes", NOTES_GATE % chain) if chain != "default" else chain
+    kl_cli(tmp_path, "start", "--title", "t", "--chain", ref)
+    walk.to(tmp_path, gate)  # every document recorded on the way
+    document = tmp_path / kl_cli(tmp_path, "gate")["gate"]["artifact_path"]
+    document.unlink()
+
+    if missing:
+        refused = kl_cli(tmp_path, "approve", ok=False)
+        assert f"{gate}: {missing} is missing" in refused.stderr
+        assert kl_cli(tmp_path, "state")["status"] == "blocked"
+        document.write_text("# Back\n")
+    assert kl_cli(tmp_path, "approve")["node"] != gate
+
+
+NO_CHANGE = '```json\n{"rationale": "The chain fits."}\n```\n'
+
+
+@pytest.mark.parametrize(
+    ("body", "rationale"),
+    [
+        pytest.param(NO_CHANGE, "The chain fits.", id="no_change"),
+        pytest.param(
+            '---\nkind: x\n---\n```json\n{"rationale": "Fits.", "skip": [], "overrides": {}}\n```',
+            "Fits.",
+            id="empty_changes_under_front_matter",
+        ),
+        pytest.param(
+            '```json\n{"rationale": "Skip.", "skip": [{"node": "verification"}]}\n```\n',
+            None,
+            id="a_change",
+        ),
+        pytest.param("The chain fits; no change.\n", None, id="prose"),
+        pytest.param(
+            '```json\n{"rationale": "Fits.", "unslice": "s"}\n```\n', None, id="other_key"
+        ),
+        pytest.param('```json\n{"rationale": ""}\n```\n', None, id="no_rationale"),
+        pytest.param("proposal", None, id="slicing_proposed"),
+        # As Kraft's strict read: a key twice, a symlink, a file outside the repo, past 1 MB.
+        pytest.param(
+            '```json\n{"rationale": "Fits.", "add": [{"after": "x"}], "add": []}\n```',
+            None,
+            id="duplicate_key",
+        ),
+        pytest.param("symlink", None, id="behind_a_symlink"),
+        pytest.param("outside", None, id="outside_the_repo"),
+        pytest.param("too_big", None, id="past_the_size_cap"),
+    ],
+)
+def test_an_unchanged_chain_revision_passes_without_asking(walk, kl_cli, tmp_path, body, rationale):
+    """As Kraft's walk: a change set that changes nothing, with no slicing to
+    ask about, passes its gate and says why; anything else asks."""
+    chain_id = walk.to_chain_revision(tmp_path)
+    if body == "proposal":
+        (tmp_path / kl.STATE_DIR / "proposals").mkdir()
+        (tmp_path / kl.STATE_DIR / "proposals" / f"{chain_id}.json").write_text("{}")
+    special = {"too_big": NO_CHANGE + " " * kl.REVISION_MAX_BYTES}
+    special |= dict.fromkeys(("proposal", "symlink", "outside"), NO_CHANGE)
+    outside = tmp_path.parent / f"{tmp_path.name}-revision.md"
+    revision = outside if body == "outside" else tmp_path / "revision.md"
+    revision.write_text(special.get(body, body))
+    kl_cli(tmp_path, "produced", "--kind", "chain_revision", "--path", str(revision))
+    if body == "symlink":  # swapped after it was recorded, as Kraft's read guards against
+        (tmp_path / "real.md").write_text(NO_CHANGE)
+        revision.unlink()
+        revision.symlink_to(tmp_path / "real.md")
+    kl_cli(tmp_path, "close")
+
+    state = kl_cli(tmp_path, "gate")
+
+    if rationale is None:
+        assert (state["node"], state["status"]) == ("chain_revision_approval", "blocked")
+        assert "passed_unchanged" not in state
+    else:
+        assert (state["node"], state["status"]) == ("implementation", "open")
+        assert state["passed_unchanged"] == {
+            "node": "chain_revision_approval",
+            "rationale": rationale,
+        }
 
 
 def test_attachment_trim(kl_cli, default_chain, tmp_path):

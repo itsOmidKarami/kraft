@@ -131,6 +131,25 @@ class Capability:
 
 
 @dataclass(frozen=True)
+class Interactive:
+    """How a person runs this CLI themselves (`kraft item takeover`): its
+    command line with none of Kraft's headless flags. `resume` and
+    `session_id` are bound like their headless namesakes, `{value}` the
+    provider's session id and the one Kraft minted."""
+
+    command: tuple[str, ...]
+    #: As the harness's own: replaces `command` when a resume is requested.
+    command_resume: tuple[str, ...] = ()
+    resume: Capability | None = None
+    #: Names the session the CLI starts, so Kraft knows it without parsing
+    #: anything the CLI prints.
+    session_id: Capability | None = None
+    #: A glob, `{value}` the minted id, `~` expanded: the file that proves the
+    #: session was written, because a person may quit before any turn.
+    session_file: str | None = None
+
+
+@dataclass(frozen=True)
 class Harness:
     id: str
     kind: str
@@ -187,6 +206,8 @@ class Harness:
     min_version: str | None = None
     #: A `kind: acp` entry's own fields (`acp/entry.py`); None for any other kind.
     acp: AcpEntry | None = None
+    #: How a person runs this CLI interactively. None: takeover refuses it.
+    interactive: Interactive | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -352,6 +373,7 @@ class Harness:
         return cls(
             id=parsed.id,
             kind=kind,
+            interactive=_interactive(parsed.interactive, where),
             command=tuple(parsed.command),
             command_resume=command_resume,
             capabilities=caps,
@@ -564,6 +586,18 @@ class NetworkInput(BaseModel):
     requires: list[StrictStr] = []
 
 
+class InteractiveInput(BaseModel):
+    """`interactive:` as written. Shape only, like the rest of the file."""
+
+    model_config = ConfigDict(strict=True)
+
+    command: Prefix = []
+    command_resume: Prefix = []
+    resume: CapabilityInput | None = None
+    session_id: CapabilityInput | None = None
+    session_file: StrictStr | None = None
+
+
 class HarnessInput(BaseModel):
     """One harness file as written. Everything is defaulted so that a missing
     key reaches `Harness.from_input`, which refuses it in the same words as a
@@ -594,6 +628,7 @@ class HarnessInput(BaseModel):
     always_deny: list[StrictStr] = []
     settles_itself: list[StrictStr] = []
     options: dict[StrictStr, OptionInput] = {}
+    interactive: InteractiveInput | None = None
 
 
 _VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
@@ -695,6 +730,50 @@ def _capability(name: str, raw: CapabilityInput, where: str) -> Capability:
         reader=raw.reader,
         via=raw.via,
         under_allowlist=raw.under_allowlist,
+    )
+
+
+def _interactive(raw: InteractiveInput | None, where: str) -> Interactive | None:
+    if raw is None:
+        return None
+    if not raw.command:
+        raise HarnessError(f"{where}: interactive 'command' must be a non-empty string or list")
+    caps: dict[str, Capability | None] = {}
+    for name in ("resume", "session_id"):
+        cap = getattr(raw, name)
+        if cap is None:
+            caps[name] = None
+            continue
+        for frag in cap.cli:
+            for ph in re.findall(r"\{[a-z_]+\}", frag):
+                if ph != "{value}":
+                    raise HarnessError(
+                        f"{where}: interactive {name!r} uses placeholder {ph}; "
+                        "only {value} exists"
+                    )
+        if cap.via not in (None, "command_resume") or (cap.via and name != "resume"):
+            raise HarnessError(
+                f"{where}: interactive {name!r} 'via' can only be 'command_resume' on 'resume'"
+            )
+        if cap.via and cap.cli:
+            raise HarnessError(
+                f"{where}: interactive {name!r} is bound 'via' {cap.via!r}, "
+                "so it must not also carry a 'cli' binding"
+            )
+        if cap.via and not raw.command_resume:
+            raise HarnessError(
+                f"{where}: interactive {name!r} is bound via 'command_resume', "
+                "which this harness does not define"
+            )
+        if not cap.via and not cap.cli:
+            raise HarnessError(f"{where}: interactive {name!r} needs a 'cli' binding")
+        caps[name] = Capability(name=name, argv=tuple(cap.cli), via=cap.via)
+    return Interactive(
+        command=tuple(raw.command),
+        command_resume=tuple(raw.command_resume),
+        resume=caps["resume"],
+        session_id=caps["session_id"],
+        session_file=raw.session_file,
     )
 
 
@@ -809,4 +888,29 @@ def build_argv(
         if value is None:
             continue
         argv += _fill(cap.argv, value)
+    return argv
+
+
+def build_interactive_argv(h: Harness, *, session_id: str, resume: str | None) -> list[str]:
+    """The command line a person's own terminal runs for `kraft item takeover`.
+
+    The `command` prefix, the provider session to continue when there is one,
+    and the id the new session takes. Nothing else: no prompt, no structured
+    log, no approval channel, no tool lists, no context -- the person is the
+    policy and the instruction.
+    """
+    i = h.interactive
+    if i is None:
+        raise HarnessError(f"takeover isn't supported for {h.id} yet")
+    if resume is not None and i.resume is None:
+        raise HarnessError(f"{h.id} can't resume a session interactively")
+    via_prefix = resume is not None and i.resume is not None and i.resume.via == "command_resume"
+    prefix = list(i.command_resume if via_prefix else i.command)
+    if via_prefix and resume is not None:
+        prefix = [p.replace("{value}", resume) for p in prefix]
+    argv = prefix
+    if resume is not None and i.resume is not None and not via_prefix:
+        argv += _fill(i.resume.argv, resume)
+    if i.session_id is not None:
+        argv += _fill(i.session_id.argv, session_id)
     return argv

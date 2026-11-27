@@ -9,6 +9,7 @@ chain an approval covers.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Mapping
@@ -17,7 +18,13 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from kraft.templates import revision
-from kraft.templates.models import PATH_SEPARATOR, ExecNode, GateNode, ResolvedChain
+from kraft.templates.models import (
+    PATH_SEPARATOR,
+    ExecNode,
+    GateNode,
+    ResolvedChain,
+    lift_tasks,
+)
 
 #: What `work_items.chain_template` holds for a one-off item; no chain id can.
 ONE_OFF_TEMPLATE = "@one-off"
@@ -58,8 +65,12 @@ def review_digest(authored_digest: str, custom: list[dict]) -> str:
 
 
 def prepare(mapping: Mapping[str, object]) -> tuple[dict, str]:
-    """The chain with its `id` filled in, and its digest: the only way one is made."""
-    authored = {**mapping, "id": mapping.get("id") or DEFAULT_ID}
+    """The chain with its `id` filled in and its flat forge keys under `config`,
+    and its digest: the only way one is made, so the editor and the filing hash
+    the same mapping."""
+    lifted = copy.deepcopy(dict(mapping))
+    lift_tasks(lifted)
+    authored = {**lifted, "id": lifted.get("id") or DEFAULT_ID}
     return authored, digest(authored)
 
 

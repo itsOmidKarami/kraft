@@ -244,13 +244,16 @@ describe("the phone board (B)", () => {
 
   it("lists a parent's slices on its card, opens each as its own item, and keeps a slice off the board as a card", async () => {
     const children = [
-      { id: "c1", title: "Cache reads", slice_key: 1, status: "needs_human", display_status: "needs_you" as const, current_node_id: "verification", cost_usd: 0.4 },
+      { id: "c1", title: "Item p1 · slice 1: Cache reads", slice_key: 1, status: "needs_human", display_status: "needs_you" as const, current_node_id: "verification", cost_usd: 0.4 },
+      { id: "c2", title: "Item p1 · slice 2: Cache writes", slice_key: 2, status: "completed", display_status: "archived" as const, current_node_id: "verification", cost_usd: 0.2 },
     ];
     // A live `work_item_created` can leave the child itself in the store: it is no card of its own.
-    put(item("p1", "running", { children, slices: { done: 0, needs_you: 1, paused: 0, running: 0, queued: 0, dropped: 0, total: 1 } }), item("c1", "needs_you", { parent_id: "p1", slice_key: 1 }));
+    put(item("p1", "running", { children, slices: { done: 1, needs_you: 1, paused: 0, running: 0, queued: 0, dropped: 0, total: 2 } }), item("c1", "needs_you", { parent_id: "p1", slice_key: 1 }));
     mount();
-    const slices = await screen.findByRole("list", { name: "Slices of Item p1" });
+    const slices = await screen.findByRole("list", { name: "Slices of Item p1 that need you" });
     expect(screen.queryByText("Item c1")).toBeNull();
+    // Only the slice that needs you, by its own name, not its parent's again; the archived one is in the summary alone.
+    expect(within(slices).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["slice 1: Cache reads, needs you · verification"]);
     await userEvent.click(within(slices).getByRole("button", { name: /Cache reads/ }));
     expect(where()).toContain("/work-items/c1");
   });

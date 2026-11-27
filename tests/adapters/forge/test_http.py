@@ -227,6 +227,7 @@ async def test_a_log_download_follows_one_redirect_without_the_token(
             await tr(m, _GHES).rest("GET", _LOGS, download=True)
         assert says in str(err.value)
         assert (err.value.reason, err.value.status) == (reason, status)
+        assert err.value.no_answer is ("did not answer" in says)
         assert "SECRETSIG" not in str(err.value) and "S2" not in str(err.value)
     assert len(m.requests) == sent
     assert m.requests[0].headers["authorization"] == f"Bearer {TOK}"
@@ -330,6 +331,17 @@ async def _never(req):
         pytest.param(
             lambda req: httpx.Response(400, json={"message": "m" * 600}), "…", id="long-message"
         ),
+        pytest.param(
+            lambda req: httpx.Response(
+                422,
+                json={
+                    "message": "Validation Failed",
+                    "errors": [{"message": "one pending review per pull request"}],
+                },
+            ),
+            "Validation Failed; one pending review per pull request",
+            id="errors-detail",
+        ),
     ],
 )
 async def test_a_call_is_bounded_and_its_error_stays_short(mock_http, monkeypatch, answer, says):
@@ -337,6 +349,7 @@ async def test_a_call_is_bounded_and_its_error_stays_short(mock_http, monkeypatc
     with pytest.raises(ForgeError) as err:
         await tr(mock_http(handler=answer), timeout=0.05).rest("GET", "x")
     assert says in str(err.value) and len(str(err.value)) < 300, str(err.value)
+    assert err.value.no_answer is ("did not answer" in says)
 
 
 def test_a_transport_registers_its_token_with_the_redactor(mock_http):
@@ -474,6 +487,8 @@ async def test_an_error_is_a_structured_forge_error(mock_http, answer, reason, s
         await tr(m).rest("GET", "x")
     err = e.value
     assert (err.reason, err.status) == (reason, status)
+    # Only a call nothing answered; a 500 answered, and TLS will not heal by itself.
+    assert err.no_answer is (status is None and reason == "unreachable")
     assert len(m.requests) == 1
     if status:
         assert f"(HTTP {status})" in str(err)
@@ -481,6 +496,24 @@ async def test_an_error_is_a_structured_forge_error(mock_http, answer, reason, s
         assert "set ca_file on forge account corp" in str(err) and "refused" not in str(err)
     if "SSO" in str(answer):
         assert err.sso_url == "https://github.com/orgs/a/sso?x=1"
+
+
+@pytest.mark.parametrize(
+    "error, no_answer",
+    [
+        (httpx.ReadError("connection reset"), True),
+        (httpx.RemoteProtocolError("server disconnected"), True),
+        (httpx.ReadTimeout("slow"), True),
+        (httpx.LocalProtocolError("bad header"), False),
+        (httpx.UnsupportedProtocol("no scheme"), False),
+    ],
+    ids=["reset", "disconnected", "timeout", "local-protocol", "unsupported"],
+)
+async def test_only_a_dropped_connection_is_no_answer(mock_http, error, no_answer):
+    m = mock_http({("GET", f"{GH}/x"): error})
+    with pytest.raises(ForgeError) as e:
+        await tr(m).rest("GET", "x")
+    assert e.value.no_answer is no_answer
 
 
 async def test_an_error_body_echoing_the_token_is_redacted(mock_http):

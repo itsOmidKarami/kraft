@@ -14,11 +14,12 @@ import pytest
 from support.harness import entry_of
 from support.item_walk import approve, commits_a_fix, merge_drops, walk_once
 
-from kraft import executor, item_paths, store
+from kraft import db, events, executor, item_paths, store
 from kraft import policy as _policy
-from kraft.executor import gates
+from kraft.executor import gates, stops
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import BuiltinTask
+from kraft.vocab import ChainEvent
 
 SEEDED = Path(__file__).resolve().parents[2] / "config"
 NO_SETUP = entry_of({"setup_command": ""})
@@ -30,13 +31,14 @@ def default_chain():
     return TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("default")
 
 
-def _walk(it, chain, node: str):
+def _walk(it, chain, node: str, steer_to: dict[str, str] | None = None):
     return executor.run_once(
         it.database,
         it.run_dirs,
         work_item_id=it.id,
         start_index=[n.id for n in chain.nodes].index(node),
         policy=POLICY,
+        steer_to=steer_to,
         launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
@@ -115,13 +117,102 @@ def _moves_base_once(it):
     return effect
 
 
+def _holds_a_members_move_once(it):
+    """What `forge.run_task` writes when a workspace member's CI wait rebased it and the root
+    then stopped, parked or failed: the member's move, held for the node's next completion."""
+    held = []
+
+    async def effect(_row):
+        if not held:
+            held.append(True)
+            await it.database.write(
+                lambda c: events.append(
+                    c,
+                    it.id,
+                    ChainEvent.BASE_MOVE_HELD,
+                    {"node_id": "merge_request_feedback", "before": ""},
+                )
+            )
+
+    return effect
+
+
+def _taken_at_its_park(monkeypatch, it, door):
+    """`door` takes the park before the walk that parked it has returned."""
+    for name in ("stop_for_rate_limit", "stop_for_waiting"):
+        real = getattr(stops, name)
+
+        async def parks(*args, real=real):
+            stopped = await real(*args)
+            await it.database.write(door)
+            return stopped
+
+        monkeypatch.setattr(stops, name, parks)
+
+
+_REPAIRED = ["await_review", "triage", "await_ci", "repair_feedback", "sync_mr", "await_review"]
+
+
+@pytest.mark.parametrize(
+    ("plan", "moves", "parks", "before"),
+    [
+        ({}, "base", (), ["await_review", "triage", "await_ci"]),
+        # Pushing the rebased head failed: `on_failure` repairs and pushes it,
+        # and the node's re-measure parks on the review of that head.
+        (
+            {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
+            "base",
+            ("waiting",),
+            _REPAIRED,
+        ),
+        # Pushing the rebased head was rate-limited.
+        (
+            {"await_ci": ["rate_limited", "done"]},
+            "base",
+            ("rate_limited",),
+            ["await_review", "triage", "await_ci"],
+        ),
+        # Its poller took the park back before the walk that parked it checked the move.
+        (
+            {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
+            "reentered",
+            (),
+            _REPAIRED,
+        ),
+        (
+            {"await_ci": ["rate_limited", "done"]},
+            "reentered",
+            (),
+            ["await_review", "triage", "await_ci"],
+        ),
+        # A workspace member moved under a root whose failure the node repaired.
+        ({"await_ci": ["failed", "done"]}, "member", (), [*_REPAIRED, "triage", "await_ci"]),
+        # A workspace member moved under a rate-limited root: held across each park.
+        (
+            {"await_ci": ["rate_limited", "rate_limited", "done"]},
+            "member",
+            ("rate_limited", "rate_limited"),
+            ["await_review", "triage", "await_ci", "await_ci", "await_ci"],
+        ),
+    ],
+    ids=[
+        "completes",
+        "parks-on-the-review-wait",
+        "rate-limited",
+        "parks-and-its-poller-re-enters-first",
+        "rate-limited-and-its-poller-re-enters-first",
+        "a-member-moved-under-a-repaired-root",
+        "a-member-moved-under-a-rate-limited-root",
+    ],
+)
 async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head(
-    item_on, script, default_chain
+    item_on, script, default_chain, monkeypatch, plan, moves, parks, before
 ):
     """Kraft-bjw6a. A CI conflict rebased away moves the base, and
     `merge_request_feedback` declares `on_base_changed: {restart_from:
     verification}`, so the rebased head is tested and reviewed again before
-    anything reads it as green.
+    anything reads it as green -- also when the node parks after the move and
+    its poller walks it again from its cursor.
 
     The rebase was clean -- the forge's forced rebase succeeds only with no
     textual conflict -- so the approved `local_review` in the restart span keeps
@@ -130,22 +221,43 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span."""
     it = await item_on(default_chain, "merge_request_feedback")
     await approve(it, "local_review")
-    script.effects = {"await_ci": _moves_base_once(it)}
+    script.plan = plan
+    script.effects = {
+        "await_ci": _holds_a_members_move_once(it) if moves == "member" else _moves_base_once(it)
+    }
+    if moves == "reentered":  # its poller, before that walk has returned
+        _taken_at_its_park(monkeypatch, it, lambda c: store.mark_reentered(c, it.id))
+    await it.session("parked", "merge_request_feedback.main.await_review", "waiting")
 
-    assert await _walk(it, default_chain, "merge_request_feedback") == "awaiting_gate"
+    # Addressed to a task this walk never launches, so no launch takes it.
+    unread = {"elsewhere.main.task": "a note"} if moves == "reentered" else None
+    walked = await _walk(it, default_chain, "merge_request_feedback", unread)
+    if unread:
+        # The walk that carries on reports the steer it replaces with what moved.
+        assert [e["payload"]["steer"] for e in it.events("steer_undelivered")][0] == "a note"
+        assert script.steers["test_changed_scopes"][0].source == "seeded"
+    # No later walk observes that wait, or reuses its row for the rebased head.
+    closed = [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
+    assert closed == (moves != "member" or not parks), "a held member move closes it later"
+    for park in parks:
+        assert walked == park
+        # A member's move does not re-verify into the rate limit it parked on.
+        assert bool(it.events("base_change_restart")) == (moves != "member")
+        await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
+        walked = await walk_once(it, POLICY)
+    assert walked == "awaiting_gate"
+    assert [s["status"] for s in it.sessions() if s["id"] == "parked"] == ["paused"]
     assert script.calls == [
-        "await_ci",
-        "await_review",
-        "triage",
+        *before,
         "test_changed_scopes",
         "code_review",
         "author",
         "author",
         "rebase",
         "open",
-        "await_ci",
         "await_review",
         "triage",
+        "await_ci",
         "author",
     ]
     [restart] = it.events("base_change_restart")
@@ -154,6 +266,116 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
     assert requested == ["local_review", "final_review"]
     assert it.events("gate_reopened") == []
+
+
+@pytest.mark.parametrize(
+    ("park", "door", "left"),
+    [
+        ("rate_limited", "pause", "paused"),
+        ("waiting", "pause", "paused"),
+        ("rate_limited", "abandon", "abandoned"),
+    ],
+    ids=["paused-at-a-rate-limit", "paused-at-a-wait", "abandoned-at-a-rate-limit"],
+)
+async def test_a_door_that_takes_the_park_first_keeps_the_restart_off_it(
+    item_on, script, default_chain, monkeypatch, park, door, left
+):
+    """A person pauses or abandons the item between its park and the restart the move owes:
+    it stays where they left it, and nothing of the restart is written."""
+    it = await item_on(default_chain, "merge_request_feedback")
+    await approve(it, "local_review")
+    script.plan = {"await_ci": [park]}
+    script.effects = {"await_ci": _moves_base_once(it)}
+    takes = {
+        "pause": lambda c: store.pause_work_item(c, it.id, []),
+        "abandon": lambda c: store.abandon_work_item(c, it.id, "dropped"),
+    }[door]
+    _taken_at_its_park(monkeypatch, it, takes)
+
+    assert await _walk(it, default_chain, "merge_request_feedback") == park
+    assert it.status() == left
+    assert it.row()["current_node_id"] == "merge_request_feedback"
+    assert it.events("base_change_restart") == []
+
+
+@pytest.mark.parametrize(
+    ("how", "answer"),
+    [
+        ("pause", "paused"),
+        ("question", "needs_context"),
+        ("server-restart", "paused"),
+        ("skip", "paused"),
+        ("by-another-door", "paused"),
+    ],
+    ids=["pause", "question", "server-restart", "skip", "by-another-door"],
+)
+async def test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite(
+    item_on, script, default_chain, run_dirs, how, answer
+):
+    """A person's stop after the node moved its base stays on that node, so a steer or an
+    answer reaches its agent, and the restart runs when the node is next walked, from the
+    record alone. A skip drops the owed restart; a door that took the item gets no record."""
+    node = "merge_request_feedback"
+    it = await item_on(default_chain, node)
+    await approve(it, "local_review")
+    feedback = next(n for n in default_chain.nodes if n.id == node)
+    paths = {t.task.id: t.path for step in feedback.steps for t in step.tasks}
+    triage, ci = paths["triage"], paths["await_ci"]
+    await it.session("held", triage, "paused")
+    moves = _moves_base_once(it)
+
+    async def stops(row):
+        if it.events("base_move_held") or len(script.steers["await_ci"]) > 1:
+            if answer == "needs_context":  # the answered look's own session
+                await it.session(f"answered-{len(script.steers['await_ci'])}", ci, "done")
+            return  # only the first look stops
+        await moves(row)
+        if answer == "needs_context":
+            await it.session("asked", ci, "needs_context")
+        elif how != "by-another-door":
+            await it.database.write(lambda c: store.pause_work_item(c, it.id, []))
+
+    script.plan = {"await_ci": [answer, "done"]}
+    script.effects = {"await_ci": stops}
+
+    walked = await _walk(it, default_chain, node)
+
+    assert walked == ("paused" if answer == "paused" else "needs_human")
+    assert it.events("base_change_restart") == []
+    assert it.events("gate_reopened") == []
+    assert it.row()["current_node_id"] == node
+    assert [s["status"] for s in it.sessions() if s["id"] == "held"] == ["paused"]
+    assert bool(it.events("base_move_held")) == (how != "by-another-door")
+    if how == "by-another-door":
+        return
+    if how == "skip":
+        await it.database.write(lambda c: store.skip_node(c, it.id, node, None, "not needed"))
+        await it.database.write(lambda c: store.stand_at(c, it.id, node))
+        script.plan = {}
+        await walk_once(it, POLICY)
+        assert it.events("base_change_restart") == []
+        return
+    assert executor.resume_steer(it.database, it.row(), "note", {}) == {triage: "note"}
+
+    await it.database.write(lambda c: store.mark_reentered(c, it.id))
+    database = await db.Database.open(run_dirs.db) if how == "server-restart" else it.database
+    try:
+        walked = await executor.run_once(
+            database,
+            it.run_dirs,
+            work_item_id=it.id,
+            policy=POLICY,
+            steer="answer",
+            launch=executor.LaunchContext(repo_entry=NO_SETUP),
+        )
+    finally:
+        if how == "server-restart":
+            await database.close()
+
+    assert walked == "awaiting_gate"
+    assert script.calls[3:5] == ["await_ci", "test_changed_scopes"]
+    [restart] = it.events("base_change_restart")
+    assert restart["payload"]["restart_from"] == "verification"
 
 
 async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback(
@@ -171,7 +393,7 @@ async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_fe
     script.effects = {"rebase": _moves_base_once(it)}
 
     assert await _walk(it, default_chain, "draft_merge_request") == "awaiting_gate"
-    assert script.calls == ["rebase", "open", "await_ci", "await_review", "triage", "author"]
+    assert script.calls == ["rebase", "open", "await_review", "triage", "await_ci", "author"]
     assert it.events("base_change_restart") == []
     assert gates.pending_gate(it.database, it.id) == "final_review"
     assert it.row()["base_ref"] == "1" * 40

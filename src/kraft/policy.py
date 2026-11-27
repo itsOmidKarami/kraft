@@ -78,6 +78,12 @@ DEFAULT_ESCALATION_GRANTS = ("git-commit", "git-rebase", "git-push")
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 #: `storage.outputs.max_size` when policy.yaml sets none: 64M.
 DEFAULT_OUTPUTS_MAX_BYTES = 64 << 20
+#: What a missing reply key reads: code defaults, so a
+#: `policy.yaml` seeded before the keys, a chain and an item filed before them
+#: all get a value.
+DEFAULT_REPLY_CAP_PER_THREAD = 2
+DEFAULT_REPLY_ROUNDS_PER_HEAD = 2
+DEFAULT_REPLY_TIMEOUT_MINUTES = 5
 
 
 @model(frozen=True, config=ConfigDict(extra="forbid"))
@@ -753,7 +759,13 @@ _SAFETY_NUMERIC_FIELDS: tuple[str, ...] = ()
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
 #: `work-item-policy-may-exceed-default-ceilings-within-admin-maximum`).
-_OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
+_OPERATIONAL_NUMERIC_FIELDS = (
+    "timeout_minutes",
+    "max_attempts",
+    "reply_cap_per_thread",
+    "reply_rounds_per_head",
+    "reply_timeout_minutes",
+)
 #: Retired by Ruling 196: a wait's timeout is its task's own
 #: `total_time_cap_minutes`.
 RETIRED_WAIT_TIMEOUT = "wait_timeout_minutes"
@@ -886,6 +898,11 @@ class PolicyDefaultsInput(CapLevels):
 
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    #: Part 2's reply limits (`DEFAULT_REPLY_*` when unset): Kraft's triage replies
+    #: per thread and reply rounds per head, and how long a round waits for an answer.
+    reply_cap_per_thread: PositiveInt | None = None
+    reply_rounds_per_head: PositiveInt | None = None
+    reply_timeout_minutes: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
     #: The `harnesses.yaml` profile an escalation turn runs on, or `"item"`
     #: (`FOLLOW_ITEM`). Operational: any layer may change it, and the
@@ -917,6 +934,9 @@ class PolicyMaximaInput(CapLevels):
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    reply_cap_per_thread: PositiveInt | None = None
+    reply_rounds_per_head: PositiveInt | None = None
+    reply_timeout_minutes: PositiveInt | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1465,6 +1485,10 @@ class TaskPolicyOverride(BaseModel):
     #: rate limit, less only a manual pause. For a task other than a wait that
     #: is its running time; for a wait it is the wait's timeout (Ruling 196).
     total_time_cap_minutes: PositiveInt | None = None
+    #: How long a reply round waits for an answer to each Kraft reply: read at
+    #: the review wait, so any scope may set it and the nearest wins. An
+    #: operational number (`InstancePolicy.reply_timeout_minutes`).
+    reply_timeout_minutes: PositiveInt | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1485,6 +1509,10 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    #: Bound an execution node's reply rounds (Part 2): Kraft's triage replies per
+    #: thread per item, and reply rounds per head in one node run.
+    reply_cap_per_thread: PositiveInt | None = None
+    reply_rounds_per_head: PositiveInt | None = None
     #: `PolicyDefaultsInput.escalation_harness`, for this scope: an escalation
     #: turn runs under the policy of the node its item stopped at.
     escalation_harness: StrictStr | None = None
@@ -1535,7 +1563,11 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             escalation_harness=escalation[0] if escalation else None,
             **{
                 n: min(values) if (values := present(n)) else None
-                for n in (*BUDGET_FIELDS, "timeout_minutes", "max_attempts", *CAP_FIELDS)
+                for n in (
+                    *BUDGET_FIELDS,
+                    *_OPERATIONAL_NUMERIC_FIELDS,
+                    *CAP_FIELDS,
+                )
             },
         )
 
@@ -1678,6 +1710,12 @@ class WorkItemPolicy(TemplatePolicyOverride):
         return next((v for v in values if v is not None), None)
 
 
+def _reply_value(default: int | None, maximum: int | None, code: int) -> int:
+    """A reply limit: the `defaults:` value, else the code default, never past the maximum."""
+    value = code if default is None else default
+    return value if maximum is None else min(value, maximum)
+
+
 @dataclass(frozen=True)
 class InstancePolicy:
     """One resolved policy state: the effective value of every field, plus
@@ -1713,6 +1751,11 @@ class InstancePolicy:
     escalation_harness: str = DEFAULT_ESCALATION_HARNESS
     #: `defaults.escalation_grants`, frozen with the snapshot like the rest.
     escalation_grants: tuple[str, ...] = DEFAULT_ESCALATION_GRANTS
+    #: Part 2's reply limits (`defaults.reply_*`, else the code defaults), held to
+    #: the maxima.
+    reply_cap_per_thread: int = DEFAULT_REPLY_CAP_PER_THREAD
+    reply_rounds_per_head: int = DEFAULT_REPLY_ROUNDS_PER_HEAD
+    reply_timeout_minutes: int = DEFAULT_REPLY_TIMEOUT_MINUTES
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -1736,6 +1779,15 @@ class InstancePolicy:
             escalation_grants=tuple(d.escalation_grants)
             if d.escalation_grants is not None
             else DEFAULT_ESCALATION_GRANTS,
+            reply_cap_per_thread=_reply_value(
+                d.reply_cap_per_thread, m.reply_cap_per_thread, DEFAULT_REPLY_CAP_PER_THREAD
+            ),
+            reply_rounds_per_head=_reply_value(
+                d.reply_rounds_per_head, m.reply_rounds_per_head, DEFAULT_REPLY_ROUNDS_PER_HEAD
+            ),
+            reply_timeout_minutes=_reply_value(
+                d.reply_timeout_minutes, m.reply_timeout_minutes, DEFAULT_REPLY_TIMEOUT_MINUTES
+            ),
         )
 
     def at_level(self, level: str) -> InstancePolicy:

@@ -18,13 +18,13 @@ def forge(target: str = CI, **kw) -> dict:
 @pytest.mark.parametrize(
     "task",
     [
-        pytest.param(forge(pipeline="12345"), id="digits"),
-        pytest.param(forge(pipeline="0"), id="zero"),
-        pytest.param(forge(pipeline=12345), id="unquoted-yaml-integer"),
+        pytest.param(forge(config={"pipeline": "12345"}), id="digits"),
+        pytest.param(forge(config={"pipeline": "0"}), id="zero"),
+        pytest.param(forge(config={"pipeline": 12345}), id="unquoted-yaml-integer"),
     ],
 )
 def test_ci_pipeline_accepts_a_literal_id(task):
-    assert tm.ForgeTask.model_validate(task).pipeline == str(task["pipeline"])
+    assert tm.ForgeTask.model_validate(task).pipeline == str(task["config"]["pipeline"])
 
 
 @pytest.mark.parametrize(
@@ -32,13 +32,17 @@ def test_ci_pipeline_accepts_a_literal_id(task):
     [
         pytest.param(forge(), "needs its pipeline id", id="missing"),
         pytest.param(
-            forge("mr.ci", pipeline="12345"), "only a ci.pipeline task", id="other-target"
+            forge("mr.ci", config={"pipeline": "12345"}),
+            "not an option of mr.ci",
+            id="other-target",
         ),
-        pytest.param(forge(pipeline="12a"), "digits only", id="letters"),
-        pytest.param(forge(pipeline="12\n"), "digits only", id="trailing-newline"),
-        pytest.param(forge(pipeline=""), "digits only", id="empty"),
-        pytest.param(forge(pipeline=-5), "digits only", id="negative-integer"),
-        pytest.param(forge(pipeline="12345", scope="each_repository"), "scope", id="fan-out"),
+        pytest.param(forge(config={"pipeline": "12a"}), "digits only", id="letters"),
+        pytest.param(forge(config={"pipeline": "12\n"}), "digits only", id="trailing-newline"),
+        pytest.param(forge(config={"pipeline": ""}), "digits only", id="empty"),
+        pytest.param(forge(config={"pipeline": -5}), "digits only", id="negative-integer"),
+        pytest.param(
+            forge(config={"pipeline": "12345"}, scope="each_repository"), "scope", id="fan-out"
+        ),
     ],
 )
 def test_ci_pipeline_refusals(task, match):
@@ -48,20 +52,8 @@ def test_ci_pipeline_refusals(task, match):
 
 def test_a_bad_value_is_never_echoed():
     with pytest.raises(ValidationError) as caught:
-        tm.ForgeTask.model_validate(forge(pipeline="s3cret-id"))
+        tm.ForgeTask.model_validate(forge(config={"pipeline": "s3cret-id"}))
     assert all("s3cret-id" not in e["msg"] for e in caught.value.errors())
-
-
-@pytest.mark.parametrize(
-    ("target", "kw", "hidden"),
-    [
-        pytest.param("mr.ci", {}, True, id="mr.ci"),
-        pytest.param(CI, {"pipeline": "1"}, False, id="ci.pipeline"),
-    ],
-)
-def test_pipeline_row_is_shown_only_on_ci_pipeline(target, kw, hidden):
-    task = tm.ForgeTask.model_validate(forge(target, **kw))
-    assert ("pipeline" in task.unread()) is hidden
 
 
 def test_ci_pipeline_waits():
@@ -78,7 +70,7 @@ def _chain_with(pipeline: str, *, writes=("PIPELINE_ID",), reads=("find.t",)) ->
                     {"id": "find", "tasks": [sub(outputs={"variables": list(writes)})]},
                     {
                         "id": "wait",
-                        "tasks": [forge(pipeline=pipeline, reads=list(reads))],
+                        "tasks": [forge(config={"pipeline": pipeline}, reads=list(reads))],
                     },
                 ]
             )

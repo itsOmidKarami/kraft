@@ -1,6 +1,6 @@
 ---
 name: next
-description: "Runs the next node of a Kraft Lite chain from its recorded state. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
+description: "Runs the next node of a Kraft Lite chain from its recorded state. Use when continuing a chain: right after `kraft-lite:start`, after `kraft-lite:gate` has recorded an answer, when the user says to carry on or that they merged a slice's PR, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`; a slice's child starts with `kraft-lite:build-slice`."
 ---
 
 # Running the next node
@@ -10,26 +10,30 @@ it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
 This skill holds no state in the conversation: everything comes from `state`,
 so it survives a `/clear`. Below, `KL` is short for
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command carries
-`--chain-id <id>`. If a verb exits saying there is more than one unfinished
-chain, show the user the list it printed and ask which - do not pick. A verb
-that refuses with `Run: python3 kl.py migrate` means a run or registry from an
-older Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
-migrate`, then go on with the new id it prints.
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command except `settings`,
+`import`, `chains`, `detect`, `migrate` and `start` carries `--chain-id <id>`.
+In a cleared session you have no id: take `chain_id` from `KL chains`, or from
+a bare `state` while one chain is unfinished. If a verb exits saying there is
+more than one unfinished chain, show the user the list it printed and ask
+which - don't pick. A verb that refuses with `Run: python3 kl.py migrate` means
+a run or registry from an older Kraft Lite: follow `kraft-lite:init`'s last
+section, `A pre-V1 directory: migrate`, then go on with the new id it prints.
 
 ## 1. Read the state
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
-You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
-`steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
+You get `chain_id`, `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
+`read_only`, `steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
 `on_merge_rejected`, `gate` and `sliced`.
 
-- `status: unstarted` - there is no chain here. Invoke `kraft-lite:start`, or say
-  so if you were not asked to start one. Do not report this as finished.
+- `status: unstarted` - there is no chain here: tell the user so. Invoke
+  `kraft-lite:start` only if they asked to begin work, with the title they gave.
+  Do not report this as finished.
 - `status: done` - the chain is finished. Report what it cost (section 5) and stop.
 - `status: blocked` - a gate is waiting. Invoke `kraft-lite:gate`. Do not proceed.
-- `note` non-empty - the node was sent back. That note leads this attempt.
+- `sliced` null, as in most chains - `kind: exec` is section 2 and `kind: gate`
+  is section 4; skip the rest of this section.
 - `sliced` not null, `status` neither `done` nor `blocked` - `sliced.action` says
   what this node is:
   - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
@@ -46,7 +50,7 @@ You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
     failure.
   - `skip` - `KL close` with nothing run (`KL approve` on a gate node: `close`
     refuses one), then this skill again.
-  - `await_user_merges` - check the PR of each slice that `slices` does not show as
+  - `await_user_merges` - check the PR of each slice that `KL slices` does not show as
     `merged`. For each the user merged: `KL slice-set --slice <key> --status merged`,
     tell each slice cut from its branch or from the target to rebase onto the
     target, and archive its child, as `kraft-lite:run-slices` says after a merge,
@@ -56,9 +60,9 @@ You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
     merged, `KL close` (`KL approve` on a gate node), then this skill again. Never
     open this node's gate or ask anyone to approve it: the user's merges are the answer.
   - `run` - as in an unsliced chain, below.
-- Otherwise `kind: exec` is section 2 and `kind: gate` is section 4.
 
-In a sliced `feature` run, every task from the first build node on runs in a
+In a sliced `feature` run, every task from the first build node on (the
+`shape.first_build` that `KL slices` prints) runs in a
 worktree of the feature branch, never in the state branch's checkout: the rebase
 and the PR are made from the branch they run in. Make the worktree
 once, from origin's feature branch, where the slices merged:
@@ -82,9 +86,22 @@ where they name one, not the strongest by default). Run each task by its `kind`:
 
 - `skill` - invoke `skill`, with `prompt` as the instruction.
 - `prompt` - follow `prompt`. A `source` ending `(skill missing)` means the bound
-  skill is not installed here: say you fell back.
+  skill is not installed here, and Lite ships no method for it: say you fell back.
+  One ending `(shipped method)` means the skill is missing too, but `prompt` ends
+  with a `## Method` section naming a file: read that file and follow it as the
+  task's method.
 - `subprocess` - run `command` as an argument list, without a shell; show its output.
 - `skip` - run nothing; say the task was skipped, and its `why`.
+
+A non-empty `note` means the node was sent back (a rejection, a base change or a
+merge drop), and `state` doesn't put it in any task's `prompt`. Give it to every
+`skill` and `prompt` task as the first thing in its instruction.
+
+A step with `read_only: true`, or any step in `steps` when the node's own
+`read_only` is true, changes nothing: write, edit and commit nothing, run no
+test or command that writes, leave no file behind. The node's flag doesn't reach
+its `on_failure` or `fix_loop` steps, which repair. Kraft Lite does not check
+this: the rule is yours to keep.
 
 After a task with `produces`, record the file it wrote before anything else:
 `KL produced --kind <produces> --path <file>`, `<file>` being the absolute path
@@ -114,12 +131,15 @@ PR's branch, then `KL restart --merge-rejected`: it reopens the walk from
 checks and the final gate are answered again before the merge runs. Then this
 skill again.
 
-Every step passed: `KL close`, then this skill again. In a sliced run (`sliced`
+Checks still running are neither a pass nor a failure: leave the node open,
+spend no `attempt`, run no `KL close`, and wait as below. Every step passed:
+`KL close`, then this skill again. In a sliced run (`sliced`
 not null), export state after every `close`, as `kraft-lite:run-slices`
 describes under State branch.
 
 Resuming replays a node from its first step: keep tasks idempotent, and stop and
-ask rather than run twice one that is not. The chain froze at `start` and cannot
+ask rather than run twice one that is not. Before replaying a task, check what
+it left: the branch, the PR, the merge. The chain froze at `start` and cannot
 be reordered, but `.kraft-lite/bindings.yaml` is read again at every `state`, so
 rebinding a task there is how a live chain is corrected.
 
@@ -134,14 +154,17 @@ rebinding a task there is how a live chain is corrected.
    whole node again from its first step.
 3. `fix_loop` null: stop and report. A node with no fix loop has no retry budget.
 4. `KL attempt`. When it prints `attempt` 2 or more and `fix_loop.judge` is set,
-   run the judge first, with every attempt's findings and the attempts used of
-   `cap`. It rules: stop for the user (stop, with its reasoning); finish with
-   findings, when no task failed outright (`KL close`, report the findings left);
-   or continue.
+   run the judge first, with every attempt's findings and `attempt` against
+   `cap`. It returns `continue`, `stop_needs_human` or `stop_downgrade`, with
+   `concerns`. On `stop_needs_human`, stop for the user with its `concerns`. On
+   `stop_downgrade`, finish with findings when no task failed outright (`KL close`,
+   report the findings left). On `continue`, step 6 hands its `concerns` to the
+   repair. No verdict buys a cycle past the cap: step 5 still applies.
 5. `over_cap: true` - stop the chain and escalate: show the user every attempt's
    output, not a summary. A cap that is hit is a failure they need the traces for.
-6. Run `fix_loop.steps` as in section 2, with what failed and the findings as
-   their input, then the whole node again from its first step - not the chain.
+6. Run `fix_loop.steps` as in section 2, with what failed, the findings and the
+   judge's `concerns` (when it ran) as their input, then the whole node again
+   from its first step - not the chain.
 
 ## 4. A gate node
 

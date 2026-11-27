@@ -414,3 +414,18 @@ def test_a_chain_summary_names_its_parent_and_its_children(client):
     assert listed["default"]["extended_by"] == ["middle", "team"]
     # A child that writes no description shows the one it inherits.
     assert listed["team"]["description"] == "Ours."
+
+
+def test_a_chain_put_answers_the_text_it_wrote(client, templates_dir):
+    flat = SCRATCH.replace(
+        '      - {id: t, kind: subprocess, command: "true"}',
+        "      - id: t\n        kind: forge\n        target: ci.pipeline\n        pipeline: 42",
+    )
+    path = templates_dir / "chains" / "scratch.yaml"
+    path.write_text(flat)
+    r = client.put("/api/templates/chains/scratch", json={"text": flat})
+    assert r.status_code == 200, r.text
+    assert "config:" in r.json()["text"]
+    assert r.json()["text"] == path.read_text()
+    assert r.json()["warning"] is None
+    assert (templates_dir / "chains" / "scratch.yaml.pre-config").read_text() == flat

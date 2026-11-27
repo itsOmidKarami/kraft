@@ -51,7 +51,6 @@ const KNOWN_GAPS: Record<string, string> = {
   // every surface falls back on its own rule (`status.admits`), held to the same doors by `status.test.ts`.
   "GET /api/work-items:items[].actions": "the UI's own door rule stands in, as for a server older than `actions`",
   "GET /api/work-items/{wid}:actions": "the UI's own door rule stands in, as for a server older than `actions`",
-  "GET /api/work-items/{wid}/documents:documents[]": "the item pages' sample items list no documents; the older board's carry every key",
 };
 
 describe("skeleton: the same rows as test_api_shapes.py's", () => {
@@ -81,11 +80,15 @@ describe("missingKeys", () => {
 
 describe("the demo's mocked API answers every key the real server does", () => {
   const S = buildScenario("default");
-  const item = S.ng["needs-gate"];
+  // A board row waiting at a gate, with documents of its own (kraft-cb59): its documents list holds the pending gate's
+  // and those its approvals and sessions filed, every key a real list's rows carry.
+  const item = S.ngBoard.find((id) => S.bundles[id].item.bead_id === "kraft-cb59")!;
   const b = S.bundles[item];
   // No sample item is filed with a spec, so the attachment route reads one given here.
   b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
-  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat()[0].document_id, $REPO: b.item.repo };
+  // A session whose agent handed work to sub-agents (a spec's author, its first, works alone).
+  const sub = b.sessions.find((s) => subagentList(b.logs[s.id] ?? [], s.status).length)!;
+  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: sub.id, $AGENT: subagentList(b.logs[sub.id] ?? [], sub.status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat().find((d) => d.source_kind === "session_summary")!.document_id, $REPO: b.item.repo };
   const serve = mockServer(S, demoOptions);
   const url = (route: string, params: Record<string, string>) => {
     let path = route.replace(/^GET /, "");
@@ -97,8 +100,11 @@ describe("the demo's mocked API answers every key the real server does", () => {
     return `http://demo${path}${query.size ? `?${query}` : ""}`;
   };
 
+  // The real run searched for its fake agent's name, which no demo document holds: search matches every word, so the
+  // demo's answer would list nothing and show no result's keys. A word the demo's documents hold stands in.
+  const QUERY: Record<string, Record<string, string>> = { "GET /api/search": { q: "cache" } };
   it.each(Object.entries(TABLE.routes))("%s", async (route, { params, shape }) => {
-    const reply = (await serve({ method: "GET", url: url(route, params), json: () => null })) as Answer;
+    const reply = (await serve({ method: "GET", url: url(route, { ...params, ...QUERY[route] }), json: () => null })) as Answer;
     expect(reply.status, `${route} answers ${reply.status}: ${reply.body}`).toBe(200);
     const gaps = Object.keys(KNOWN_GAPS).filter((g) => g.startsWith(`${route}:`)).map((g) => g.slice(route.length + 1));
     const missing = missingKeys(shape, skeleton(JSON.parse(reply.body!)));

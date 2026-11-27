@@ -2,10 +2,10 @@
 title: Reference
 navigation:
   title: Overview
-description: Look-up pages for the web UI, the CLI, the console, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables and events.
+description: Look-up pages for the web UI, the CLI, the console, Kraft Lite, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables and events.
 ---
 
-Look up a command, field, endpoint, tool, status or event. The sidebar groups these pages under the three headings below.
+Look up a command, field, endpoint, tool, status or event. The sidebar groups these pages under the four headings below.
 
 ## In this section
 
@@ -34,8 +34,5 @@ Look up a command, field, endpoint, tool, status or event. The sidebar groups th
 
 **Use Kraft in your editor**
 
-- [Kraft for VS Code](/reference/vscode-extension): when you want the extension's status bar, settings, Restricted Mode and version rule.
-
-**Upgrading**
-
-- [Changes from 1.4 to 2.0](/reference/changes-from-1-4): when you upgrade from 1.4 and want what changed, what 1.4 did, and what to do about it.
+- [Kraft for VS Code](/reference/vscode-extension): when you want the extension's commands, keys, settings, status bar, Restricted Mode and version rule.
+- [Kraft Lite](/reference/kraft-lite): when you run chains with the Lite plugin and want chain sources, bindings, fix-loop order, state fields, slices and the move from an older directory.

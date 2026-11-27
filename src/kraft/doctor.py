@@ -1900,14 +1900,14 @@ def _version_check() -> dict:
     if os.environ.get("KRAFT_NO_UPDATE_CHECK"):
         # The same switch `cli.admin._update_notice` honours: one env var turns off
         # every version check, so an air-gapped machine never reaches for the
-        # network and a test suite never depends on gitlab.com being up.
+        # network and a test suite never depends on GitHub's public releases API.
         return _check("version", True, f"{here} (skipped: KRAFT_NO_UPDATE_CHECK)", skipped=True)
     release = update.latest(channel=update.channel_of(update.installed()))
     if release is None:
-        # Not a skip: this ran and failed to get an answer, which on a
-        # private project usually means no GITLAB_TOKEN and no authenticated
-        # `glab` - worth a human's attention, unlike an opt-out or a missing
-        # server.
+        # Not a skip: the unauthenticated GitHub releases check ran but could
+        # not find a usable release. GitHub may be unreachable or refuse the
+        # request (for example, its rate limit), or the channel may have no
+        # release with a wheel. Unlike an opt-out, this merits a warning.
         return _check("version", True, f"{here} (could not reach the release feed)", warn=True)
     if update.is_behind(release):
         return _check("version", True, f"{here} installed, {release.tag} available")

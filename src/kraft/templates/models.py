@@ -46,8 +46,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewer
 from kraft.cap_levels import LEVEL_OF
 from kraft.policy import (
     FROZEN,
@@ -396,9 +397,6 @@ class WaitPolicy(BaseModel):
     model_config = _CONFIG
 
     polling: PollingPolicy = Field(default_factory=PollingPolicy)
-    #: `mr.automated_review` only: how long a review bot must stay quiet after
-    #: its last activity on the head before it counts as finished with it.
-    grace_period: Duration | None = None
 
 
 #: The grace period of a review wait that authors none.
@@ -502,6 +500,11 @@ class TaskBase(BaseModel):
         a forge task narrows by its target."""
         return self.TAKES_READS
 
+    def takes_reply_timeout(self) -> bool:
+        """Whether this task reads `policy.reply_timeout_minutes`: only the review
+        wait does (a reply round's wait for the bots' answers)."""
+        return False
+
     #: What only an agent launch reads, as `sources` names it (a policy cap as
     #: `policy.<cap>`). Steering is text for an agent's prompt, and the
     #: harness allowlist, the spend caps, the tool lists and the grants bound
@@ -529,7 +532,12 @@ class TaskBase(BaseModel):
         agent_only = (
             self.AGENT_ONLY & {"steering"} if self.on_failure is not None else self.AGENT_ONLY
         )
-        return agent_only if self.takes_reads() else agent_only | {"reads"}
+        agent_only = agent_only if self.takes_reads() else agent_only | {"reads"}
+        return (
+            agent_only
+            if self.takes_reply_timeout()
+            else agent_only | {"policy.reply_timeout_minutes"}
+        )
 
     def for_recovery(self) -> frozenset[str]:
         """The caps this task does not read but its `on_failure` recovery runs
@@ -758,19 +766,32 @@ def pipeline_variable(value: str | None) -> str | None:
     return (match[1] or match[2]) if match else None
 
 
-class ForgeTask(TaskBase):
-    kind: Literal[TaskKind.FORGE]
-    target: Annotated[ForgeAction, _LOOSE]
-    wait: WaitPolicy | None = None
-    #: `mr.automated_review` only: the reviewers it waits for when neither the
-    #: item's node override nor the repository's `automated_review:` names
-    #: any. Which reviewers, never how each is read
-    #: (`automated-review-implementation-is-not-template-configuration`).
-    #: `[]` expects none.
-    reviewers: list[AutomatedReview] | None = None
-    #: `ci.pipeline` only, and required there: the id of the one pipeline it
-    #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
-    pipeline: StrictStr | None = None
+class ReviewWaitConfig(BaseModel):
+    """`mr.automated_review`'s own keys (`forge-task-config-is-per-target`)."""
+
+    model_config = _CONFIG
+
+    #: The reviewers it waits for when neither the item's node override nor the
+    #: repository's `automated_review:` names any. Which, never how each is read
+    #: (`automated-review-implementation-is-not-template-configuration`). `[]`
+    #: expects none.
+    reviewers: list[Reviewer] | None = None
+    #: Also push the branch and read the merge request's pipeline at every
+    #: check, ending on a red pipeline or a conflict; the node's own `mr.ci`
+    #: task, in a later step, stays the owner of CI
+    #: (`watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait`).
+    watch_ci: StrictBool = False
+    #: How long a review bot must stay quiet after its last activity on the head.
+    grace_period: Duration | None = None
+
+
+class PipelineWaitConfig(BaseModel):
+    """`ci.pipeline`'s own key: the id of the one pipeline it waits for (a
+    GitLab pipeline `id`, a GitHub Actions run id), as digits or a `$NAME`."""
+
+    model_config = _CONFIG
+
+    pipeline: StrictStr
 
     @field_validator("pipeline", mode="before")
     @classmethod
@@ -779,28 +800,233 @@ class ForgeTask(TaskBase):
         reads an integer, which is the digits it means."""
         return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
 
+
+#: The one place a target names its config. A target missing here takes none.
+CONFIG_OF: dict[ForgeAction, type[BaseModel]] = {
+    ForgeAction.MR_AUTOMATED_REVIEW: ReviewWaitConfig,
+    ForgeAction.CI_PIPELINE: PipelineWaitConfig,
+}
+#: Every key a forge task's `config` knows. Another target's one is a clear when
+#: null or false; anything else is refused.
+CONFIG_KEYS = frozenset(k for shape in CONFIG_OF.values() for k in shape.model_fields)
+#: The keys `config` replaced, flat on the task (Kraft-nghnx); `grace_period`
+#: was on `wait`.
+_FLAT = ("reviewers", "watch_ci", "pipeline")
+
+
+def _unset(value: object) -> bool:
+    # By identity: `0` is not `false`.
+    return value is None or value is False
+
+
+def lift_config(task: Mapping, *, stored: bool) -> tuple[dict, tuple[str, ...]]:
+    """`task` with its flat `reviewers`, `watch_ci`, `pipeline` and
+    `wait.grace_period` moved under `config`, and the flat names it moved
+    (`flat-forge-keys-read-as-config`). Only a mapping whose `kind` is `forge`
+    or absent (inherited through `extends`) is touched. A `stored` snapshot
+    dumped every flat key, unset ones too: those are dropped there, not
+    lifted. A flat key beside the same key under `config` is refused, naming
+    the key as written. `config` takes the place of the first moved key, or
+    follows `wait` when only `wait.grace_period` moved."""
+    task = dict(task)
+    config = task.get("config")
+    if task.get("kind", TaskKind.FORGE) != TaskKind.FORGE or not (
+        config is None or isinstance(config, Mapping)
+    ):
+        return task, ()
+    wait = task.get("wait")
+    nested = isinstance(wait, Mapping) and "grace_period" in wait
+    found = {k: v for k, v in task.items() if k in _FLAT}  # in the task's order
+    if nested:
+        found["grace_period"] = wait["grace_period"]
+    if not found:
+        return task, ()
+    keep = {k: v for k, v in found.items() if not (stored and _unset(v))}
+    named = {k: "wait.grace_period" if k == "grace_period" else k for k in keep}
+    for key in keep:
+        if config is not None and key in config:
+            raise ValueError(f"{named[key]}: set it once, under config")
+    lifted: dict = {}
+    for key, value in task.items():
+        if key in _FLAT:
+            if keep and key in keep and "config" not in lifted and "config" not in task:
+                lifted["config"] = None  # its place; filled below
+            continue
+        if key == "wait" and nested:
+            rest = {k: v for k, v in wait.items() if k != "grace_period"}
+            if rest:
+                lifted["wait"] = rest
+            if "grace_period" in keep and set(keep) == {"grace_period"} and "config" not in task:
+                lifted["config"] = None
+            continue
+        lifted[key] = value
+    if not keep:
+        return lifted, ()
+    lifted["config"] = {**(config or {}), **keep}
+    return lifted, tuple(named.values())
+
+
+def lift_tasks(data: dict) -> list[str]:
+    """Lift every task mapping of a chain or library mapping `data` in place
+    (`lift_config`, as written) and return the moved paths, `<where>.<flat
+    name>`, `<where>` being the ids and slot names walked through. The walk
+    goes by position, never by key name: a library task named `pipeline`
+    stays a task. A task `lift_config` refuses is left as written, for the
+    model to refuse at the task; anything that is not the container expected
+    is skipped, so a malformed file still reaches the loader's own error. It
+    mirrors `drafts.authored._walk`, which visits containers instead."""
+    moved: list[str] = []
+
+    def at(where: str, name: object) -> str:
+        return f"{where}.{name}" if where else str(name)
+
+    def entries(value: object) -> list[dict]:
+        return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+    def task(t: dict, where: str) -> None:
+        try:
+            lifted, names = lift_config(t, stored=False)
+        except ValueError:
+            lifted, names = t, ()
+        if names:
+            t.clear()
+            t.update(lifted)
+            moved.extend(at(where, n) for n in names)
+        if isinstance(t.get("on_failure"), dict):
+            shape(t["on_failure"], at(where, "on_failure"))
+
+    def listed(t: dict, where: str) -> None:
+        task(t, at(where, t["id"]) if isinstance(t.get("id"), str) else where)
+
+    def step(s: dict, where: str) -> None:
+        for t in entries(s.get("tasks")):
+            listed(t, where)
+        if isinstance(s.get("on_failure"), dict):
+            shape(s["on_failure"], at(where, "on_failure"))
+
+    def shape(c: dict, where: str) -> None:
+        for t in entries(c.get("tasks")):
+            listed(t, where)
+        for s in entries(c.get("steps")):
+            step(s, at(where, s["id"]) if isinstance(s.get("id"), str) else where)
+        if isinstance(c.get(JUDGE_SEGMENT), dict):
+            task(c[JUDGE_SEGMENT], at(where, JUDGE_SEGMENT))
+
+    def node(n: dict, where: str) -> None:
+        shape(n, where)
+        for key in ("on_failure", "fix_loop"):
+            if isinstance(n.get(key), dict):
+                shape(n[key], at(where, key))
+        for key in ("escalation", AUTO_REVIEW_SEGMENT):
+            if isinstance(n.get(key), dict):
+                task(n[key], at(where, key))
+        for key, slot in (("on_base_changed", "on_conflict"), ("on_merge_rejected", "repair")):
+            handler = n.get(key)
+            if isinstance(handler, dict) and isinstance(handler.get(slot), dict):
+                shape(handler[slot], at(where, f"{key}.{slot}"))
+
+    def named(n: dict, where: str) -> str:
+        return at(where, n["id"]) if isinstance(n.get("id"), str) else where
+
+    nodes = data.get("nodes")
+    if isinstance(nodes, dict):  # a library's section
+        for name, n in nodes.items():
+            if isinstance(n, dict):
+                node(n, at("nodes", name))
+    for n in entries(nodes):
+        node(n, named(n, ""))
+    for entry in entries(data.get("add")):
+        if isinstance(entry.get("node"), dict):
+            node(entry["node"], named(entry["node"], "add"))
+    overrides = data.get("overrides")
+    for path, value in overrides.items() if isinstance(overrides, dict) else ():
+        if isinstance(value, dict):
+            task(value, at("overrides", path))
+            shape(value, at("overrides", path))
+    # A library's sections; a chain has none.
+    for section, walk in (("steps", step), ("tasks", task)):
+        if isinstance(data.get(section), dict):
+            for name, value in data[section].items():
+                if isinstance(value, dict):
+                    walk(value, at(section, name))
+    return moved
+
+
+class ForgeTask(TaskBase):
+    kind: Literal[TaskKind.FORGE]
+    target: Annotated[ForgeAction, _LOOSE]
+    wait: WaitPolicy | None = None
+    #: The target's own keys: a `ReviewWaitConfig` on `mr.automated_review`, a
+    #: `PipelineWaitConfig` on `ci.pipeline`, none on any other target
+    #: (`forge-task-config-is-per-target`).
+    config: ReviewWaitConfig | PipelineWaitConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flat_config(cls, data: object, info: ValidationInfo) -> object:
+        """The flat form, read as `config` (`flat-forge-keys-read-as-config`).
+        Silent: what reaches the model directly is Kraft's own record or input
+        a seam already lifted, and warned about."""
+        if not isinstance(data, dict):
+            return data
+        stored = bool((info.context or {}).get("stored_snapshot"))
+        return lift_config(data, stored=stored)[0]
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def _config_of_its_target(cls, value: object, info: ValidationInfo) -> object:
+        """The target's class validates its config; another target's known key
+        is a clear when null or false and refused otherwise. Raised here, not
+        on the model, so a nested error keeps its `config` segment."""
+        target = info.data.get("target")
+        if target is None or not isinstance(value, dict):
+            return value  # the target's own error, or the union's
+        shape = CONFIG_OF.get(target)
+        own = shape.model_fields if shape is not None else {}
+        for key, item in value.items():
+            if key in CONFIG_KEYS and key not in own and not _unset(item):
+                takes = ", ".join(own) or "none"
+                raise ValidationError.from_exception_data(
+                    cls.__name__,
+                    [
+                        InitErrorDetails(
+                            type=PydanticCustomError(
+                                "config_key",
+                                "not an option of {target}, whose config takes {takes}",
+                                {"target": target.value, "takes": takes},
+                            ),
+                            loc=(key,),  # pydantic prefixes `config`
+                            input=item,
+                        )
+                    ],
+                )
+        kept = {k: v for k, v in value.items() if k in own or k not in CONFIG_KEYS}
+        if shape is None:
+            if kept:  # an unknown key, on a target with no config
+                key = next(iter(kept))
+                raise ValidationError.from_exception_data(
+                    cls.__name__,
+                    [InitErrorDetails(type="extra_forbidden", loc=(key,), input=kept[key])],
+                )
+            return None
+        return shape.model_validate(kept, context=info.context)
+
     def takes_reads(self) -> bool:
         return self.target is ForgeAction.CI_PIPELINE
 
-    def unread(self) -> frozenset[str]:
-        extra = frozenset() if self.target is ForgeAction.CI_PIPELINE else frozenset({"pipeline"})
-        return super().unread() | extra
+    def takes_reply_timeout(self) -> bool:
+        return self.target is ForgeAction.MR_AUTOMATED_REVIEW
 
     @model_validator(mode="after")
-    def _pipeline_only_on_ci_pipeline(self) -> Self:
+    def _ci_pipeline_takes_its_id(self) -> Self:
         if self.target is not ForgeAction.CI_PIPELINE:
-            if self.pipeline is not None:
-                raise ValueError(
-                    f"pipeline: only a {ForgeAction.CI_PIPELINE.value} task waits for a "
-                    f"pipeline, not {self.target.value}"
-                )
             return self
         if self.pipeline is None:
             raise ValueError(
-                f"pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
+                f"config.pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
             )
         if not (re.fullmatch(r"[0-9]+", self.pipeline) or pipeline_variable(self.pipeline)):
-            raise ValueError("pipeline: must be a pipeline id (digits only) or a $NAME")
+            raise ValueError("config.pipeline: must be a pipeline id (digits only) or a $NAME")
         if self.scope is not TaskScope.ONCE:
             raise ValueError(
                 f"scope: a {ForgeAction.CI_PIPELINE.value} task waits for one pipeline "
@@ -808,26 +1034,29 @@ class ForgeTask(TaskBase):
             )
         return self
 
-    @model_validator(mode="after")
-    def _reviewers_only_on_the_review(self) -> Self:
-        if self.target is ForgeAction.MR_AUTOMATED_REVIEW:
-            return self
-        if self.reviewers is not None:
-            raise ValueError(
-                f"reviewers: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task waits for "
-                f"reviewers, not {self.target.value}"
-            )
-        if self.wait is not None and self.wait.grace_period is not None:
-            raise ValueError(
-                f"wait.grace_period: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task "
-                f"waits for review bots to settle, not {self.target.value}"
-            )
-        return self
+    @property
+    def reviewers(self) -> list[Reviewer] | None:
+        """`config.reviewers` on a review wait; `None` otherwise."""
+        return self.config.reviewers if isinstance(self.config, ReviewWaitConfig) else None
+
+    @property
+    def watch_ci(self) -> bool:
+        """`config.watch_ci` on a review wait; `False` otherwise."""
+        return isinstance(self.config, ReviewWaitConfig) and self.config.watch_ci
+
+    @property
+    def pipeline(self) -> str | None:
+        """`config.pipeline` on a pipeline wait; `None` otherwise."""
+        return self.config.pipeline if isinstance(self.config, PipelineWaitConfig) else None
 
     @property
     def grace(self) -> timedelta:
-        """How long a review bot must stay quiet to be finished with a push."""
-        return (self.wait and self.wait.grace_period) or DEFAULT_GRACE
+        """`config.grace_period`: how long a review bot must stay quiet to be
+        finished with a push; `DEFAULT_GRACE` when unset."""
+        config = self.config
+        if isinstance(config, ReviewWaitConfig) and config.grace_period is not None:
+            return config.grace_period
+        return DEFAULT_GRACE
 
     @model_validator(mode="before")
     @classmethod
@@ -1175,6 +1404,9 @@ class FixLoop(ExecutionShape):
     #: cannot collide with anything. No reserved check belongs here.
     judge: AnyTask | None = None
     max_attempts: Annotated[int, Field(gt=0)] | None = None
+    #: Start the loop as soon as one of the node's own steps finishes with eligible
+    #: findings, without running the later steps (`dispatch.measure_node`).
+    early: bool = False
 
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:
@@ -1208,7 +1440,7 @@ class ExecNode(ExecutionShape):
     #: steps, its recovery plan, its fix loop and judge, its escalation task,
     #: its conflict handler, its merge-rejection repair -- and only here may
     #: `max_attempts`/`timeout_minutes` appear, because they bound this node's
-    #: fix loop.
+    #: fix loop, and `reply_cap_per_thread`/`reply_rounds_per_head`, its reply rounds.
     policy: TemplatePolicyOverride | None = None
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
@@ -1553,6 +1785,25 @@ class Chain(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _watch_ci_looks_ahead_to_its_ci_wait(self) -> Self:
+        """A review wait that sets `watch_ci` only looks ahead: the node's own
+        `mr.ci` task owns CI, so one must sit in a later step of the same node's
+        own steps, never in a recovery plan, the fix loop or another node
+        (`watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait`)."""
+        for node in ResolvedChain.from_chain(self).nodes:
+            for task in node.tasks():
+                if (
+                    isinstance(task.task, ForgeTask)
+                    and task.task.watch_ci
+                    and node.ci_wait_after(task.path) is None
+                ):
+                    raise ValueError(
+                        f"{task.path}: config.watch_ci needs an {ForgeAction.MR_CI.value} task "
+                        f"in a later step of node {node.id!r}'s own steps"
+                    )
+        return self
+
+    @model_validator(mode="after")
     def _reads_name_earlier_writers(self) -> Self:
         """Every `reads` entry names a task that declares `outputs` and sits
         before the reader. "Before" is an earlier node, or an earlier step of
@@ -1769,6 +2020,17 @@ class ResolvedNode:
                 for handler in (step.on_failure, *(t.on_failure for t in step.tasks)):
                     yield from handler
 
+    def checks_read_only(self, task: ResolvedTask) -> bool:
+        """Whether Kraft verifies the worktree around `task` (`dispatch.measure_node`):
+        its step is read_only, or the node is and the step is one of its own, which
+        is all a node's `read_only` covers. A judge, an escalation or a gate
+        reviewer is in no step, and so is not."""
+        node_wide = getattr(self.node, "read_only", False)
+        for step in self.steps_in():
+            if any(t.path == task.path for t in step.tasks):
+                return step.read_only or (node_wide and any(step is own for own in self.steps))
+        return False
+
     def tasks(self) -> Iterator[ResolvedTask]:
         for step in self.steps_in():
             yield from step.tasks
@@ -1779,6 +2041,31 @@ class ResolvedNode:
             for dedicated in (inner.judge, inner.escalation):
                 if dedicated is not None:
                     yield dedicated
+
+    def _own_step_groups(self) -> Iterator[tuple[ResolvedStep, ...]]:
+        """Each run of this node's own steps: its own, and a group body's nodes'."""
+        yield self.steps
+        for inner in self.body:
+            yield from inner._own_step_groups()
+
+    def ci_wait_after(self, path: str) -> ResolvedTask | None:
+        """The first `mr.ci` task in the first of this node's own steps after
+        the step holding the task at `path`; None when `path` is in none of the
+        own steps (a recovery plan's, the fix loop's), or no later own step has
+        one. The one lookup behind the `watch_ci` load check and its runtime."""
+        for steps in self._own_step_groups():
+            held = next(
+                (i for i, step in enumerate(steps) if any(t.path == path for t in step.tasks)),
+                None,
+            )
+            if held is None:
+                continue
+            for step in steps[held + 1 :]:
+                for t in step.tasks:
+                    if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_CI:
+                        return t
+            return None
+        return None
 
     @property
     def covered_by(self) -> str | None:
@@ -2551,11 +2838,15 @@ class MaterializedChain:
             except PathError as exc:
                 raise PolicyError(f"{where}: {exc}", field=where) from exc
             on_exec_node = at.scope is ControlScope.NODE and isinstance(at.node.node, ExecNode)
-            for name in ("max_attempts", "timeout_minutes"):
+            for name in (
+                "max_attempts",
+                "timeout_minutes",
+                "reply_cap_per_thread",
+                "reply_rounds_per_head",
+            ):
                 if getattr(layer, name) is not None and not on_exec_node:
                     raise PolicyError(
-                        f"{where}.{name}: bounds an execution node's fix loop, and {path!r} "
-                        "is not an execution node",
+                        f"{where}.{name}: applies to an execution node, and {path!r} is not one",
                         field=f"{where}.{name}",
                     )
         layered = replace(self, item_policy=item)

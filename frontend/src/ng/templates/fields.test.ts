@@ -24,3 +24,22 @@ describe("the step output keys a Config row edits", () => {
     expect(parse(text, meta.kind)).toEqual({ value: want });
   });
 });
+
+describe("a forge task's config rows", () => {
+  it.each([
+    { field: "config.watch_ci", kind: "bool", label: "watch CI" },
+    { field: "config.grace_period", kind: "duration", label: "grace period" },
+    { field: "config.pipeline", kind: "text", label: "pipeline" },
+    { field: "config.reviewers", kind: "list", label: "reviewers" },
+  ])("$field edits as $kind, labelled $label", ({ field, kind, label }) => {
+    expect(fieldMeta(field)).toMatchObject({ kind, label });
+  });
+
+  it("locks the reviewers row: its entries are mappings, edited in YAML", () => {
+    expect(fieldMeta("config.reviewers")).toMatchObject({ elsewhere: "Edit reviewers in YAML", where: "YAML" });
+  });
+
+  it("labels an unlisted config key by its name alone", () => {
+    expect(fieldMeta("config.some_key").label).toBe("some key");
+  });
+});

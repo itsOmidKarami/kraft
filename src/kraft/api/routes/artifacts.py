@@ -276,6 +276,7 @@ async def mark_viewed(wid: str, request: Request):
 
 @api_router.delete("/work-items/{wid}/viewed")
 async def unmark_viewed(wid: str, request: Request):
+    """Clear a file's viewed mark in the diff."""
     return await _set_viewed(wid, request, False)
 
 

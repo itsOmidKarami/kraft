@@ -8,8 +8,12 @@ import sys
 
 import psutil
 import pytest
+from support.harness import entry_of
 from support.local_worker import ScriptedLink
 
+from kraft.api.deps import _PoisonedRepoEntry
+from kraft.config import ConfigError
+from kraft.executor import LaunchContext
 from kraft.remote import local_link
 from kraft.worker import reattach
 from worker.test_reattach import _CHAIN, DEAD, IMPLEMENT, _sleeper
@@ -147,6 +151,46 @@ async def test_an_adopted_local_session_holds_a_slot_until_it_exits(item, databa
         assert not link.free()  # counted, though it was running before this start
         await asyncio.wait_for(adopted["w1-s1"], 10)
     assert link.free()
+
+
+@pytest.mark.parametrize(
+    ("command", "held", "readable"),
+    [
+        pytest.param("just test-targeted", True, True, id="a-scope-of-the-group"),
+        pytest.param("just lint", False, True, id="a-scope-of-no-group"),
+        # A repos.yaml that fails to load must not stop the restart: nothing is held.
+        pytest.param("just test-targeted", False, False, id="an-unreadable-repos-yaml"),
+    ],
+)
+async def test_an_adopted_test_session_holds_its_concurrency_group_again(
+    item, database, run_dirs, command, held, readable
+):
+    entry = entry_of(
+        {
+            "test_scopes": [
+                {
+                    "paths": ["**"],
+                    "command": "just ci-test",
+                    "targeted_command": "just test-targeted",
+                    "concurrency_group": "heavy",
+                },
+                {"paths": ["docs/**"], "command": "just lint"},
+            ]
+        }
+    )
+    if not readable:
+        entry = _PoisonedRepoEntry(ConfigError("repos.yaml: broken"))
+    link = local_link.current()
+    with _sleeper(0.5) as (proc, started):
+        await item.session("s1", IMPLEMENT, running=(proc.pid, started), command=command)
+        _, adopted = await reattach.reattach(
+            database, run_dirs, launch_factory=lambda _repo: LaunchContext(repo_entry=entry)
+        )
+        await asyncio.sleep(0.1)
+        assert link.take("w2/next", "heavy") is not held
+        link.release("w2/next")
+        await asyncio.wait_for(adopted["w1-s1"], 10)
+    assert link.take("w2/next", "heavy")  # given back when the adopted session ends
 
 
 async def test_an_escalation_resumed_after_an_adopted_session_does_not_wait_on_its_slot(

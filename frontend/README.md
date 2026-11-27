@@ -51,71 +51,7 @@ imports unless `VITE_DEV_PAGES=1` is set.
 
 ### The dashboard demo
 
-`demo/` runs this UI with no Kraft server: the UI contract's scenario
-(`e2e/contract/mocks/`), answered in the page instead of by Playwright. `just
-demo` serves it at <http://localhost:5174/demo/>, and `npm run build:demo`
-writes `dist-demo/`. The docs site has one per version, beside its pages, the
-way it has their docs: `main`'s at `/next/demo/` and a release's, built from
-its own tag, at `/demo/` (CONTRIBUTING.md, "Versions of the docs").
-
-`demo/main.ts` builds the scenario and hands it to `mocks/mockApi.ts`, the same
-answers the contract suite gets. `demo/shim.ts` puts them under the page:
-`fetch` and the events socket for `/api/**`, the clock moved to the scenario's
-moment, and the two `<a href="/api/...">` log links. An action there sticks
-until the page reloads: the mock changes the item as the server would
-(`mocks/transitions.ts`), and each event it appends goes out on the events
-socket (`broadcast`), so the board moves as the item does. The board moves
-on its own too: `MockOptions.motion` (`mocks/motion.ts`), which only the
-demo sets, moves each board item whose status is `active` one step along
-its chain every 8–15 seconds, through the same transitions. A node takes
-two ticks, with a session for each task it runs, and a gate stops the item
-until the visitor answers it. A waiting or rate-limited item is active
-again once its retry time passes, and a spend cap stops an item before its
-next agent task. An escalation turn, the sample's or one the visitor starts,
-ends on its own two ticks in, as its agent finishing does: its session is done,
-its reply is the item's document (the task's Output links it), and the item
-stays as it stopped, for a reply, a retry or a decision. A finished chain is Done. When no board item is active
-and none waits at a gate, it files a fresh item, so a gate always comes
-round again. `whileShown` pauses it while the tab is hidden. A reload starts
-from the sample data again. The routers take the build's base
-(`import.meta.env.BASE_URL`), `/` everywhere but here. A change to what the
-demo shows is a change to the contract's mocks, so it is checked there.
-
-The demo adds one thing to the page, outside the React tree and drawn in the
-app's tokens: `demo/badge.ts`, the corner badge, which opens a list of five
-things to try. Nothing for it lives in `src/`. Its × hides the badge for the
-visit. The list opens by itself once, on a desktop's first visit, and after
-that stays as the visitor left it (`localStorage`). Phones start with it shut.
-
-- `demo/tries.ts` holds the five entries. Each is ticked by the request that
-  does it: `shim.ts`'s `watch` hands every answered request to `tickOf`. Each
-  has a Show me: a real link to where it can be done now, such as whichever
-  item waits at a gate. The page is found by reading the mock directly, so the
-  look itself ticks nothing. It is read again when the list opens, after a
-  request that may move things, and on each event the mock appends, live
-  motion's too. Those events tick nothing: motion is not the visitor.
-- A Show me's click goes by `pushState` and a `popstate`, so the demo is not
-  reloaded. A click already handled is left alone, and so is a click asking
-  for a new tab. One such click is the item page's leave guard, for an
-  unapplied chain draft: its dialog then goes on to the page with no ring.
-- `demo/ring.ts` then finds the target by role and accessible name, as
-  Playwright does, scrolls it into view, and rings it. The ring hides while
-  the target is scrolled away. On the phone layout, which draws no such
-  control, there is no ring.
-
-`e2e/demo/` is the demo's smoke suite: the built demo on `vite preview`, booted,
-and every Show me followed to its target on the desktop layout. A rename that
-strands an entry fails it. It keeps live motion still, as a hidden tab does
-(the tab reads hidden while the demo boots), so each row meets the sample
-data. `just demo-smoke` runs it (`npm run demo:smoke` without `just`), and so
-does CI's `ui contract` job.
-
-Two unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
-asks the mock, with the demo's options (`demo/scenario.ts`), every route in
-`tests/api/api_shapes.json`, the keys a real server answers with, and fails
-on a key or route the mock leaves out. `just shapes` rewrites that table
-after a response changes. `demo/sampleCoverage.test.ts` fails when no sample
-item shows a display status or stop kind.
+`demo/` runs this UI with no Kraft server, on the UI contract's scenario. `just demo` serves it at <http://localhost:5174/demo/>. How it works, the things-to-try badge and its tests are in [`DEMO.md`](DEMO.md).
 
 ## Layout of `src/`
 
@@ -287,81 +223,14 @@ test in the PR) are in [`docs/testing.md`](../docs/testing.md).
 | **vitest** | component and pure-logic tests in jsdom, with `fetch` stubbed | **Every change.** New behaviour gets a test beside it. CI's `frontend` job runs `npm run build` and `npm test` | `just test-ui` |
 | **Playwright** (`e2e/`) | a real browser against a real orchestrator with the fake agent: the UI↔server contract, addresses, and layout jsdom cannot show (media queries, tap-target size, sideways overflow) | A change to what the page sends or reads, to an address, or to phone layout. CI's `playwright` job runs it on every code pull request | `just e2e-ci`; see [`e2e/README.md`](e2e/README.md) |
 | **UI contract** (`e2e/contract/`) | the built SPA in a browser on a **mocked** `/api`: what a screen does (the sidebar's pin and reveal, Esc and focus order, the item header's cards, review, the document viewer, tooltips) and that every icon-only control has a name and a tooltip | A change to how a screen behaves, or a new icon-only control. CI's `ui contract` job runs it on every code pull request | `just ui-contract`; see [`e2e/contract/README.md`](e2e/contract/README.md) |
-| **Demo smoke** (`e2e/demo/`) | the built dashboard demo in a browser: it boots, and each things-to-try Show me lands on its target | A change to `demo/`, or to a control a Show me rings (its name is in `demo/tries.ts`). CI's `ui contract` job runs it after the contract | `just demo-smoke`; see "The dashboard demo" above |
+| **Demo smoke** (`e2e/demo/`) | the built dashboard demo in a browser: it boots, and each things-to-try Show me lands on its target | A change to `demo/`, or to a control a Show me rings (its name is in `demo/tries.ts`). CI's `ui contract` job runs it after the contract | `just demo-smoke`; see [`DEMO.md`](DEMO.md) |
 
 Playwright proves the contract and vitest proves component behaviour; do not
 pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Every docs and README screenshot is taken by a script, so a retake is one
-command and changes a picture only where its screen changed. All are Kraft's
-default look: Ink, dark, a violet accent at the full colour amount.
-
-```bash
-just docs-screenshots              # the web UI, from the dashboard demo
-just docs-screenshots -g storage   # one picture, by its test name
-just vscode-screenshots            # the VS Code extension (vscode/media/, copied here)
-just console-screenshot            # the console, from a seeded dev instance (below)
-```
-
-`just docs-screenshots` builds the demo, serves it on :4329 and runs
-`e2e/docs-shots/shots.ts`, one Playwright test per picture. The demo's sample
-data is fixed, so nothing needs seeding. It hides the demo's own pill and
-things-to-try list and pauses its live motion. The sidebar's footer names the
-release the demo was built from, the newest tag behind the commit; a clone
-without tags says `vdev`, so build with `KRAFT_DEMO_VERSION=X.Y.Z` there.
-`setup` answers the repo and item lists empty, which is what a new home shows.
-A retake writes a picture only when it looks different from the one there, so
-an unchanged screen leaves its file alone. `chain-extends` is of `team-default`,
-a chain that extends `default`, which the demo lists on the Chains screen only:
-its list entry and draft view are a real server's answers, recorded into
-`e2e/contract/mocks/draftViews.json`.
-
-`just console-screenshot` needs the dev instance filled first: `just api` in
-one terminal, then `just dev-seed --rich`. It runs the console headless,
-selects *Design the caching layer* so the peek shows its spec (writing a real
-one over the fake agent's `fake spec body`), and renders Textual's SVG to a
-PNG. The top line names the newest release tag; pass `--version` in a clone
-without tags.
-
-`just vscode-screenshots` drives the packaged extension in a real VS Code,
-in a 1440×900 window; on Linux run it under `xvfb-run`. Every picture is saved
-at its size on screen, so text reads at its real size.
-
-| File | Size | Shows | Shown in |
-|---|---|---|---|
-| `board.png` | 1440×700 | the board, grouped by status: Needs you (a gate and six stops, each with its one button), then Running | README, docs home (cropped), first work item, web UI › Board |
-| `gate.png` | 1440×700 | the review page of the item at `final_review`, its review brief rendered | README, the real chain, review a change |
-| `item.png` | 1440×700 | that item's page with `final_review` selected in the graph and the inspector | docs home (cropped), web UI › Item page |
-| `review.png` | 1440×700 | that item's review page, a must-fix comment being written on lines Old 2 – new 2 | docs home (cropped), web UI › Review page, review a change |
-| `search.png` | 1440×700 | Ctrl/⌘K with `caching` typed, over the board | not shown yet |
-| `analytics.png` | 1440×660 | the Analytics page | README, web UI › Analytics |
-| `chains.png` | 1440×700 | Templates › Chains on `default`, the `spec_approval` gate selected | web UI › Templates and Settings |
-| `policy.png` | 1440×700 | Settings › Policy on its Limits tab | web UI › Templates and Settings |
-| `setup.png` | 1440×700 | the setup wizard's first step, on a home with no repo | first run |
-| `mobile.png` | 390×844 | the board in the phone layout | README, docs home (cropped), Kraft on a phone |
-| `stops.png` | 1180×450 | the board's Needs you group alone: one row per kind of stop | why did my item stop |
-| `stop-peek.png` | 1230×700 | a capped item's side panel beside the board | why did my item stop |
-| `composer.png` | 1230×309 | the board's composer, filled in | file a work item |
-| `storage.png` | 1230×685 | Settings › Storage down to the first worktree row | logs and disk space |
-| `chain-extends.png` | 1230×700 | Templates › Chains on `team-default`, which extends `default`: `verification` overridden and selected, `security_scan` added | web UI › Templates and Settings, write your own chain |
-| `fixloop.png` | 1230×700 | a running item's `verification` node in its own view, on its second fix-loop round | web UI › Fix loops and test scopes |
-| `new-item-page.png` | 1230×602 | the full new-item page, a title typed | file a work item |
-| `harnesses.png` | 1230×700 | Settings › Harnesses | web UI › Templates and Settings |
-| `notifications.png` | 1230×700 | Settings › Notifications | web UI › Templates and Settings, notifications |
-| `access.png` | 1230×700 | Settings › Access | web UI › Templates and Settings, remote access |
-| `appearance.png` | 1230×700 | Settings › Appearance on the default look | web UI › Templates and Settings |
-| `console.png` | 1482×880 | `kraft console` on the board, its peek on a gate | console reference |
-| `vscode-*.png` | various | copies of `vscode/media/screenshot-*.png` | Kraft for VS Code |
-
-The docs home crops `board`, `item`, `review` and `mobile` in CSS
-(`docsite/app/components/LandingShot.vue`), by a `crop:` box in pixels in
-`docsite/content/index.md`. When a retake moves what a crop frames, fix the
-box there. Look at each PNG before committing it, and update its alt text
-wherever the table says it is shown when what it shows changed. A pull request
-that changes only these PNGs counts as docs-only to CI. The README and docs
-site link to them by file name, so keep the names.
+`just docs-screenshots` retakes the web UI pictures; the table of every picture and where it is shown is in [`SCREENSHOTS.md`](SCREENSHOTS.md#retaking-the-screenshots-in-githubassets).
 
 ## Other generated files
 

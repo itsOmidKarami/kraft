@@ -147,7 +147,7 @@ def test_each_chain_names_the_library_components_each_node_uses(client):
     uses = chains["default"]["uses"]
     assert uses["implementation"] == ["nodes.implementation", "tasks.implementer"]
     assert uses["spec"] == ["steering.project-standards", "tasks.spec_author"]
-    assert "spec_approval" not in uses  # a gate references nothing
+    assert uses["spec_approval"] == ["tasks.gate_reviewer"]  # its reviewer
 
 
 # ── PUT /templates/library ──
@@ -284,19 +284,20 @@ def test_the_steering_preview_shows_a_task_launch_section_by_section(client, che
 
 
 def _reviewed_chain(templates_dir, mode):
-    """`reviewed`: the default chain with an agent reviewing `spec_approval` in `mode`."""
+    """`reviewed`: the default chain, its `spec_approval` reviewer set to `mode`."""
     _demo_repo(templates_dir)
-    reviewer = {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Check it."}
-    gate = {"auto_review": reviewer} | ({"auto_review_mode": mode} if mode else {})
+    gate = {"auto_review_mode": mode}
     chain = {"id": "reviewed", "extends": "default", "overrides": {"spec_approval": gate}}
     (templates_dir / "chains" / "reviewed.yaml").write_text(yaml.safe_dump(chain))
 
 
 @pytest.mark.parametrize(
-    "read_only",
+    ("read_only", "chain", "task"),
     [
         pytest.param(
             True,
+            "reviewed",
+            "spec_approval.auto_review",
             marks=pytest.mark.api_client(
                 edit_templates=partial(_reviewed_chain, mode="checks_first")
             ),
@@ -304,13 +305,24 @@ def _reviewed_chain(templates_dir, mode):
         ),
         pytest.param(
             False,
-            marks=pytest.mark.api_client(edit_templates=partial(_reviewed_chain, mode=None)),
+            "reviewed",
+            "spec_approval.auto_review",
+            marks=pytest.mark.api_client(edit_templates=partial(_reviewed_chain, mode="decides")),
             id="decides",
+        ),
+        pytest.param(
+            True,
+            "default",
+            "verification.review.code_review",
+            marks=pytest.mark.api_client(edit_templates=_demo_repo),
+            id="a-read-only-step",
         ),
     ],
 )
-def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(client, read_only):
-    response = _preview(client, chain="reviewed", task="spec_approval.auto_review")
+def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(
+    client, read_only, chain, task
+):
+    response = _preview(client, chain=chain, task=task)
     assert response.status_code == 200, response.text
     contract = response.json()["sections"][0]["text"]
     told = ("Commit everything you change" in contract, "Kraft compares it after you" in contract)

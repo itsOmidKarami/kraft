@@ -24,6 +24,9 @@ neither, the path stays blind):
 - an edit to a file under `EDIT_TESTS`, which adds the tests listed for it. A
   file added or deleted there stays blind: a reader that globs the tree, or
   names each file, is not something an edit's list can promise to cover.
+- a Python script directly under `fixtures/` (`fixture_readers`), added or
+  edited: the tests that name it, which are all the tests that can run it,
+  because nothing globs `fixtures/`. This needs no base.
 - a YAML or JSON file whose change is comments and blank lines only
   (`comments_only`), which adds `COMMENT_TESTS` for its tree.
 
@@ -60,6 +63,9 @@ BLIND: tuple[tuple[str, bool], ...] = (
     # Copied into a repo and run by its own test command.
     ("tests/support/sample_repo", False),
     ("plugins/kraft/skills", False),
+    # kraft-lite's skills, methods, evals, bundled config and manifests are read
+    # by its own tests; its `.py` is imported in-process, which testmon traces.
+    ("plugins/kraft-lite", True),
 )
 
 #: A blind file whose readers are known, so an edit to it adds them rather than
@@ -82,10 +88,16 @@ EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_plugin_docs_surface.py",
         ),
     ),
+    # kraft-lite: the readers span subtrees (the parity test reads skills/run-slices,
+    # config and methods; `conftest.texts` globs every skill), and the whole plugin
+    # suite plus the parity file runs in seconds, so the whole directory is named.
+    ("plugins/kraft-lite", ("plugins/kraft-lite/tests", "tests/plugins/test_kraft_lite_parity.py")),
     # Kraft's own skills: read for their wording and examples, and as the
     # method of every agent launch. That reaches nearly every test that walks a
     # chain, but only the fake agents read it there, and they skip a method
     # (tests/test_fake_claude.py), so these are the tests that read its text.
+    # methods/ and config/ under plugins/kraft-lite are generated copies; the
+    # parity test fails when they differ.
     (
         "src/kraft/skills",
         (
@@ -94,6 +106,7 @@ EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/adapters/test_agent.py",
             "tests/addons/test_pins.py",
             "tests/templates/test_library.py",
+            "tests/plugins/test_kraft_lite_parity.py",
         ),
     ),
 )
@@ -251,6 +264,48 @@ def _code_lines(text: str) -> list[str]:
     ]
 
 
+def fixture_readers(path: str, cwd: Path) -> list[str] | None:
+    """The tests that name a script directly under `fixtures/`, or None when the
+    path is not one or something that is not a test names it. Nothing globs
+    `fixtures/` (every reader spells out `fake-claude.sh`), so a script is run
+    only by a path that names it; the stem is searched, for an `import` too.
+    A name in a support helper, `src` or config is a reader whose own users
+    cannot be listed, so it stays blind. Shortcut: a name built at run time
+    (`f"fake_{kind}_agent.py"`) is not found; CI's full suite still runs it."""
+    directory, _, name = path.rpartition("/")
+    if directory != "fixtures" or not name.endswith(".py") or not (cwd / path).is_file():
+        return None
+    done = subprocess.run(
+        [
+            "git",
+            "grep",
+            "--untracked",
+            "-l",
+            "-F",
+            "-e",
+            name[:-3],
+            "--",
+            ".",
+            f":(exclude){path}",
+            ":(exclude,glob)**/*.md",
+            ":(exclude,glob)justfile",
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode > 1:  # 1 is "no match"; anything else is git failing
+        return None
+    found = done.stdout.splitlines()
+    if any(
+        not (h.startswith("tests/") and h.endswith(".py") and Path(h).name.startswith("test_"))
+        for h in found
+    ):
+        return None
+    return found
+
+
 def comments_only(path: str, base: str, cwd: Path) -> bool:
     """Whether a YAML or JSON file changed in nothing but whole-line comments
     and blank lines since `base`. Both checks: the lines alone would take a `#`
@@ -333,6 +388,8 @@ def plan(
             known += mapped
         elif base is not None and comments_only(path, base, cwd):
             known += _tests_for(path, COMMENT_TESTS)
+        elif (readers := fixture_readers(path, cwd)) is not None:
+            known += readers
         else:
             blind.append(path)
     if blind:

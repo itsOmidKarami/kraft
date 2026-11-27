@@ -18,7 +18,13 @@ import yaml
 
 from kraft.policy import TemplatePolicyOverride
 from kraft.templates.library import Namespace, _merge
-from kraft.templates.models import AUTO_REVIEW_SEGMENT, JUDGE_SEGMENT, MAIN_STEP, PATH_SEPARATOR
+from kraft.templates.models import (
+    AUTO_REVIEW_SEGMENT,
+    JUDGE_SEGMENT,
+    MAIN_STEP,
+    PATH_SEPARATOR,
+    lift_tasks,
+)
 
 CHAIN = "chain"
 LIBRARY = "library"
@@ -37,19 +43,19 @@ NODE_KEYS = (
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
     "produces", "profile", "model", "effort", "inputs", "fallback", "outputs", "reads", "steering",
-    "scope", "execution", "suite", "wait", "reviewers", "pipeline", "policy", "skippable",
-    "on_failure",
+    "scope", "execution", "suite", "wait", "config", "policy", "skippable", "on_failure",
 )  # fmt: skip
 STEP_KEYS = (
     "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",
 )  # fmt: skip
-SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts", "read_only")
+SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts", "early", "read_only")
 #: The order inside a nested mapping, by its key.
 NESTED_KEYS = {
     "policy": tuple(TemplatePolicyOverride.model_fields),
     "on_base_changed": ("restart_from", "on_conflict"),
     "on_merge_rejected": ("restart_from", "repair"),
-    "wait": ("grace_period", "polling"),
+    "wait": ("polling",),
+    "config": ("reviewers", "watch_ci", "grace_period", "pipeline"),
     "polling": ("initial_interval", "max_interval"),
     "outputs": ("files", "variables"),
 }
@@ -78,19 +84,23 @@ def load(text: str | None) -> object:
 
 
 def normalise(data: object) -> object:
-    """`data` with the shorthand normalised in place, as `load` does."""
+    """`data` with the shorthand normalised and every flat forge key under
+    `config`, in place, as `load` does. The lift is silent: this knows no
+    file, and the server warns when it loads the same one."""
     if isinstance(data, dict):
         _walk(data, _normalise)
+        lift_tasks(data)
     return data
 
 
 def dump(mapping: Mapping) -> str:
     """`mapping` as YAML: a lone `main` step holding only `id` and `tasks` back
-    as `tasks:`, block style, two-space indents, a multi-line string as `|`."""
+    as `tasks:`, a step's lone `id`-and-`extends` task on one line, otherwise
+    block style, two-space indents, a multi-line string as `|`."""
     data = copy.deepcopy(mapping)
     if not isinstance(data, dict):
         return _yaml(data)
-    _walk(data, _collapse)
+    _walk(data, _collapse, _inline)
     parts = []
     for key, value in data.items():
         if key in _SPACED and isinstance(value, (list, dict)) and value:
@@ -209,6 +219,17 @@ def _collapse(container: dict) -> None:
         _rekey(container, "steps", "tasks", container["steps"][0]["tasks"])
 
 
+def _inline(step: dict) -> None:
+    tasks = step.get("tasks")
+    if (
+        isinstance(tasks, list)
+        and len(tasks) == 1
+        and isinstance(tasks[0], dict)
+        and set(tasks[0]) == {"id", "extends"}
+    ):
+        step["tasks"] = _FlowList(tasks)
+
+
 def _dicts(value: object) -> list[dict]:
     values = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
     return [v for v in values if isinstance(v, dict)]
@@ -219,9 +240,12 @@ def added_nodes(data: Mapping) -> list[dict]:
     return [e["node"] for e in _dicts(data.get("add")) if isinstance(e.get("node"), dict)]
 
 
-def _walk(data: dict, fn: Callable[[dict], None]) -> None:
+def _walk(
+    data: dict, fn: Callable[[dict], None], on_step: Callable[[dict], None] = lambda _: None
+) -> None:
     """Apply `fn` to every container that may take the shorthand: each node
-    (a chain's list, a library's section), and each handler and fix loop."""
+    (a chain's list, a library's section), and each handler and fix loop; and
+    `on_step` to every step in them and in a library's `steps` section."""
 
     def shape(c: dict) -> None:
         fn(c)
@@ -233,6 +257,7 @@ def _walk(data: dict, fn: Callable[[dict], None]) -> None:
             task(c[JUDGE_SEGMENT])
 
     def step(s: dict) -> None:
+        on_step(s)
         for t in _dicts(s.get("tasks")):
             task(t)
         if isinstance(s.get("on_failure"), dict):
@@ -408,6 +433,10 @@ class _Walk:
 # ── the writer ──
 
 
+class _FlowList(list):
+    """A step's lone bare task: `tasks: [{id: triage, extends: x}]`."""
+
+
 class _Dumper(yaml.SafeDumper):
     def increase_indent(self, flow: bool = False, indentless: bool = False):
         # A sequence indented under its key, as the shipped files write it.
@@ -428,6 +457,12 @@ def _list(dumper: yaml.SafeDumper, value: list) -> yaml.Node:
 
 _Dumper.add_representer(str, _str)
 _Dumper.add_representer(list, _list)
+_Dumper.add_representer(
+    _FlowList,
+    lambda dumper, value: dumper.represent_sequence(
+        "tag:yaml.org,2002:seq", list(value), flow_style=True
+    ),
+)
 
 
 _WIDTH = 80

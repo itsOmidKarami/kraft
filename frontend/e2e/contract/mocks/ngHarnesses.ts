@@ -2,14 +2,24 @@
  *  `src/kraft/drafts/harnesses.py`'s resolve, with the few ops the flows send applied to a
  *  small in-memory state so problems appear and clear as the real draft's do. */
 
+import { ago } from "./clock";
+
 type Access = "available" | "override" | "never";
 interface Task { chain: string; path: string; profile: string | null; fallback: boolean }
-const t = (path: string, profile: string | null): Task => ({ chain: "default", path, profile, fallback: false });
+const t = (path: string, profile: string | null, chain = "default"): Task => ({ chain, path, profile, fallback: false });
 
+/** Each harness's tasks as the shipped chains select them (`_tasks_by_harness`): every agent task names claude, and no
+ *  profile in `config/harnesses.yaml` has a fallback that lands on another. */
 const HARNESSES: { id: string; provider: string; defaults: Record<string, string>; executable?: string; found: boolean; tasks: Task[] }[] = [
-  { id: "claude", provider: "claude", defaults: { model: "sonnet", permission_mode: "acceptEdits" }, found: true, tasks: [t("implementation.main.implementer", "strong"), t("verification.fix.repair_verification", "strong"), t("verification.fix.strict_judge", "strong"), t("spec.main.spec_author", null), t("plan.main.plan_author", null), t("review.main.code_review", null), t("finish.main.describe_mr", null)] },
+  { id: "claude", provider: "claude", defaults: { model: "sonnet", permission_mode: "acceptEdits" }, found: true, tasks: [
+    t("spec.main.author", null), t("plan.main.author", null), t("chain_revision.main.revise", null), t("implementation.main.implement", "strong"),
+    t("verification.review.code_review", null), t("verification.fix_loop.main.repair", "strong"), t("verification.fix_loop.judge", "strong"),
+    t("work_brief.main.author", null), t("describe_merge_request.main.author", null), t("merge_request_feedback.review_feedback.triage", "fast"),
+    t("merge_request_feedback.fix_loop.repair.repair", "strong"), t("merge_request_feedback.fix_loop.judge", "strong"), t("work_item_summary.main.author", null),
+    t("implementation.main.implement", "strong", "quick-task"),
+  ] },
   { id: "claude-sandbox", provider: "claude", defaults: { model: "sonnet" }, executable: "claude --sandbox", found: true, tasks: [] },
-  { id: "codex", provider: "codex", defaults: { effort: "medium" }, found: true, tasks: [t("finish.main.write_summary", "fast")] },
+  { id: "codex", provider: "codex", defaults: { effort: "medium" }, found: true, tasks: [] },
   { id: "cursor", provider: "cursor", defaults: {}, found: true, tasks: [] },
   { id: "gemini", provider: "gemini", defaults: {}, found: false, tasks: [] },
   { id: "opencode", provider: "opencode", defaults: {}, found: true, tasks: [] },
@@ -107,7 +117,7 @@ export function harnessesServer() {
       area: "harnesses", key: "harnesses", draft: c.length > 0,
       files: { "harnesses.yaml": harnessesYaml(state), "policy.yaml": policyYaml(state) },
       published: { "harnesses.yaml": harnessesYaml(original), "policy.yaml": policyYaml(original) },
-      base: { "harnesses.yaml": "a".repeat(64), "policy.yaml": "b".repeat(64) }, updated_at: "2026-10-01T09:12:00Z",
+      base: { "harnesses.yaml": "a".repeat(64), "policy.yaml": "b".repeat(64) }, updated_at: ago(90),
       result: { model: {}, resolved: resolved(), problems: problems(), sources: {}, changes: c, impact: { tasks: 3, chains: ["default"] }, warnings: [], extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 } },
     };
   };

@@ -57,7 +57,7 @@ origin: src/kraft/api/startup.py §lifespan
 
 IF an attempt does not hand the restart to the helper, THEN the system SHALL
 delete the snapshot it took, and SHALL NOT repeat a restart that failed.
-enforced-by: tests/test_when_free.py::test_apply_once[went-busy-leaves-no-snapshot], tests/test_when_free.py::test_apply_once[two-busy-attempts-leave-one-snapshot-at-most], tests/test_when_free.py::test_apply_once[restarter-raises-after-install-is-not-retried]
+enforced-by: tests/test_when_free.py::test_apply_once[went-busy-leaves-no-snapshot], tests/test_when_free.py::test_apply_once[busy-attempts-keep-the-earlier-snapshot-and-none-of-their-own], tests/test_when_free.py::test_apply_once[restarter-raises-after-install-is-not-retried]
 origin: src/kraft/when_free.py §_apply_claimed
 
 ## REQ auto-update-takes-only-minor-and-patch-releases
@@ -94,3 +94,15 @@ WHILE `update.yaml` does not load, the system SHALL NOT install or restart
 when free, a marked release and an asked restart included, and SHALL say why.
 enforced-by: tests/test_when_free.py::test_pending_names_what_and_why[broken-update-yaml-blocks-a-mark], tests/test_when_free.py::test_pending_names_what_and_why[broken-update-yaml-blocks-an-asked-restart]
 origin: src/kraft/when_free.py §pending
+
+## REQ an-update-copies-config-and-databases-before-it-installs
+
+WHEN `kraft admin update` is about to install a release, the system SHALL first copy the configuration directory and every run database, with the version of the running server or else the installed one, into `run/update-snapshot-<time>/`, and IF the copy fails, THEN the system SHALL install nothing and remove the partial copy; a copy made in the same second as another SHALL NOT touch it.
+enforced-by: tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-copy-installs-nothing], tests/test_when_free.py::test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal
+origin: src/kraft/cli/admin.py §_snapshot_before_update
+
+## REQ the-last-updates-snapshot-stays-until-the-next-one
+
+The system SHALL keep the snapshot of the last update that went through until the next update goes through, across restarts, and an attempt that installs nothing or is not confirmed SHALL NOT delete it, nor SHALL a manual update delete the snapshot an update still being confirmed names.
+enforced-by: tests/api/test_startup.py::test_a_confirmed_updates_snapshot_outlives_a_restart, tests/test_when_free.py::test_apply_once[busy-attempts-keep-the-earlier-snapshot-and-none-of-their-own], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-install-keeps-the-earlier-one], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[refused-install-keeps-the-earlier-one], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[an-update-in-flight-keeps-its-snapshot], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot], tests/api/test_startup.py::test_confirm_ends_it
+origin: src/kraft/when_free.py §delete_snapshots

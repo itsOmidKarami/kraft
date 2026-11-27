@@ -169,6 +169,24 @@ KINDS = [
         "go mod download",
     ),
     (
+        "leiningen",
+        {"project.clj": "", "test/x/core_test.clj": ""},
+        "lein test",
+        "lein with-profile +test deps",
+    ),
+    (
+        "leiningen-beside-a-pom",
+        {"project.clj": "", "pom.xml": "<project/>", "test/x/core_test.clj": ""},
+        "lein test",
+        "lein with-profile +test deps",
+    ),
+    (
+        "leiningen-without-tests",
+        {"project.clj": ""},
+        None,
+        "lein with-profile +test deps",
+    ),
+    (
         "gradle-wrapper",
         {"gradlew": "", "build.gradle.kts": ""},
         "./gradlew --no-daemon test",
@@ -265,6 +283,30 @@ KINDS = [
         "cmake -S . -B build",
     ),  # noqa: E501
     ("meson", {"meson.build": ""}, "meson test -C builddir", "meson setup builddir"),
+    (
+        "dune",
+        {"dune-project": "", "test/dune": "(test (name t))\n", "x.opam": ""},
+        "dune test",
+        "opam install . --deps-only --with-test --yes",
+    ),
+    (
+        "dune-inline-tests",
+        {"dune-project": "", "lib/dune": "(library (name x) (inline_tests))\n"},
+        "dune test",
+        None,
+    ),
+    (
+        "dune-cram",
+        {"dune-project": "", "test.t": "$ echo hi\n"},
+        "dune test",
+        None,
+    ),
+    (
+        "dune-without-tests",
+        {"dune-project": "", "lib/dune": "(library (name x))\n"},
+        None,
+        None,
+    ),
 ]
 
 

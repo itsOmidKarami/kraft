@@ -56,8 +56,10 @@ _KRAFT_COMMITS = re.compile(
     r"^<details>\s*<summary>Commits on this branch</summary>.*?</details>[ \t]*$",
     re.MULTILINE | re.DOTALL,
 )
-#: The footer Kraft signs every merge request with now.
-_KRAFT_FOOTER = re.compile(r"^---[ \t]*\n(?:[ \t]*\n)*_Opened by \[Kraft\]\(.*$", re.MULTILINE)
+#: The footer Kraft, or Kraft Lite, signs every merge request with now.
+_KRAFT_FOOTER = re.compile(
+    r"^---[ \t]*\n(?:[ \t]*\n)*_Opened by \[Kraft(?: Lite)?\]\(.*$", re.MULTILINE
+)
 _KRAFT_BRANCH = re.compile(
     r"^Branch `[^`\n]+`\. Review the diff and the pipeline before merging\.[ \t]*$", re.MULTILINE
 )
@@ -111,7 +113,7 @@ _TOP_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 #: words: a nested item, a fence, a line that opens on a Markdown image (`![…]`,
 #: linked `[![…](…)](…)`, with a title, or two side by side), or an `<img …>`
 #: tag alone, which is what GitHub's editor writes for a dropped image. Any other
-#: picture, a dropped video too, goes after a blank line (CONTRIBUTING.md).
+#: picture, a dropped video too, goes after a blank line (RELEASING.md, "Highlights").
 _NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```|~~~|!\[|\[!\[|<img\b[^<>]*>\s*$)")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 

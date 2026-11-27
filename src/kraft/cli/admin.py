@@ -2107,8 +2107,30 @@ def _update_when_free(ns: argparse.Namespace) -> None:
     print(f"kraft: {tag} will be installed when Kraft is free{why}")
 
 
+def _snapshot_before_update(run_dirs: RunDirs) -> dict:
+    """Copy the configuration and every run database before an install, so the
+    version it replaces can be put back by hand. A home that never ran has
+    nothing to copy; a copy that fails stops the update before it installs."""
+    import sqlite3
+
+    from kraft import update, when_free
+
+    if not run_dirs.base.is_dir() or not config_dir().is_dir():
+        return {}
+    try:
+        # The server that wrote the databases, when one answers: an install
+        # never restarted onto did not.
+        wrote = _running_server_version() or update.installed()
+        taken = when_free.snapshot(run_dirs, config_dir(), wrote)
+    except (OSError, sqlite3.Error) as exc:
+        _exit(f"could not back up the configuration and databases: {exc}. Nothing was installed")
+    folder = Path(taken["config_snapshot"]).parent
+    print(f"kraft: backed up the configuration and databases to {folder}")
+    return taken
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
-    from kraft import update
+    from kraft import update, when_free
 
     if ns.cancel_when_free:
         _when_free_call(client.unmark_update, instead="there is no mark to drop without one")
@@ -2172,9 +2194,19 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         )
     print(f"kraft {here} -> {release.tag}")
     update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
-    code = update.perform(release)
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    taken = _snapshot_before_update(run_dirs)
+    try:
+        code = update.perform(release)
+    except SystemExit:
+        when_free.drop_snapshot(taken)
+        raise
     if code != 0:
+        when_free.drop_snapshot(taken)
         raise SystemExit(code)
+    # An update still being confirmed may yet restore the snapshot its record names.
+    if taken and not when_free.read_rollback(run_dirs):
+        when_free.delete_snapshots(run_dirs, keep=str(Path(taken["config_snapshot"]).parent))
     print(f"kraft {release.tag} installed.")
     if other := update.shadowing_kraft():
         print(

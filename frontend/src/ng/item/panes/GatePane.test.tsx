@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { KraftEvent } from "../../../types";
+import type { GateRound } from "../../../types";
 import { acceptWrites, detail, holdFetch, SLICED, stubFetch, V1 } from "../testkit";
 import type { ItemDetail } from "../useItem";
 import { GateBody, GateFooter } from "./GatePane";
@@ -14,7 +14,9 @@ const WRITES = acceptWrites("POST /work-items/w1/gates/plan_approval/approve", "
 afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
 const pending = detail({ current_node_id: "plan_approval", pending_gate: "plan_approval", gate_artifact: ".engineering/plans/p.md", display_status: "needs_you" });
-const approved = (by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate: "plan_approval", by }, node_id: "plan_approval", created_at: "t" });
+/** A round of plan_approval, as the server reads it from the events. */
+const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+const rounds = (...rs: GateRound[]) => ({ gate_rounds: { plan_approval: rs } });
 
 let where = "";
 const Where = () => {
@@ -127,32 +129,32 @@ describe("GateFooter", () => {
 describe("GateBody", () => {
   it("says who passed a gate, and what a pending one decides on", async () => {
     stubFetch();
-    const { unmount } = render(<GateBody item={detail()} version="1" gate={gate} events={[approved("agent")]} />);
+    const { unmount } = render(<GateBody item={detail(rounds(round(1, { by: "agent" })))} version="1" gate={gate} />);
     expect(screen.getByText("passed · auto")).toBeInTheDocument();
     expect(screen.queryByText("decides on")).toBeNull();
     unmount();
-    const { unmount: unmount2 } = render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
+    const { unmount: unmount2 } = render(<GateBody item={pending} version="1" gate={gate} />);
     expect(screen.getByText("waiting for you")).toBeInTheDocument();
     expect(screen.getByText("p.md")).toBeInTheDocument();
     // The node it rejects to by its name, as the footer says it.
     expect(screen.getByText("reject to").nextElementSibling).toHaveTextContent(/^plan$/);
     unmount2();
     const far = { ...pending, chain_definition: { ...pending.chain_definition, nodes: V1.map((n) => (n.id === "plan_approval" ? { ...n, reject_to: "merge_request" } : n)) } };
-    render(<GateBody item={far} version="1" gate={gate} events={[]} />);
+    render(<GateBody item={far} version="1" gate={gate} />);
     expect(screen.getByText("reject to").nextElementSibling).toHaveTextContent(/^merge request$/);
   });
 
   // R14b-05: a skipped gate on a finished item was "not reached", though the item had passed it.
-  const skip = (gate_: string): KraftEvent => ({ seq: 3, work_item_id: "w1", type: "node_skipped", payload: { node_id: gate_, gate: gate_ }, node_id: gate_, created_at: "t" });
+  const skipped = round(1, { outcome: "skipped", by: null });
   it.each([
-    ["skipped", [skip("plan_approval")], "skipped"],
-    ["skipped, then decided on a retry", [skip("plan_approval"), approved("human")], "passed · you"],
-    ["another gate's skip", [skip("final_review")], "not reached"],
+    ["skipped", rounds(skipped), "skipped"],
+    ["skipped, then decided on a retry", rounds(skipped, round(2)), "passed · you"],
+    ["another gate's skip", { gate_rounds: { final_review: [skipped] } }, "not reached"],
     // A run inside a later group stands at `slices.<node>`: the gate before it is behind it.
-    ["behind a run inside a group", [], "passed", { display_status: "running", chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.implementation" }],
-  ] as [string, KraftEvent[], string, Partial<ItemDetail>?][])("a gate that is %s", (_n, events, status, over) => {
+    ["behind a run inside a group", { display_status: "running", chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.implementation" }, "passed"],
+  ] as [string, Partial<ItemDetail>, string][])("a gate that is %s", (_n, over, status) => {
     stubFetch();
-    render(<GateBody item={detail({ display_status: "done", current_node_id: null, ...over })} version="1" gate={gate} events={events} />);
+    render(<GateBody item={detail({ display_status: "done", current_node_id: null, ...over })} version="1" gate={gate} />);
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(status);
   });
 
@@ -165,16 +167,157 @@ describe("GateBody", () => {
     ["every scope passed, one of three targeted", { passed: true, scopes: [scope(1, true, "s1/**", true), scope(2, true), scope(3, true)] }, "✓ 3 scopes (1 targeted)"],
   ])("tests line: %s", async (_name, test_result, line) => {
     stubFetch();
-    render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} events={[]} />);
+    render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} />);
     if (line === null) return expect(screen.queryByText("tests")).toBeNull();
     expect(screen.getByText("tests").nextElementSibling).toHaveTextContent(line);
     if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "cmd2" })).toHaveAttribute("href", "/api/work-items/w1/sessions/sess2/log?format=text");
     else expect(screen.queryByRole("link", { name: /\*\*/ })).toBeNull();
   });
 
+  // plan_approval asked, sent back with a long note, asked again, approved: what 510ysadf did (its note was about 700 characters).
+  const LONG = "The plan skips the invalidation story. Add a section on what happens when git_scan sees a blob_sha change mid-query. ".repeat(6).trim();
+  const sentBack = round(1, { outcome: "rejected", by: "assistant", note: LONG, sent_to: "plan" });
+  const twice = rounds(sentBack, round(2, { by: "assistant" }));
+
+  const waiting = rounds(sentBack, round(2, { outcome: "pending", by: null, ended_at: null }));
+  const historyHead = () => screen.queryByRole("heading", { name: /^History/ });
+
+  // "now" is for a round still waiting: an ended newest round is not "now".
+  it.each([
+    ["the newest still waiting is now", waiting, ["Round 2 · now", "Round 1"]],
+    ["an ended newest is not", twice, ["Round 2", "Round 1"]],
+  ])("lists every round newest first: %s", (_name, over, labels) => {
+    stubFetch();
+    render(<GateBody item={detail(over)} version="1" gate={gate} />);
+    expect(screen.getByRole("heading", { name: "History · 2 rounds" })).toBeInTheDocument();
+    const rows = screen.getAllByRole("button", { name: /^Round/ });
+    expect(rows.map((r) => r.querySelector(".ip-hist-n")?.textContent)).toEqual(labels);
+    expect(rows[0]).toHaveTextContent(over === waiting ? "waiting" : "approved · assistant");
+    expect(rows[1]).toHaveTextContent("changes requested · assistant");
+  });
+
+  it("says a review round's count in its History row, never its note", () => {
+    stubFetch({ "GET /work-items/w1/threads": [200, []] });
+    const reviewed = round(1, { outcome: "rejected", by: "human", note: "must fix: SECRET NOTE", sent_to: "plan", review: { id: "rv", outcome: "request_changes", summary: "s", head_sha: "h" }, threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } } });
+    render(<GateBody item={detail({ ...rounds(reviewed, round(2, { outcome: "pending", by: null, ended_at: null })), pending_gate: "plan_approval" })} version="1" gate={gate} />);
+    const row = screen.getByRole("button", { name: /^Round 1/ });
+    expect(row).toHaveTextContent("2 threads · 1 must-fix · 1 question · 1 open");
+    expect(row).not.toHaveTextContent("SECRET NOTE");
+    expect(screen.getByRole("button", { name: /^Round 2/ })).not.toHaveTextContent("thread");
+  });
+
+  it("opens the picked row of an ended review round in review, at the canvas's URL", () => {
+    stubFetch({ "GET /work-items/w1/threads": [200, []] });
+    const reviewed = round(1, { outcome: "rejected", by: "human", note: "n", sent_to: "plan", review: { id: "rv", outcome: "request_changes", summary: "s", head_sha: "h" }, threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } } });
+    const noted = round(2, { outcome: "rejected", by: "human", note: "n", sent_to: "plan" });
+    const at = (picked: number) => <MemoryRouter><GateBody item={detail({ ...rounds(reviewed, noted, round(3, { outcome: "pending", by: null, ended_at: null })), pending_gate: "plan_approval" })} version="1" gate={gate} picked={picked} /></MemoryRouter>;
+    const { rerender } = rtlRender(at(1));
+    expect(screen.getByRole("link", { name: "Open in review" })).toHaveAttribute("href", "/work-items/w1/review?gate=plan_approval&round=1");
+    // Not the row that is not picked, nor a round that holds no review, nor the waiting round.
+    rerender(at(2));
+    expect(screen.queryByRole("link", { name: "Open in review" })).toBeNull();
+    rerender(at(3));
+    expect(screen.queryByRole("link", { name: "Open in review" })).toBeNull();
+  });
+
+  // It repeats the status line, until a round has ended.
+  it.each([
+    ["only a round that is waiting", rounds(round(1, { outcome: "pending", by: null, ended_at: null })), null],
+    ["one round that ended", rounds(round(1, { by: "agent" })), "History · 1 round"],
+    ["an ended round and a waiting one", waiting, "History · 2 rounds"],
+  ])("History with %s", (_name, over, heading) => {
+    stubFetch();
+    render(<GateBody item={detail({ ...over, pending_gate: "plan_approval" })} version="1" gate={gate} />);
+    if (heading === null) return expect(historyHead()).toBeNull();
+    expect(historyHead()).toHaveTextContent(heading);
+  });
+
+  // It grows with every round, so the facts above it must not move down.
+  it("puts History after the facts, at the end of the body", () => {
+    stubFetch();
+    const { container } = render(<GateBody item={detail({ ...waiting, pending_gate: "plan_approval", gate_artifact: ".x/p.md" })} version="1" gate={gate} />);
+    const facts = container.querySelector("dl")!;
+    expect(facts.compareDocumentPosition(historyHead()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.lastElementChild).toBe(container.querySelector(".ip-hist"));
+  });
+
+  // The canvas previews the note and the drawer holds it whole; a row says when, what and who, and marks the one shown.
+  it("shows no note text in a row, and never opens one: the picked row is marked and the rest are the same", () => {
+    stubFetch();
+    const both = rounds(sentBack, round(2, { outcome: "rejected", by: "assistant", note: LONG, sent_to: "plan" }), round(3, { outcome: "pending", by: null, ended_at: null }));
+    render(<GateBody item={detail(both)} version="1" gate={gate} picked={1} />);
+    const [, second, first] = screen.getAllByRole("button", { name: /^Round/ });
+    expect(first).toHaveAttribute("aria-current", "true");
+    expect(second).not.toHaveAttribute("aria-current");
+    for (const row of [first, second]) {
+      expect(row).not.toHaveTextContent("invalidation");
+      expect(row.querySelectorAll("span:not(.ip-hist-head):not(.ip-hist-head *)")).toHaveLength(1);
+    }
+    expect(second).toHaveTextContent(/^Round 2.*changes requested · assistant$/);
+    expect(first).not.toHaveAttribute("aria-expanded");
+    expect(first.querySelectorAll("button, [aria-expanded]")).toHaveLength(0);
+  });
+
+  it("clicking a row picks its round, and the newest round picks none", async () => {
+    stubFetch();
+    const onPick = vi.fn();
+    render(<GateBody item={detail(twice)} version="1" gate={gate} onPick={onPick} />);
+    await userEvent.click(screen.getByRole("button", { name: /^Round 1/ }));
+    expect(onPick).toHaveBeenLastCalledWith(1);
+    await userEvent.click(screen.getByRole("button", { name: /^Round 2/ }));
+    expect(onPick).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("a round with no request has no asked fact, and still reads who passed it", () => {
+    stubFetch();
+    const unasked = detail({ ...rounds(round(1, { requested_at: null, by: "kraft" }), round(2)) });
+    render(<GateBody item={unasked} version="1" gate={gate} picked={1} />);
+    expect(screen.queryByText("asked")).toBeNull();
+    expect(screen.getByText("decided")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Round 1/ })).toHaveTextContent("approved · auto");
+  });
+
+  // The reviewer's rejection is the round's note too: the canvas previews it, so the pane says it nowhere.
+  it("a reviewer's own rejection leaves its note to the canvas", () => {
+    stubFetch();
+    const note = "Task 3 has no test.";
+    const item = detail(rounds(round(1, { outcome: "rejected", by: "agent", note, sent_to: "plan", reviewer: { kind: "reject", note } })));
+    render(<GateBody item={item} version="1" gate={gate} />);
+    expect(screen.getByText("Reviewer: reject")).toBeInTheDocument();
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
+  it("a past round shows that round's reviewer, not the newest's", () => {
+    stubFetch();
+    const item = detail(rounds(round(1, { reviewer: { kind: "ready", note: "" } }), round(2)));
+    const { unmount } = render(<GateBody item={item} version="1" gate={gate} picked={1} />);
+    expect(screen.getByText("Reviewer: ready for you")).toBeInTheDocument();
+    unmount();
+    render(<GateBody item={item} version="1" gate={gate} />);
+    expect(screen.queryByText(/^Reviewer/)).toBeNull();
+  });
+
+  it("a past round shows no files and no decides-on, and its own facts", async () => {
+    const answers = { "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }] }] } as Record<string, [number, unknown]>;
+    const calls = stubFetch(answers);
+    const item = { ...pending, ...rounds(sentBack, round(2, { outcome: "pending", by: null, ended_at: null })), test_result: { passed: true, scopes: [] } as never };
+    const { unmount } = render(<GateBody item={item} version="1" gate={gate} />);
+    expect(await screen.findByText("a.py")).toBeInTheDocument();
+    expect(screen.getByText("decides on")).toBeInTheDocument();
+    unmount();
+    calls.length = 0;
+    render(<GateBody item={item} version="1" gate={gate} picked={1} />);
+    await act(async () => {});
+    // Nothing is read for the files of a round that is over, and none of the newest's are drawn.
+    expect(calls.filter((c) => c.path === "/work-items/w1/diff")).toEqual([]);
+    expect(screen.queryByText("a.py")).toBeNull();
+    for (const gone of ["decides on", "status", "tests"]) expect(screen.queryByText(gone)).toBeNull();
+    for (const kept of ["decided", "asked", "reject to"]) expect(screen.getByText(kept)).toBeInTheDocument();
+  });
+
   it("lists the open threads, not the resolved ones", async () => {
     stubFetch({ "GET /work-items/w1/threads": [200, [{ id: "a", state: "open", comments: [{ body: "no size bound" }] }, { id: "b", state: "resolved", comments: [{ body: "fixed already" }] }]] });
-    render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
+    render(<GateBody item={pending} version="1" gate={gate} />);
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
     expect(screen.queryByText("fixed already")).toBeNull();
   });
@@ -185,24 +328,21 @@ describe("GateBody", () => {
     ["a gate that is not pending does not", detail(), false],
   ])("concerns: %s", (_n, item, shown) => {
     stubFetch();
-    render(<GateBody item={{ ...item, concerns: ["fix is inferred, not reproduced"] }} version="1" gate={gate} events={[]} />);
+    render(<GateBody item={{ ...item, concerns: ["fix is inferred, not reproduced"] }} version="1" gate={gate} />);
     expect(screen.queryByText("fix is inferred, not reproduced") !== null).toBe(shown);
     expect(screen.queryByText("Concerns · 1") !== null).toBe(shown);
   });
 
   // Kraft's note on the reviewer's outcome is owed to whoever decides the gate, the changed-files warning above all.
-  const reviewed = (reason: string, note: string): KraftEvent[] => [
-    { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "plan_approval" }, node_id: "plan_approval", created_at: "t" },
-    { seq: 2, work_item_id: "w1", type: "gate_auto_review_skipped", payload: { gate: "plan_approval", reason, note }, node_id: "plan_approval", created_at: "t" },
-  ];
+  const reviewed = (kind: "ready" | "undecided", note: string) => rounds(round(1, { outcome: "pending", by: null, ended_at: null, reviewer: { kind, note } }));
   // The reviewer's `concerns` are usually its note too: shown once, under the outcome.
   it.each([
-    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored; its changes are still in the worktree: a.py", []],
-    ["ready for you", "passed", "Every task is covered.", []],
-    ["ready for you", "passed", "Every task is covered.", [" Every task is covered.\n"]],
-  ])("shows the reviewer's note: %s, %s, %s, concerns %j", (word, reason, note, concerns) => {
+    ["could not decide", "undecided" as const, "The reviewer changed files, so its verdict was ignored; its changes are still in the worktree: a.py", []],
+    ["ready for you", "ready" as const, "Every task is covered.", []],
+    ["ready for you", "ready" as const, "Every task is covered.", [" Every task is covered.\n"]],
+  ])("shows the reviewer's note: %s, %s, %s, concerns %j", (word, kind, note, concerns) => {
     stubFetch();
-    render(<GateBody item={{ ...pending, concerns }} version="1" gate={gate} events={reviewed(reason, note)} />);
+    render(<GateBody item={{ ...pending, concerns, ...reviewed(kind, note) }} version="1" gate={gate} />);
     expect(screen.getByText(`Reviewer: ${word}`)).toBeInTheDocument();
     expect(screen.getByText(note)).toBeInTheDocument();
     expect(screen.queryByText(/^Concerns/)).toBeNull();
@@ -210,7 +350,7 @@ describe("GateBody", () => {
 
   it("reads the threads again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/threads/);
-    const at = (version: string) => <MemoryRouter><GateBody item={pending} version={version} gate={gate} events={[]} /></MemoryRouter>;
+    const at = (version: string) => <MemoryRouter><GateBody item={pending} version={version} gate={gate} /></MemoryRouter>;
     const { rerender } = rtlRender(at("1"));
     rerender(at("2"));
     await waitFor(() => expect(reads).toHaveLength(2));
@@ -223,7 +363,7 @@ describe("GateBody", () => {
   it("reads the changed files again when a session starts or ends", async () => {
     const answers: Record<string, [number, unknown]> = { "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }] }] };
     stubFetch(answers);
-    const at = (it: typeof pending) => <MemoryRouter><GateBody item={it} version="1" gate={gate} events={[]} /></MemoryRouter>;
+    const at = (it: typeof pending) => <MemoryRouter><GateBody item={it} version="1" gate={gate} /></MemoryRouter>;
     const { rerender } = rtlRender(at(pending));
     expect(await screen.findByText("a.py")).toBeInTheDocument();
     answers["GET /work-items/w1/diff"] = [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }, { path: "b.py", insertions: 2, deletions: 0 }] }];

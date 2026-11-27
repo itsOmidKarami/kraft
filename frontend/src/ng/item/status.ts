@@ -3,7 +3,7 @@ import { elapsed, usd } from "../../format";
 
 /** What the header shows for an item. Read from the server's `display_status`
  *  and `stop` only (R16, R27, R28): never derived from sessions or events. */
-export type Main = "pause" | "resume" | "start" | "raise" | "retry" | "archive" | "restore" | "gate" | "answer" | "conflicts" | "reopen";
+export type Main = "pause" | "resume" | "start" | "raise" | "retry" | "archive" | "restore" | "gate" | "answer" | "conflicts" | "reopen" | "rerun";
 import type { Tone } from "../ui/tone";
 export type { Tone };
 export type PanelItem = "escalate" | "complete" | "archive" | "cancel";
@@ -162,7 +162,9 @@ function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
     case "cap": return item.stop.limit ? ["raise"] : ["retry"];
     case "conflict": return ["conflicts"];
     case "mr_closed": return ["reopen", "retry"];
-    // stuck, and any stop a later server adds: /retry claims every needs_human item.
+    // A fix loop stopped on merge-request CI: Re-run CI, which retries, where the server lists it.
+    case "stuck": return ["rerun", "retry"];
+    // Any stop a later server adds: /retry claims every needs_human item.
     default: return ["retry"];
   }
 }
@@ -172,12 +174,14 @@ function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
  *  budget stop is `offersRaise`'s; a cap's limit editor patches, then retries. */
 const MAIN_DOOR: Record<Main, ItemAction | null> = {
   pause: "pause", resume: "resume", start: "resume", answer: "resume", raise: "retry", retry: "retry",
-  archive: "archive", restore: "restore", reopen: "reopen_mr", gate: null, conflicts: null,
+  archive: "archive", restore: "restore", reopen: "reopen_mr", rerun: "rerun_ci", gate: null, conflicts: null,
 };
 
 /** Whether the server admits `main`'s door; true for every door on a server that sends no `actions`. */
 function mainAdmitted(item: Pick<WorkItem, "stop"> & Doors, main: Main): boolean {
   if (main === "raise" && item.stop?.kind === "budget") return offersRaise(item);
+  // Only where the server lists it: an older server sends no `actions`, and its route takes no person's re-run.
+  if (main === "rerun") return admits(item, "rerun_ci", false);
   const door = MAIN_DOOR[main];
   return door === null || admits(item, door, true);
 }
@@ -195,7 +199,9 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
   const main = strandedOneOff(item) ? "start" : first(
     status === "paused" ? ["resume"]
     : status === "needs_you" ? needsYouMain(item)
-    : status === "failed" || status === "escalated" ? ["retry"]
+    // A `ci.pipeline` wait's red or broken pipeline: Re-run CI, which retries, where the server lists it.
+    : status === "failed" ? ["rerun", "retry"]
+    : status === "escalated" ? ["retry"]
     : status === "done" || status === "cancelled" ? ["archive"]
     : status === "archived" ? ["restore"]
     : ["pause"],
@@ -220,7 +226,7 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
 export function bodyOffers(item: Pick<WorkItem, "display_status" | "stop" | "needs_context_question">, main: Main | null): boolean {
   const status = item.display_status;
   switch (main) {
-    case "gate": case "conflicts": case "raise": case "reopen": case "resume": return true;
+    case "gate": case "conflicts": case "raise": case "reopen": case "rerun": case "resume": return true;
     case "answer": return !!item.needs_context_question;
     case "archive": return status === "cancelled" || status === "done";
     case "retry": return !!item.stop && (status === "failed" || (status === "needs_you" && !["gate", "budget", "cap", "mr_closed", "conflict", "question"].includes(item.stop.kind)));
@@ -244,6 +250,7 @@ export const MAIN_LABEL: Record<Main, string> = {
   answer: "Answer",
   conflicts: "Review conflicts",
   reopen: "Reopen MR",
+  rerun: "Re-run CI",
 };
 
 /** The header's ⋮ doors that act on the item: Duplicate once it has ended. Escalate… and

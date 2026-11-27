@@ -167,6 +167,24 @@ export function useThreads(id: string) {
   return { ...got, reload: fetchNow };
 }
 
+/** `GET /work-items/{id}/threads?gate=&round=`: the threads one round of a gate holds, read again when `stamp` changes
+ *  (the item's version: a thread's state moves with it). */
+export function useRoundThreads(id: string, gate: string, round: number, stamp?: string) {
+  // Kept with the round it was read for: another gate or round is another list, and the last one's is not shown while it is read.
+  const key = `${id}\n${gate}\n${round}`;
+  const [read, setRead] = useState<{ key: string; got: Fetched<ReviewThread[]> } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const q = new URLSearchParams({ gate, round: String(round) });
+    request<ReviewThread[]>(`/work-items/${encodeURIComponent(id)}/threads?${q}`).then(({ status, body }) => {
+      if (!live) return;
+      setRead({ key, got: status === 200 ? { state: "ready", data: body } : { state: "error", status, error: detailOf(body) } });
+    });
+    return () => void (live = false);
+  }, [id, gate, round, stamp]);
+  return read?.key === key ? read.got : ({ state: "loading" } as const);
+}
+
 /** Viewed marks (B11): the comparison's own, overlaid by what was clicked since
  *  it loaded. A click is sent at once and taken back, with the server's words,
  *  if refused. */

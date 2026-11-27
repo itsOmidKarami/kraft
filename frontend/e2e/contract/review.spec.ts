@@ -1,18 +1,13 @@
 import { expect, type Page } from "@playwright/test";
-import { compareFor, withProducer } from "./mocks/fixtures";
+import { compareFor } from "./mocks/fixtures";
 import { app, contract, editorsRoute, focusedName, item, pause, type Row } from "./kit";
 
 /** Review and the document viewer: the gate review, Approve's lock, Esc and focus, Open in editor, search matches. */
 
-const appDoc = async (p: Page, editors = true) => {
-  await app(p, item("needs-gate", "?sel=final_review"), editors ? { routes: editorsRoute } : {});
+const appDoc = async (p: Page, routes: (p: Page) => Promise<unknown> = editorsRoute) => {
+  await app(p, item("needs-gate", "?sel=final_review"), { routes });
   await p.getByRole("button", { name: /^Read / }).first().click();
   await p.getByRole("dialog").waitFor();
-};
-const appSearchDoc = async (p: Page, routes: (p: Page) => Promise<unknown> = editorsRoute) => {
-  await app(p, "/settings/policy", { routes });
-  await p.keyboard.press("ControlOrMeta+k"); await p.getByRole("combobox", { name: /search/i }).fill("cache");
-  await p.getByRole("listbox").locator('[data-section="docs"] [role="option"]').first().click(); await p.getByRole("dialog").waitFor(); await pause(p, 600);
 };
 
 const ROWS: Row[] = [
@@ -80,8 +75,9 @@ const ROWS: Row[] = [
   {
     name: "doc viewer: one Open in editor button; its menu lists only the installed editors [decided]",
     run: async (p) => {
-      // GET /editors (mocked): VS Code (default) and Cursor installed, plus the system opener. An indexed document (from search).
-      await appSearchDoc(p); const d = p.getByRole("dialog");
+      // GET /editors (mocked): VS Code (default) and Cursor installed, plus the system opener. A document with a file on
+      // disk: the gate's. What search finds is Kraft's own copy (`event_ingest`), which offers no editor.
+      await appDoc(p); const d = p.getByRole("dialog");
       await expect(d.getByRole("button", { name: "Open in editor" })).toHaveCount(1, { timeout: 3000 });
       await expect(d.getByRole("button", { name: "Open in editor" })).toBeEnabled();
       await d.getByRole("button", { name: "Other editors" }).click(); await pause(p, 300);
@@ -95,7 +91,7 @@ const ROWS: Row[] = [
   {
     name: "doc viewer: with no editor installed, Open in editor is disabled and says so [decided]",
     run: async (p) => {
-      await appSearchDoc(p, (pg) => pg.route("**/api/editors", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: [], system: false, default: null }) })));
+      await appDoc(p, (pg) => pg.route("**/api/editors", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: [], system: false, default: null }) })));
       const b = p.getByRole("dialog").getByRole("button", { name: "Open in editor" });
       await expect(b).toBeDisabled(); await expect(b).toHaveAttribute("title", "No editor found on this machine");
     },
@@ -153,7 +149,7 @@ const ROWS: Row[] = [
   {
     name: "doc viewer: a gate's document says who wrote it [decided]",
     run: async (p) => {
-      await app(p, item("needs-gate", "?sel=final_review"), { routes: editorsRoute, tweak: withProducer });
+      await app(p, item("needs-gate", "?sel=final_review"), { routes: editorsRoute });
       await p.getByRole("button", { name: /^Read / }).first().click(); await p.getByRole("dialog").waitFor();
       await expect(p.getByRole("dialog").getByText(/written by/).first()).toBeVisible({ timeout: 3000 });
     },

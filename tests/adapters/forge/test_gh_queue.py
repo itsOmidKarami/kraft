@@ -768,3 +768,28 @@ async def test_a_merge_github_refuses_for_a_moved_head_raises_head_moved(
     assert isinstance(refused.value, forge.HeadMoved) is moved
     if moved:
         assert refused.value.current == "f0reign1"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(api_outputs.MERGE_IN_PROGRESS, id="graphql-error"),
+        pytest.param(Api(405, '{"message": "Merge already in progress"}'), id="http-405"),
+    ],
+)
+async def test_a_merge_github_is_already_making_is_waited_for(cli, tmp_path, answer):
+    """A retry after an ask whose answer was lost (Kraft-l1hbl): GitHub is still
+    merging, which parks the item to read the state again (`MergeBusy`), not a
+    refusal for a repair."""
+    cli.stub("git", "0")
+    routes = {_MERGE_READ: api_outputs.merge_state(), _MUTATION: answer}
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    with pytest.raises(forge.MergeBusy) as busy:
+        await forge.GhCli().merge(
+            repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=7, url=""), head=_HEAD
+        )
+
+    assert busy.value.no_answer
+
+    assert _mutations(cli.argv("gh")) == [("mergePullRequest", _MERGE_INPUT)]

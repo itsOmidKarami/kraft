@@ -25,8 +25,9 @@ So the failure comes from one or both of:
 
 ## Find out which
 
-If the prompt tells you to rebase this branch first, do that before anything
-else: the rest of this method assumes the branch already sits on the target.
+If the prompt tells you to rebase this branch first, do that and resolve any
+conflict before anything else: the rest of this method assumes the branch
+already sits on the target.
 
 Read the failed jobs the prompt names, then their logs. `kraft view
 pipelines` lists this merge request's pipelines; the train's has kind `train`
@@ -36,20 +37,21 @@ pipelines` lists this merge request's pipelines; the train's has kind `train`
 links to a pipeline (`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`),
 that number is the `--pipeline` value.
 
-In a workspace item a failure names its repository (`[name] ...` in the log);
-for a member, add `--repo <its folder, relative to the worktree root>` to each
-`kraft view` call. Without `--repo` they read the root repository.
+When the prompt says its merge request is the one in a workspace member, add
+`--repo <that member's folder, relative to the worktree root>` to each `kraft
+view` call. Without `--repo` they read the root repository.
 
 A log names the failing test or check far more precisely than a job name
 does; read it before you change anything.
 
-Then reproduce it where you can. Fetch the target branch and run the failing
-job's command on this branch combined with `origin/<base>`, the way the train
-or queue did: in a scratch worktree (`git worktree add`) of a merge of the two,
-never by merging or checking out another branch in this one. A failure you
-reproduced is a failure you can confirm you fixed. One you could not reproduce
-(a job that needs a service or a secret only the forge has) you fix from the
-log alone; say so in your report.
+Then reproduce it where you can. Rebase only when the prompt has a rebase step,
+and the way it says; otherwise leave the branch where Kraft put it. That is as
+near as you can get to what the train or queue merged. Run the failing job's
+command in this worktree (in the member's checkout when the prompt names one).
+Never merge `origin/<base>` into the branch or check out another branch there. A
+failure you reproduced is a failure you can confirm you fixed. One you couldn't
+reproduce (a job that needs a service or a secret only the forge has) you fix from
+the log alone; say so in your report.
 
 ## Fix the code, not the pipeline
 
@@ -59,21 +61,21 @@ fix the test that collides, satisfy the check that only runs there. Do not
 edit the CI configuration to skip, relax or remove a job, and do not mark a
 test as skipped or expected to fail to get past it.
 
-The one exception is a train-only or queue-only job that is itself wrong: it
-fails on the target branch alone, with no change of yours in it, or it tests
-something this project no longer has. That is not yours to fix by editing it
-and not something a code change can satisfy. Change nothing and report
-`needs_context`, naming the job and what you saw, so a person decides.
-
-A failure that is not this change's at all (a flaky job, a runner that ran out
-of disk, a registry that timed out) is also not something to patch around.
-Report it plainly, with the log line that shows it.
+If the failure isn't this change's (a job that is itself wrong or tests something
+the project no longer has, a flaky job, a runner that ran out of disk, a registry
+that timed out), no code change satisfies it, and editing the job isn't yours
+either. Commit nothing and stop as Finish says.
 
 ## Finish
 
-Commit your fix on this branch. A repair that commits nothing stops the item
-for a person, since the train would only reject the same head again; that is
-the right outcome when there is nothing in the code to fix.
+Run the command that reproduced the failure again on the fixed branch; if it
+still fails, keep going. Then commit your fix on this branch, and say in your
+report what you ran and what it printed, or that you could not reproduce it.
+
+When there is nothing in the code to fix, commit nothing and stop with
+`needs_context`, naming the job and the log line that shows why. A repair that
+commits nothing stops the item for a person, since the train would only reject
+the same head again; that is the right outcome here.
 
 Never push, never merge, and never put the merge request back on the train or
 in the queue yourself. Kraft does all three: after your commit it sends the

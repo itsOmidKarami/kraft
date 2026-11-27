@@ -79,6 +79,10 @@ async def _retry_one(app, row) -> bool:
     node_id = row["current_node_id"]
     if _waits_for_checkout(st, wid):
         return False  # tried again next tick, nothing counted
+    if deps.task_is_live(app, wid):
+        # The walk that parked it is still returning: claimed now, the cap stop and the
+        # retry below would land under it, and it may carry on (`walk.run_once`). Next tick.
+        return False
 
     # Bracketed from *before* the claim to the hand-off. A claim makes this item
     # read `active`, and this poller's own `tick` SELECT filters

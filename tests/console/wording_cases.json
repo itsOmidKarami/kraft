@@ -75,6 +75,12 @@
       "tail": "the fix loop made no progress in 3 rounds"
     },
     {
+      "name": "other-stop-in-paragraphs",
+      "row": { "display_status": "needs_you", "current_node_id": "verification", "stop": { "kind": "stuck", "node": "verification", "reason": "judge: Re-run the e2e job.\n\nDocker Hub's pull rate limit failed it." } },
+      "group": "needs",
+      "tail": "judge: Re-run the e2e job. Docker Hub's pull rate limit failed it."
+    },
+    {
       "name": "other-stop-without-reason",
       "row": { "display_status": "needs_you", "current_node_id": "merge_request", "stop": { "kind": "other", "node": "merge_request", "reason": null } },
       "group": "needs",
@@ -201,6 +207,20 @@
     {
       "name": "merged",
       "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 42, "url": "https://example.com/mr/42" } },
+      "group": "done",
+      "tail": "merged !42",
+      "marks": ["done", "done", "done", "done", "done"]
+    },
+    {
+      "name": "merged-github-pull-request",
+      "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 1401, "url": "https://github.com/itsOmidKarami/kraft/pull/1401" } },
+      "group": "done",
+      "tail": "merged #1401",
+      "marks": ["done", "done", "done", "done", "done"]
+    },
+    {
+      "name": "merged-gitlab-merge-request",
+      "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 42, "url": "https://gitlab.example/acme/app/-/merge_requests/42" } },
       "group": "done",
       "tail": "merged !42",
       "marks": ["done", "done", "done", "done", "done"]
@@ -649,6 +669,7 @@
     { "name": "scope-skipped-task", "event": { "type": "scope_skipped", "node_id": null, "payload": { "path": "verification.checks.lint", "note": null } }, "line": "lint skipped on verification" },
     { "name": "scope-skipped-step-named", "event": { "type": "scope_skipped", "node_id": null, "payload": { "path": "merge_request_feedback.main", "note": "evidence" } }, "line": "main skipped on merge request feedback" },
     { "name": "scope-skipped-node", "event": { "type": "scope_skipped", "node_id": null, "payload": { "path": "plan" } }, "line": "plan skipped" },
+    { "name": "quiet-reply-round-started", "event": { "type": "reply_round_started", "node_id": "feedback", "payload": { "node_id": "feedback", "head": "abc123", "round": 1, "threads": ["T1"] } }, "line": null },
     { "name": "quiet-session-reattached", "event": { "type": "session_reattached", "node_id": null, "payload": { "session_id": "s1", "pid": 4242 } }, "line": null },
     { "name": "session-stopped", "event": { "type": "worker_session_paused", "node_id": null, "payload": { "session_id": "s1" } }, "line": "a session stopped" },
     { "name": "session-lost-in-a-restart", "event": { "type": "session_unknown", "node_id": null, "payload": { "session_id": "s1", "reason": "pid reused" } }, "line": "a session was lost in a restart" },
@@ -661,6 +682,10 @@
     { "name": "mr-closed-by", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "by": "mara" } }, "line": "MR !142 closed by mara" },
     { "name": "mr-closed-by-cancel", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "by": "cancel" } }, "line": "MR !142 closed" },
     { "name": "mr-reopened", "event": { "type": "mr_reopened", "node_id": null, "payload": { "ref": 142 } }, "line": "MR !142 reopened" },
+    { "name": "mr-opened-github", "event": { "type": "mr_opened", "node_id": "draft_merge_request", "payload": { "number": 142, "url": "https://github.com/o/r/pull/142" } }, "line": "MR #142 opened" },
+    { "name": "mr-closed-by-github", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "url": "https://github.com/o/r/pull/142", "by": "mara" } }, "line": "MR #142 closed by mara" },
+    { "name": "mr-closed-by-cancel-github", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "url": "https://github.com/o/r/pull/142", "by": "cancel" } }, "line": "MR #142 closed" },
+    { "name": "mr-reopened-github", "event": { "type": "mr_reopened", "node_id": null, "payload": { "ref": 142, "url": "https://github.com/o/r/pull/142" } }, "line": "MR #142 reopened" },
     { "name": "merge-refused-unreviewed", "event": { "type": "merge_refused_unreviewed", "node_id": "implement", "payload": { "node_id": "implement", "repo": "/work/app", "reviewed": "a1b2c3d", "current": "e4f5a6b" } }, "line": "implement · not merged: the code is not what the final review approved" },
     { "name": "merge-refused-unreviewed-brought-home", "event": { "type": "merge_refused_unreviewed", "node_id": "merge", "payload": { "node_id": "merge", "repo": "/work/app", "reviewed": "a1b2c3d", "current": "e4f5a6b", "source": "forge", "fast_forwarded": true } }, "line": "merge · not merged: a commit reached the merge request after the review; it is on the item's branch to review" },
     { "name": "merge-refused-unreviewed-by-hand", "event": { "type": "merge_refused_unreviewed", "node_id": "merge", "payload": { "node_id": "merge", "repo": "/work/app", "reviewed": "a1b2c3d", "current": "e4f5a6b", "source": "forge", "fast_forwarded": false } }, "line": "merge · not merged: a commit reached the merge request after the review; pull it into the branch by hand" },

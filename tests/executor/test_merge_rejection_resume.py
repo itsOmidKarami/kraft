@@ -4,6 +4,8 @@ nothing answered yet -- a resume, the rate-limit poller, a person's retry.
 None of them asks the forge to merge a head the train rejected, or a repair's
 commit, before a gate saw it."""
 
+import inspect
+
 import pytest
 from support.harness import v1_node, v1_task
 from support.item_walk import (
@@ -41,7 +43,15 @@ def _crash_after(monkeypatch, module, name: str, *, before: bool = False, when=N
             await real(*args, **kwargs)
         raise _Crash
 
-    monkeypatch.setattr(module, name, crashing)
+    def crashing_in_its_transaction(*args, **kwargs):
+        assert when is None, "a step written inside a transaction crashes on its first call"
+        monkeypatch.setattr(module, name, real)
+        if not before:
+            real(*args, **kwargs)
+        raise _Crash
+
+    sync = not inspect.iscoroutinefunction(real)
+    monkeypatch.setattr(module, name, crashing_in_its_transaction if sync else crashing)
 
 
 async def _retry_where_it_stands(it, steer=None, at=None):
@@ -73,14 +83,12 @@ async def _retry_where_it_stands(it, steer=None, at=None):
     [
         (("dispatch", "run_recovery", False), "code", True, True),
         (("dispatch", "run_recovery", False), "code", False, True),
-        (("walk", "_reopen_gates", True), "code", True, True),
         (("walk", "_clear_span_counters", True), "code", True, True),
         (("walk", "_restart_span", True), "conflict", False, False),
     ],
     ids=[
         "during-the-repair-after-it-committed",
         "during-the-repair-before-any-commit",
-        "restarting-before-the-gates-reopened",
         "restarting-after-the-gates-reopened",
         "before-a-rebased-conflict-s-rewind",
     ],

@@ -18,6 +18,7 @@
 .ph-path-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); font-weight: 500; }
 .ph-path-text { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); }
 .ph-attempts { display: flex; gap: 8px; overflow-x: auto; }
+.ph-attempts.ph-is-wrap { flex-wrap: wrap; overflow: visible; }
 .ph-attempt { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--text-muted); cursor: pointer; }
 .ph-attempt.ph-is-on { background: var(--border); color: var(--text); }
 .ph-scope-repo + .ph-scope-repo, .ph-scope-repo + .ph-attempts { margin-top: 12px; }
@@ -26,8 +27,10 @@
 .ph-turn { display: flex; flex-direction: column; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .ph-turn p { margin: 0; }
 .ph-turn-head { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-label); color: var(--text-muted); }
+.ph-turn-count { font-size: var(--fs-label); color: var(--text-muted); }
+.ph-turn-threads { margin: 0; padding: 0 0 0 16px; font-size: var(--fs-label); color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-turn-who { font-size: var(--fs-label); color: var(--text-muted); }
-.ph-turn-text { font-size: var(--fs-meta); line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ph-turn-text { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: var(--fs-meta); }
 .ph-subtasks { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-meta); }
 .ph-subtask { display: grid; grid-template-columns: 22px 1fr auto; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 6px; }
 .ph-subtask-n { color: var(--text-muted); text-align: right; }

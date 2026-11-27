@@ -35,6 +35,7 @@ from kraft.templates.library import (
 )
 from kraft.templates.models import (
     AUTO_REVIEW_SEGMENT,
+    CONFIG_OF,
     JUDGE_SEGMENT,
     MAIN_STEP,
     PATH_SEPARATOR,
@@ -545,6 +546,24 @@ def _setter(layers: list[tuple[str, Mapping]], field: str) -> str:
     return "chain"
 
 
+def _config_rows(task, dumped: dict, layers: list[tuple[str, Mapping]]) -> dict:
+    """One `config.<key>` row per key of the task's target, its class default
+    when unset; none for a target with no config (`forge-task-config-is-per-target`)."""
+    shape = CONFIG_OF.get(task.target)
+    if shape is None:
+        return {}
+    config = task.config
+    rows = {}
+    for key, info in shape.model_fields.items():
+        field = f"config{PATH_SEPARATOR}{key}"
+        if config is not None and key in config.model_fields_set:
+            rows[field] = {"value": dumped["config"][key], "source": _setter(layers, field)}
+        else:
+            default = None if info.is_required() else to_jsonable_python(info.get_default())
+            rows[field] = {"value": default, "source": "default"}
+    return rows
+
+
 def _public_sources(library, sources: dict) -> dict:
     """`sources` with a `chain:<name>` label naming an inherited chain as the
     ancestor add-on's own id, not the hidden level the library reads it through."""
@@ -586,6 +605,9 @@ def _sources(
             if name in _NESTED or name == "policy" or (name == "read_only" and writes):
                 continue
             if name in unread and name not in model.model_fields_set:
+                continue
+            if name == "config":
+                fields.update(_config_rows(model, dumped, layers))
                 continue
             value = dumped[name]
             # Only a node that merges can have a merge rejected: elsewhere, unset, no row.

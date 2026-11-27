@@ -1131,6 +1131,10 @@ async def auto_escalate_stuck(
         return status
     if status != "needs_human":
         return status
+    from kraft import takeover  # a person in the session is the escalation
+
+    if await takeover.held(db, run_dirs, work_item_id) is not None:
+        return status
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     if pending_gate(db, work_item_id, evts=evts) is not None:
         return status  # the gate flow owns this stop, unrelated to this feature
@@ -1428,8 +1432,10 @@ async def resume_after_escalation(
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, launch, worktree)
-            # Left to a node that rebases itself (`walk.rebases_itself`).
-            if walk.rebases_itself(row, node_id):
+            # Left to a node that rebases itself (`walk.rebases_itself`). A
+            # slice's child never moves off its parent's fork commit, as
+            # `/resume` and `/retry` skip it too (`refresh_base`).
+            if walk.rebases_itself(row, node_id) or store.is_child(row):
                 new_base = None
             elif inplace.is_in_place(row):
                 base = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))

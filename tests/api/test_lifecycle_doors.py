@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from support.api import _cancel_task, _in_state, _spawn_never_returning
@@ -22,7 +20,7 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     live walk (a gate's auto-review, a walk still unwinding) is refused by
     every door that would start one (Kraft-s7c04.20: `/escalate` into a
     worktree a review agent was still writing to). Nothing taken runs here:
-    `spawn` closes what it is handed, and the forge's reopen is a no-op.
+    `spawn` closes what it is handed, and the forge is a fake with red CI.
 
     One server per door, each state tried on a fresh item in turn (a server
     per state was four fifths of this grid's time). Every state that fails is
@@ -30,11 +28,20 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     from kraft.api import deps
     from kraft.api.routes import lifecycle
 
+    # Its 10 s tick would start a `queued` row between the test's reads.
+    client.portal.call(client.app.state.queue_task.cancel)
     monkeypatch.setattr(lifecycle.forge_mod.run, "backend_for", lambda *_: "fake")
+    job = lifecycle.forge_mod.FailedJob("e2e", "failed", "script_failure")
+    red = {
+        "ci_states": ["failed"],
+        "ci_failed_jobs": [(job,)],
+        # The pipeline a `pipeline` state's `ci.pipeline` wait names, red too.
+        "pipeline_statuses": {
+            "7": [lifecycle.forge_mod.CIStatus(state="failed", url="p7", failed_jobs=(job,))]
+        },
+    }
     monkeypatch.setattr(
-        lifecycle.forge_mod.run,
-        "resolve",
-        lambda _b: SimpleNamespace(reopen_mr=lambda **_: asyncio.sleep(0)),
+        lifecycle.forge_mod.run, "resolve", lambda _b: lifecycle.forge_mod.FakeForge(**red)
     )
     monkeypatch.setattr(lifecycle, "_terminate", lambda pid, **_: None)
     spec, wrong = DOORS["doors"][door], []

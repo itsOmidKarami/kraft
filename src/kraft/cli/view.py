@@ -318,7 +318,23 @@ _CHAIN_ENDED = (WorkItemEvent.COMPLETED, WorkItemEvent.ABANDONED)
 
 
 def _cmd_events(ns: argparse.Namespace) -> None:
+    async def run_all() -> None:
+        """Every item's events from now: no backlog, no end.
+
+        The cursor is the board's, as `view watch` takes it: seq 0 would replay
+        every event the server ever committed. The stream is instance-wide and
+        no one item's completion ends it.
+        """
+        if not ns.follow:
+            raise ValueError("--all needs -f: there is no backlog to print")
+        after = ns.after or (await client.board())[1]
+        async for ev in client.stream_events(after):
+            if not ns.type or ev.get("type") == ns.type:
+                _print_event(ev, ns.json)
+
     async def run() -> None:
+        if ns.all:
+            return await run_all()
         wid = await client.resolve_work_item(ns.id)
         rows = await client.events(wid, ns.after)
         shown = [row for row in rows if row.get("type") == ns.type] if ns.type else rows
@@ -614,6 +630,7 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     events_p.add_argument("id", nargs="?")
     events_p.add_argument("--after", type=int, default=0, help="only events after this seq")
     events_p.add_argument("--type", help="only this event type")
+    events_p.add_argument("--all", action="store_true", help="every item's events (with -f only)")
     events_p.add_argument(
         "-f",
         "--follow",

@@ -95,7 +95,7 @@ async def test_node_run_start_is_the_latest_retry_decision_or_completion(
 def _forge_node(target):
     task = {"id": "ci", "kind": "forge", "target": target}
     if target == "ci.pipeline":
-        task["pipeline"] = "7"
+        task["config"] = {"pipeline": "7"}
     return v1_node("feedback", tasks=[task])
 
 

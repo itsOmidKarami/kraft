@@ -19,7 +19,7 @@
 # That build has the old look and no version menu, the origin baked into the
 # tag's nuxt.config.ts (so its canonical, og:url and sitemap URLs name that
 # origin, not kraft-sdlc.dev), and a noindex tag added here after the build.
-# CONTRIBUTING.md, "Versions of the docs", has the rest.
+# docs/writing-docs.md, "Versions of the docs", has the rest.
 #
 # Each version gets the dashboard demo (frontend/demo/) of the same code beside
 # its pages, at BASE/demo/: main's from this checkout (frontend/node_modules
@@ -85,18 +85,6 @@ build_tag() { # ID BASE TAG DEST
   # components), so they come from the tag with its pages.
   if git -C "$ROOT" cat-file -e "$3:docsite/public/diagrams" 2>/dev/null; then
     git -C "$ROOT" archive "$3" docsite/public/diagrams | tar -xf - -C "$w"
-  fi
-  # A frozen major keeps the words its own components held: StageStrip draws
-  # the default chain's stage names, which a later release renames ("draft MR"
-  # became "draft PR"). A component that holds text a page shows goes in this
-  # list; the tag's copy replaces main's if the tag has one.
-  if [ "$1" != latest ]; then
-    for component in StageStrip; do
-      path=docsite/app/components/$component.vue
-      if git -C "$ROOT" cat-file -e "$3:$path" 2>/dev/null; then
-        git -C "$ROOT" show "$3:$path" >"$w/$path"
-      fi
-    done
   fi
   ln -s "$ROOT/docsite/node_modules" "$w/docsite/node_modules"
   generate "$w/docsite" "$1" "$2" "$4"

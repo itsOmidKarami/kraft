@@ -1,10 +1,11 @@
 import { nameOf, slicesDone } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, WorkerSession } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
 import { escalationsIn, isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
 import { cursorOf, within } from "./cursor";
+import { byWord, roundsOf } from "./gateRounds";
 import { groupWords } from "./groupView";
 import { isScopeTask } from "./scopeView";
 import { waitTitle } from "./sharedWords";
@@ -39,16 +40,16 @@ export function rejectTarget(nodes: ApiNode[], gate: string): string | null {
   return null;
 }
 
-/** Who passed each gate, from its last gate_approved: an agent's verdict is "auto", a person's "you". */
-function gateDeciders(events: KraftEvent[]) {
-  const by = new Map<string, "auto" | "you">();
-  for (const e of events) if (e.type === "gate_approved") by.set(String(e.payload.gate ?? e.node_id), e.payload.by === "agent" || e.payload.by === "kraft" ? "auto" : "you");
-  return by;
+/** Who passed a gate, in the words every view uses (`byWord`), from its newest round: a gate that was skipped, closed
+ *  or sent work back has no one. */
+function gateDecider(item: ItemDetail, gate: string): string | undefined {
+  const newest = roundsOf(item, gate).at(-1);
+  return newest && (newest.outcome === "approved" || newest.outcome === "fixed") ? byWord(newest.by) ?? undefined : undefined;
 }
 
 /** Item → what the chain canvas draws (Decisions §5 Level 2, §7). Pure: the
- *  item, the events read for it (gate deciders), and now. */
-export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.now()): { nodes: ChainNode[]; arcs: (selected?: string) => ChainArc[] } {
+ *  item (its gates' rounds) and now. */
+export function chainGraph(item: ItemDetail, now = Date.now()): { nodes: ChainNode[]; arcs: (selected?: string) => ChainArc[] } {
   const api = item.chain_definition.nodes ?? [];
   const status = item.display_status;
   const finished = status === "done" || status === "archived";
@@ -56,7 +57,6 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const cur = finished ? api.length : (at?.index ?? -1);
   const stop = item.stop;
   const capped = stop && (stop.kind === "cap" || stop.kind === "budget") ? stop.node : null;
-  const deciders = gateDeciders(events);
   const byNode = new Map((item.usage?.by_node ?? []).map((r) => [r.node, r]));
   const frozen = materialized(item);
 
@@ -69,7 +69,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     if (cur < 0 || i > cur) return { ...out, state: "todo" };
     if (i < cur) {
       const ms = byNode.get(n.id)?.wall_ms;
-      return { ...out, state: "done", meta: out.kind === "gate" ? deciders.get(n.id) : ms ? elapsed(ms) : undefined };
+      return { ...out, state: "done", meta: out.kind === "gate" ? gateDecider(item, n.id) : ms ? elapsed(ms) : undefined };
     }
     // The node the item stands on.
     if (status === "failed") return { ...out, state: "failed", meta: "failed", metaTone: "red" };

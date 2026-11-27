@@ -3,18 +3,19 @@
 A forge task, `ci.pipeline`, waits for one CI pipeline named by its id: a GitLab
 pipeline `id` or a GitHub Actions run id, given as digits or as `$NAME` from a
 step output. It reads and never writes: the id may come from a worker, so it
-retries no job, and a pipeline it will not judge stops the item for a person.
+retries no job, and a pipeline it will not judge stops the item for a person. Only
+that person re-runs it.
 
 ## REQ ci-pipeline-takes-a-pipeline-id
 
-IF a `ci.pipeline` task has no `pipeline`, or one that is neither digits nor `$NAME`, THEN the
+IF a `ci.pipeline` task has no `config.pipeline`, or one that is neither digits nor `$NAME`, THEN the
 system SHALL refuse the chain, with a message that does not contain the value.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[missing], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[letters], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[trailing-newline], tests/templates/test_ci_pipeline_task.py::test_a_bad_value_is_never_echoed
 origin: src/kraft/templates/models.py §ForgeTask
 
 ## REQ ci-pipeline-is-for-ci-pipeline-alone
 
-IF a forge target other than `ci.pipeline` has a `pipeline`, THEN the system SHALL refuse the chain.
+IF a forge target other than `ci.pipeline` has a `config.pipeline`, THEN the system SHALL refuse the chain.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[other-target]
 origin: src/kraft/templates/models.py §ForgeTask
 
@@ -26,7 +27,7 @@ origin: src/kraft/templates/models.py §ForgeTask
 
 ## REQ ci-pipeline-id-comes-from-a-declared-variable
 
-IF a `ci.pipeline` task's `pipeline` is `$NAME` and no task in its `reads` declares `NAME`, THEN the
+IF a `ci.pipeline` task's `config.pipeline` is `$NAME` and no task in its `reads` declares `NAME`, THEN the
 system SHALL refuse the chain.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[no-writer-declares-it], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[no-reads], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[unclosed-brace], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[stray-brace], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[text-around-it], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_reads_its_id_from_a_writers_variable[$PIPELINE_ID], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_reads_its_id_from_a_writers_variable[${PIPELINE_ID}]
 origin: src/kraft/templates/models.py §Chain
@@ -58,6 +59,17 @@ The system SHALL NOT retry a job, push, look for a merge request or record a pip
 while a `ci.pipeline` task looks at its pipeline.
 enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_never_writes, tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[infra-red]
 origin: src/kraft/adapters/forge/run.py §_pipeline_wait
+
+## REQ only-a-person-re-runs-a-ci-pipeline-wait
+
+WHEN a person re-runs CI on an item stopped for them (failed, on the forge's infrastructure, stuck
+or at a cap) on a node with a `ci.pipeline` wait, the system SHALL re-run that pipeline's failed
+jobs, record the event with its id, and retry the node; IF anyone else asks (an assistant, an
+escalation turn, the item's own session), the item has not stopped, nothing in the pipeline failed,
+the id's writer is in the same node, or the id it resolves is not digits, THEN the system SHALL
+refuse it, read nothing from the forge, and re-run nothing.
+enforced-by: tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[failed], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[infra], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[stuck], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[cap], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[not-stopped], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[an-assistant], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[an-escalation-turn], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[its-own-worker-session], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[green], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[ran-nothing], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[id-written-in-its-node], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_reads_the_id_an_earlier_node_left[digits], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_reads_the_id_an_earlier_node_left[not-digits]
+origin: src/kraft/api/routes/lifecycle.py §_rerun_pipeline
 
 ## REQ ci-pipeline-ignores-ci-checks
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.itsOmidKarami/kraft",
+  "title": "Kraft",
+  "description": "Drive a running local Kraft server from an agent: file work, read the board, act on gates.",
+  "websiteUrl": "https://kraft-sdlc.dev",
+  "repository": {
+    "url": "https://github.com/itsOmidKarami/kraft",
+    "source": "github"
+  },
+  "version": "2.6.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "kraft-sdlc",
+      "version": "2.6.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "admin"
+        },
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

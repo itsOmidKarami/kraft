@@ -98,6 +98,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       });
       case "retry": return void run(act.retry(item.id, retryBody(node, item.stop)), "Retrying.");
       case "reopen-mr": return void run(act.reopenMr(item.id), "MR reopened.");
+      case "rerun-ci": return void run(act.rerunCi(item.id), "CI re-run. Retrying.");
       case "restore": return void run(act.restore(item.id), "Restored.");
       case "board": return navigate("/");
     }
@@ -176,7 +177,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             )}
           </section>
         )}
-        <ChainList item={item} events={events} now={now} />
+        <ChainList item={item} now={now} />
         {session && lines && lines.length > 0 && !ended && (
           <Block
             title="Log"

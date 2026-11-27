@@ -123,7 +123,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
       <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where subagents={subagents} onTask={(sel) => navigate(placeUrl(item.id, { node: sel.kind === "chain" ? undefined : sel.node, sel, tab: "overview" }))} />
-      {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
+      {cancelling && <CancelCard id={item.id} neverStarted={neverStarted(item)} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );
@@ -224,6 +224,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     }
     if (hs.main === "conflicts") return navigate(`/work-items/${encodeURIComponent(item.id)}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
     if (hs.main === "reopen") return void run(act.reopenMr(item.id));
+    if (hs.main === "rerun") return void run(act.rerunCi(item.id));
     if (hs.main === "resume") return void run(act.resume(item.id));
     // Start never applies a draft: with one, the item page asks first (R9b-01's other door).
     if (hs.main === "start") return void startHere();

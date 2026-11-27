@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
@@ -170,14 +170,30 @@ def _one(st, wid: str, tid: str) -> dict:
 
 
 @api_router.get("/work-items/{wid}/threads")
-async def list_threads(wid: str, request: Request):
+async def list_threads(
+    wid: str,
+    request: Request,
+    gate: str | None = None,
+    round_n: int | None = Query(None, alias="round", ge=1),
+):
+    """The item's review threads, drafts included. With `gate` and `round`, the
+    threads that round's count covers (`store.threads_in_round`), drafts
+    excluded."""
     st = request.app.state
     deps._work_item_row(st, wid)
-    return st.db.read(lambda c: store.threads_for(c, wid))
+    if round_n is None:
+        return st.db.read(lambda c: store.threads_for(c, wid))
+    if gate is None:
+        raise HTTPException(400, "round needs gate")
+    got = st.db.read(lambda c: store.threads_in_round(c, wid, gate, round_n))
+    if got is None:
+        raise HTTPException(404, f"{gate} has no round {round_n}")
+    return got
 
 
 @api_router.post("/work-items/{wid}/threads", status_code=201)
 async def create_thread(wid: str, body: ThreadIn, request: Request):
+    """Start a review thread, on a line of a file or on the whole item."""
     _refuse_agents(request)
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
@@ -249,6 +265,7 @@ def _draft_thread_or_409(st, tid):
 
 @api_router.patch("/threads/{tid}")
 async def patch_thread(tid: str, body: ThreadPatch, request: Request):
+    """Edit a thread's label or the text of its first comment."""
     _refuse_agents(request)
     st = request.app.state
     row = _draft_thread_or_409(st, tid)
@@ -266,6 +283,7 @@ async def patch_thread(tid: str, body: ThreadPatch, request: Request):
 
 @api_router.delete("/threads/{tid}", status_code=204)
 async def delete_thread(tid: str, request: Request):
+    """Delete a draft thread."""
     _refuse_agents(request)
     st = request.app.state
     _draft_thread_or_409(st, tid)
@@ -274,6 +292,7 @@ async def delete_thread(tid: str, request: Request):
 
 @api_router.post("/threads/{tid}/comments", status_code=201)
 async def add_comment(tid: str, body: CommentIn, request: Request):
+    """Add a reply to a thread."""
     _refuse_agents(request)
     st = request.app.state
     row = _thread_or_404(st, tid)
@@ -301,6 +320,7 @@ def _draft_comment_or_409(st, cid):
 
 @api_router.patch("/comments/{cid}")
 async def patch_comment(cid: str, body: CommentIn, request: Request):
+    """Edit a comment."""
     _refuse_agents(request)
     st = request.app.state
     row = _draft_comment_or_409(st, cid)
@@ -319,6 +339,7 @@ async def patch_comment(cid: str, body: CommentIn, request: Request):
 
 @api_router.delete("/comments/{cid}", status_code=204)
 async def delete_comment(cid: str, request: Request):
+    """Delete a draft comment."""
     _refuse_agents(request)
     st = request.app.state
     _draft_comment_or_409(st, cid)
@@ -337,11 +358,13 @@ async def _set_state(tid: str, request: Request, state: str):
 
 @api_router.post("/threads/{tid}/resolve")
 async def resolve_thread(tid: str, request: Request):
+    """Mark a thread resolved."""
     return await _set_state(tid, request, ThreadState.RESOLVED)
 
 
 @api_router.post("/threads/{tid}/reopen")
 async def reopen_thread(tid: str, request: Request):
+    """Reopen a resolved thread."""
     return await _set_state(tid, request, ThreadState.OPEN)
 
 
@@ -625,6 +648,7 @@ async def submit_item_review(wid: str, body: ReviewIn, request: Request):
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/review")
 async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
+    """Submit the draft threads as a review at the gate: comment, approve or request changes."""
     _refuse_agents(request)
     st = request.app.state
     row = deps._live_work_item_row(st, wid)

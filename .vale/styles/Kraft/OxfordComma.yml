@@ -1,7 +1,14 @@
 # No comma before the "and" or "or" that ends a list: "a, b and c".
+# Two patterns. The first catches a short list of one or two word items. The
+# second catches a longer one whose last two items both open with an article
+# ("the scheduler, the test runner, and the memory"). A looser pattern would
+# also flag a clause list ("X ran, Y stopped, and Z") and the comma that ends
+# an introductory phrase, so a list of longer items that doesn't open its last
+# two with an article still passes.
 extends: existence
 message: "No Oxford comma: '%s'."
 level: error
 nonword: true
 tokens:
   - '\b\w+, [\w-]+(?: [\w-]+)?, (?:and|or)\b'
+  - '\b(?:[Tt]he|[Aa]n?) [\w-]+(?: [\w-]+){0,3}, (?:[Tt]he|[Aa]n?) [\w-]+(?: [\w-]+){0,3}, (?:and|or) (?:[Tt]he|[Aa]n?)\b'

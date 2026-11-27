@@ -256,3 +256,22 @@ def test_an_in_process_probe_failure_keeps_the_last_line_the_childs_stderr_would
         detect.probe(tmp_path)
 
     assert str(raised.value) == "fatal: bad object"
+
+
+@pytest.mark.parametrize(
+    ("name", "scrubbed"),
+    [
+        pytest.param("KRAFT_HOST", True, id="an-inherited-kraft-var-goes"),
+        pytest.param("KRAFT_E2E_GH_REPO", False, id="a-scratch-forge-input-survives"),
+        pytest.param("KRAFT_E2E_GLAB_TRAIN_MR", False, id="a-glab-scratch-input-survives"),
+        pytest.param("KRAFT_E2E_REQUIRE", False, id="a-suite-switch-survives"),
+        pytest.param("HOME", False, id="a-non-kraft-var-is-not-its-business"),
+    ],
+)
+def test_the_per_test_env_scrub_keeps_the_e2e_inputs(name, scrubbed):
+    """The real-forge contract tests read `KRAFT_E2E_GH_REPO` and its siblings
+    inside the test, after `_isolated_kraft_home` has run. Scrubbed, they skip
+    on every run and a skip reads as a pass."""
+    from support.env_scrub import kraft_names_to_scrub
+
+    assert (name in kraft_names_to_scrub({name: "x", "KRAFT_PORT": "1"})) is scrubbed

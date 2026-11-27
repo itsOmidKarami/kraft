@@ -422,19 +422,31 @@ origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inp
 
 An agent task that declares the `bot_feedback` input SHALL be handed what the
 review bots said, as the review wait collected it for this pass of the node,
-and a task that does not declare it SHALL NOT be. WHEN that collection holds no
-summary, no open thread and no failed check, the task SHALL be recorded as done
-with no findings and no agent SHALL be started.
-enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
+and a task that does not declare it SHALL NOT be. In a reply round it SHALL be handed
+the collection the round's review wait made, not the earlier measurement's.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart], tests/store/test_sessions_reuse.py::test_a_reply_round_barrier_excludes_earlier_sessions[before-the-event-excluded]
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [bot_feedback]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.bot_feedback` and `adapters/agent.py`'s `$KRAFT_BOT_FEEDBACK`; the collection is written by the node's `mr.automated_review` wait (`adapters/forge/run.py` §_collect_review).
+
+## REQ bot-feedback-with-nothing-to-judge-starts-no-agent
+
+WHEN the review wait's collection for this pass of the node holds no unresolved
+bot thread, no review check that did not pass (an unfinished one included) and
+no bot summary or review with a non-blank body (an approval's included), the
+system SHALL record a task that declares `bot_feedback` as done with no findings
+and SHALL NOT start an agent for it. In a reply round the agent SHALL start only for a
+note a configured bot added after the latest triage read the bots, in a thread the
+round was started for.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[bodyless-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[blank-body-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[approval-with-a-body-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[failed-check-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[unfinished-check-runs], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[new-bot-note-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[answer-before-the-last-read-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_in_a_reply_round[a-person-note-skips]
+origin: src/kraft/executor/round_prompts.py §bot_feedback_source -- triage only when the bots said something that could need a change; GitHub keeps an approval's body (adapters/forge/gh.py §_bot_feedback), GitLab's approval writes no summary.
 
 ## REQ triage-verdict-is-delivered-to-the-review-brief
 
 An agent task that declares the `triage_verdict` input SHALL be pointed at the
 latest verdict of the chain's review-bot triage, by path, and SHALL NOT be when
 no triage has judged anything: a triage skipped for having nothing to read is no
-verdict.
-enforced-by: tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-triage-ran], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[only-a-skip-row], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-skip-after-a-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[chain-without-triage], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[undeclared], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
+verdict. When Kraft replied on the merge request, it SHALL also be pointed at the
+reply report beside the verdict.
+enforced-by: tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-reply-report-beside-the-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-triage-ran], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[only-a-skip-row], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-skip-after-a-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[chain-without-triage], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[undeclared], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [triage_verdict]` on the seeded `write_summary` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.triage_verdict_note`, the verdict being the triage session `prompts.last_review_session` returns.
 
 ## REQ pr-rules-are-pointed-at-by-path
@@ -570,6 +582,16 @@ file. It SHALL write each save as a new generation made current by one atomic
 rename.
 enforced-by: tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[all-guards-hold], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[suite-full], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[sandboxed], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[remote-runner], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[a-failed-scope], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-results], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[an-in-place-or-member-folder], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-carry-declared], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[files-not-touched-by-the-round], tests/test_carried.py::test_save_writes_a_generation_current_points_at, tests/test_carried.py::test_a_save_that_fails_midway_leaves_current_alone
 origin: src/kraft/executor/dispatch.py §_save_carried
+
+## REQ a-carried-copy-is-not-replaced-by-an-older-tree
+
+WHERE a repository declares `carry`, the system SHALL NOT save an item's
+carried files over a saved copy whose recorded base commit is a strict
+descendant of the commit the item's branch forks from. It SHALL leave the
+item's baseline as it was, and save as before when either commit is unrecorded
+or git cannot order the two.
+enforced-by: tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-newer-tree-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[an-older-tree-does-not], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[the-same-base-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-diverged-base-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[no-base-stored], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-base-git-does-not-know], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[no-base-given], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[git-missing], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[git-hangs], tests/executor/test_carried_save.py::test_dispatching_the_builtin_saves_what_its_command_wrote[targeted]
+origin: src/kraft/carried.py
 
 ## REQ exec-node-orders-concurrent-task-groups
 
@@ -790,7 +812,7 @@ enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_
 When resuming a paused agent task, the system SHALL resume its durable session
 when available, and otherwise restart that task with its original instruction
 and any supplied steer.
-enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
+enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session[the-log-names-it], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
 
 ## REQ steer-reaches-only-stopped-agentic-work
 
@@ -900,6 +922,24 @@ stop the work item for a human, naming the changed files, and SHALL NOT count
 as a task failure that recovery or a fix loop spends on.
 enforced-by: tests/executor/test_read_only.py::test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it[worktree-edit-swept], tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[untracked], tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[ignored], tests/executor/test_read_only.py::test_a_step_that_is_not_read_only_is_not_checked, tests/executor/test_read_only.py::test_a_read_only_node_is_checked_around_all_of_its_steps, tests/executor/test_read_only.py::test_a_read_only_step_over_workspace_members_names_the_member_file, tests/executor/test_read_only.py::test_a_sandboxed_read_only_step_that_plants_a_repository_is_not_read_by_host_git, tests/executor/test_read_only.py::test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it[in-place-commit], tests/executor/test_read_only.py::test_a_persons_edit_during_an_in_place_read_only_step_is_not_a_violation
 origin: src/kraft/executor/read_only.py (Kraft-q2zvw)
+
+## REQ a-read-only-scopes-agent-is-told-to-change-nothing
+
+WHEN the system launches an agent task in a read_only step, or in one of a read_only node's own steps, it SHALL give it the read-only contract, not the contract that tells it to commit and run tests.
+enforced-by: tests/executor/test_read_only.py::test_an_agent_in_a_read_only_scope_is_launched_with_the_read_only_contract[step], tests/executor/test_read_only.py::test_an_agent_in_a_read_only_scope_is_launched_with_the_read_only_contract[node], tests/executor/test_read_only.py::test_an_agent_in_a_read_only_scope_is_launched_with_the_read_only_contract[neither], tests/executor/test_read_only.py::test_an_agent_in_a_read_only_scope_is_launched_with_the_read_only_contract[a-handler-of-a-read-only-node], tests/adapters/test_agent_context.py::test_a_read_only_launch_is_told_to_change_nothing_and_to_be_in_a_copy_only_in_one[read-only-in-the-persons-checkout]
+origin: src/kraft/executor/dispatch.py §_launch_agent
+
+## REQ kraft-lite-freezes-read-only-as-kraft-resolves-it
+
+The Kraft Lite plugin SHALL freeze `read_only` on each exec node and each step as Kraft resolves it.
+enforced-by: tests/plugins/test_kraft_lite_parity.py::test_resolution_matches_kraft[default], tests/plugins/test_kraft_lite_parity.py::test_resolution_matches_kraft[ship]
+origin: plugins/kraft-lite/kl_chains.py
+
+## REQ kraft-lite-state-reports-read-only
+
+The Kraft Lite plugin's `state` SHALL report `read_only` for the node and for each step it lists.
+enforced-by: plugins/kraft-lite/tests/test_walk_end_to_end.py::test_state_reports_steps_and_dispatch
+origin: plugins/kraft-lite/kl.py §_state
 
 ## REQ read-only-is-refused-on-a-task
 
@@ -1083,7 +1123,7 @@ origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, Kraft-ec66w: the
 IF an approved chain revision cannot be read, or its revised chain does not
 validate under the model and policy intake uses, THEN the system SHALL refuse the
 approval with the reason and SHALL leave the item's chain unchanged.
-enforced-by: tests/executor/test_chain_revision.py::test_an_invalid_revision_never_reaches_the_chain, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[unknown-key], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[skip-a-reject-target], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-before-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[cap-above-its-parent], tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_an_added_node_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unreadable], tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unappliable]
+enforced-by: tests/executor/test_chain_revision.py::test_an_invalid_revision_never_reaches_the_chain, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[unknown-key], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[skip-a-reject-target], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-before-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[cap-above-its-parent], tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima[attempts], tests/templates/test_revision.py::test_an_added_node_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unreadable], tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unappliable]
 origin: src/kraft/api/routes/gates.py §_revise
 
 ## REQ unchanged-chain-revision-advances-without-a-human
@@ -1166,7 +1206,7 @@ enforced-by: tests/executor/test_recovery.py::test_a_step_recovery_reruns_every_
 
 When an execution-node recovery succeeds, the system SHALL retry that node
 from its first step.
-enforced-by: tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step
+enforced-by: tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[no-fix-loop], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[clean-is-recorded], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[findings-enter-the-fix-loop], tests/executor/test_recovery.py::test_a_node_recovery_reruns_the_node_from_its_first_step[findings-enter-an-early-fix-loop]
 
 ## REQ parallel-step-settles-before-recovery
 
@@ -1230,7 +1270,9 @@ enforced-by: tests/templates/test_models.py::test_recovery_plan_and_fix_loop_als
 
 After each successful fix-loop attempt, the system SHALL rerun the execution
 node from its first step before deciding whether another attempt is needed.
-enforced-by: tests/executor/test_walk.py::test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL instead continue it with the steps that didn't run.
+enforced-by: tests/executor/test_walk.py::test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step, tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once]
 
 ## REQ fix-loop-is-bounded-and-detects-stall
 
@@ -1238,22 +1280,36 @@ A fix loop SHALL enforce its effective attempt and duration limits and SHALL
 stop for a human when the loop is exhausted or detects that it is not making
 progress. A fix-loop repair round that changes none of the checkout, a review
 thread or the merge request description SHALL stop the loop for a human without
-measuring the node again.
-enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry, tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[done], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[failed], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[with-concerns], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[after-an-earlier-thread-update], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[uncommitted-edit], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[thread-reply], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[snapshot-refused], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[mr-meta-edit]
+measuring the node again. A finding the measurement did not re-read SHALL
+neither extend nor reset its stall count, and the whole-set check SHALL NOT
+compare a measurement with a previous one that read other tasks. A reply round's
+record SHALL follow no fix: it extends no stall count and no regression is read across it.
+enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry, tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[done], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[failed], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[with-concerns], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_nothing_stops_without_measuring_again[after-an-earlier-thread-update], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[uncommitted-edit], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[thread-reply], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[snapshot-refused], tests/executor/test_fix_loop_outcomes.py::test_a_fix_round_that_changed_anything_measures_again[mr-meta-edit], tests/executor/test_measurement.py::test_an_unmeasured_finding_holds_its_stuck_streak[held-not-reset], tests/executor/test_walk_early.py::test_the_whole_set_stuck_check_needs_the_same_tasks_read[previous-read-other-tasks]
 
 ## REQ findings-measured-lists-the-tasks-with-a-session
 
 WHEN the system records `findings_measured`, the event SHALL list the node's
 measuring tasks that have a session at that round and those that have none.
-enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without
+enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without, tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[marked-pairs-none], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[stuck-fingerprint-ignores-the-marked-record], tests/executor/test_reply_round_rules.py::test_a_reply_round_record_pairs_no_fix[regressed-ignores-the-marked-record]
 origin: src/kraft/executor/walk.py
 
 ## REQ a-step-that-did-not-run-contributes-nothing
 
 WHEN a node is measured and an earlier step's latest result did not advance,
-the system SHALL NOT read a later step's result recorded before it.
-enforced-by: tests/executor/test_scopes.py::test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it[stale], tests/executor/test_measurement.py::test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it[earlier-step-stopped-after-it]
+the system SHALL NOT read a later step's result recorded before it. For a node
+whose fix loop starts early, the system SHALL read no step past the one the
+measurement reached, whatever an earlier step recorded.
+enforced-by: tests/executor/test_scopes.py::test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it[stale], tests/executor/test_measurement.py::test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it[earlier-step-stopped-after-it], tests/executor/test_measurement.py::test_a_measurement_reads_only_the_steps_it_reached[early-reads-the-steps-it-reached]
 origin: src/kraft/executor/dispatch.py
+
+## REQ a-resumed-measurement-reads-its-own-rows
+
+WHEN a node's fix loop starts early and a measurement of the node is resumed
+after a park, a crash or a resume, the system SHALL continue it at its own round
+and SHALL read as its result only the steps it has reached, its reused and
+preserved sessions included.
+enforced-by: tests/executor/test_walk_early.py::test_a_parked_re_measure_resumes_at_its_own_round[own-round], tests/executor/test_walk_early.py::test_a_parked_re_measure_resumes_at_its_own_round[after-a-restart], tests/executor/test_measurement.py::test_a_measurement_reads_only_the_steps_it_reached[early-reads-the-steps-it-reached]
+origin: src/kraft/executor/walk.py
 
 ## REQ fix-cycle-started-carries-the-attempt-cap
 
@@ -1278,14 +1334,63 @@ enforced-by: tests/skills/test_fix_loop_judge.py::test_round_one_fixes_freely_no
 ## REQ fix-loop-judge-has-three-decisions
 
 A fix-loop judge SHALL decide whether to continue fixing, accept a clean
-execution result, or stop for a human.
-enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present, tests/skills/test_fix_loop_judge.py::test_judge_stop_needs_human_preempts_the_cap, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_exits_the_loop_clean, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_does_not_downgrade_a_failing_task, tests/executor/test_agent_inputs.py::test_the_seeded_fix_loop_judge_declares_the_package_and_its_method
+execution result, or stop for a human. A `stop_downgrade` on a measurement that
+ended early SHALL continue that measurement rather than complete the node.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once], tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present, tests/skills/test_fix_loop_judge.py::test_judge_stop_needs_human_preempts_the_cap, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_exits_the_loop_clean, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_does_not_downgrade_a_failing_task, tests/executor/test_agent_inputs.py::test_the_seeded_fix_loop_judge_declares_the_package_and_its_method
 
 ## REQ fix-loop-judge-cannot-override-limits
 
 A fix-loop judge SHALL NOT cause the system to exceed the loop's effective
 attempt or duration limits.
 enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present
+
+## REQ fix-loop-may-start-early
+
+A node's fix loop MAY set `early`, which is off by default. A node without a
+fix loop, and a recovery plan, SHALL NOT set it.
+
+WHEN it does, and a step of the node's own steps finishes with every task
+advanced and at least one finding at the loop severities that the fix loop
+hasn't declined on the current commit, the system SHALL end the measurement
+there without running the later steps, and SHALL hand the findings to the fix
+loop without running the node's `on_failure`. Every outcome that outranks a
+failed task SHALL outrank ending early.
+enforced-by: tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[off-by-default], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[on], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[a-bool-only], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-the-node], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-a-recovery-plan], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[ends-early], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[early-off], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[below-the-loop-severities], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-failed-co-task-keeps-failed], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-pause-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-rate-limit-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[in-the-last-step], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[measured-first], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[after-on_failure]
+origin: src/kraft/executor/dispatch.py
+
+## REQ a-declined-early-start-is-saved-for-the-commit
+
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL record that outcome for the commit in the judge's verdict event. Every
+later measurement of that commit in the node's run, the re-measure after
+`on_failure` included, SHALL NOT end early on those findings, collect them,
+hand them to the fix loop or ask the judge about them again. A reply round SHALL
+honour every `stop_downgrade` verdict on its commit, ended early or not, on every
+node shape.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-passes], tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-fails], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[loop-early], tests/executor/test_reply_round_rules.py::test_a_reply_round_does_not_collect_what_the_judge_declined_on_the_head[no-early]
+origin: src/kraft/executor/walk.py
+
+## REQ a-declined-early-start-continues-the-measurement
+
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL run only the node's steps that didn't run, at the same round, SHALL amend
+that measurement's one `findings_measured` event with their results instead of
+recording another, and SHALL complete the node only when they pass. A
+measurement whose record is written is over: a later entry SHALL start a new one.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once], tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-parks-first], tests/executor/test_walk_early.py::test_a_recorded_measurement_is_not_resumed
+origin: src/kraft/executor/walk.py
+
+## REQ unmeasured-findings-hold-their-place
+
+WHEN a measurement ends early, the system SHALL record the last findings of the
+measuring tasks it did not run apart from its findings, as unmeasured findings.
+A finding's measuring task SHALL be the session it was read from, never its
+`source_plugin`. They SHALL never be eligible or in the list to fix. They SHALL
+appear in the judge's and the repair's history marked as not re-read that round.
+They SHALL keep their identities and severities, hold their stall count, gain no
+REPEAT tag, and never read as fixed, regressed or stuck.
+enforced-by: tests/executor/test_walk_early.py::test_findings_an_early_end_did_not_re_read_are_kept_apart, tests/executor/test_measurement.py::test_unmeasured_findings_are_the_last_findings_of_the_tasks_not_read[by-the-session-that-read-it], tests/executor/test_measurement.py::test_unmeasured_findings_are_the_last_findings_of_the_tasks_not_read[a-blind-failure], tests/executor/test_measurement.py::test_unmeasured_findings_are_the_last_findings_of_the_tasks_not_read[read-by-another-task], tests/executor/test_measurement.py::test_an_unmeasured_finding_holds_its_stuck_streak[held-not-extended], tests/executor/test_measurement.py::test_an_unmeasured_finding_holds_its_stuck_streak[never-stuck-while-unread], tests/executor/test_measurement.py::test_regressed_fingerprints_finds_a_finding_a_fix_undid[a-gap-where-it-was-not-re-read], tests/executor/test_round_prompts.py::test_the_history_marks_a_finding_nobody_re_read
+origin: src/kraft/executor/dispatch.py
 
 ## REQ invalid-judge-result-does-not-block-the-loop
 
@@ -1509,7 +1614,7 @@ that did not start), and
 a harness declaring `proxy_aware: false`, SHALL stop as a configuration
 error, never run with open egress. A narrower policy layer SHALL NOT change
 an inherited `network`.
-enforced-by: tests/worker/test_egress.py::test_match[deny-wins], tests/worker/test_egress.py::test_match[wildcard-not-two-labels], tests/worker/test_egress.py::test_match[nothing-allowed], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[dns-rebound-to-loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[link-local-v4], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[v4-mapped-metadata-address], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[the-hosts-own-address], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[metadata-name], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[one-label-wildcard], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[exact], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[shared-address-space], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[nat64-private], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[v4-compatible-loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[6to4-loopback], tests/worker/test_egress.py::test_refusal_events_are_capped_per_session, tests/worker/test_egress.py::test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked[pipelined-request-dropped], tests/worker/test_egress.py::test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked[backslash-userinfo], tests/worker/test_egress.py::test_an_allowed_host_is_tunnelled_to_the_address_it_checked, tests/worker/test_egress.py::test_a_refusal_is_one_403_line_recorded_once_per_host, tests/worker/test_channel.py::test_a_sessions_socket_serves_the_proxy_and_records_against_its_item, tests/worker/backends/test_docker_relay.py::test_a_launch_under_network_joins_its_relay_and_mounts_the_shim, tests/worker/backends/test_docker_relay.py::test_a_network_sandbox_never_runs_without_its_relay, tests/worker/backends/test_docker_relay.py::test_the_relay_has_no_network_and_mounts_the_sockets_directory, tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[linux-native], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[vm], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[socket-refused-off-a-vm], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[inconclusive], tests/worker/test_channel.py::test_closing_a_session_ends_the_tunnels_it_already_has[unix], tests/worker/test_channel.py::test_closing_a_session_ends_the_tunnels_it_already_has[tls], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_joins_two_relays_through_a_volume[docker-host.docker.internal], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_joins_two_relays_through_a_volume[podman-host.containers.internal], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_refuses_before_the_listener_ever_started, tests/worker/test_ca.py::test_a_certificate_from_another_ca_is_refused, tests/worker/test_channel.py::test_a_session_certificate_reaches_its_own_session_over_tls[same-id-other-item], tests/worker/test_channel.py::test_a_session_certificate_reaches_its_own_session_over_tls[older-session], tests/worker/test_channel.py::test_a_certificate_naming_no_open_tls_session_gets_nothing[closed], tests/worker/test_channel.py::test_a_client_without_a_certificate_is_refused_at_the_handshake, tests/worker/backends/test_docker_relay.py::test_a_relay_that_did_not_start_is_refused_and_removed[unix], tests/worker/backends/test_docker_relay.py::test_a_relay_that_did_not_start_is_refused_and_removed[tls], tests/worker/test_backends.py::test_a_session_under_network_gets_its_route_before_it_is_wrapped[unix], tests/worker/test_backends.py::test_a_session_under_network_gets_its_route_before_it_is_wrapped[tls], tests/worker/test_backends.py::test_reattach_re_registers_a_tls_session_with_no_socket[repo], tests/worker/test_backends.py::test_network_without_a_channel_or_a_route_never_launches[channel], tests/worker/test_backends.py::test_network_without_a_channel_or_a_route_never_launches[route], tests/worker/test_backends.py::test_reattach_reopens_an_adopted_sessions_channel_from_its_row, tests/worker/test_backends.py::test_a_setup_command_under_network_uses_the_install_list_not_runtime, tests/worker/test_backends.py::test_a_setup_command_under_network_without_a_channel_or_route_never_runs[channel], tests/adapters/test_agent_sandbox.py::test_a_proxy_unaware_harness_under_network_is_refused_before_launch, tests/test_policy_sandbox_network.py::test_a_narrower_layer_cannot_change_inherited_network[loosened], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[docker-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[docker-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[podman-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[podman-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[docker-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[docker-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[podman-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[podman-forced-tls], tests/worker/test_backends.py::test_a_launch_under_a_kit_gets_its_lists_without_the_harness_hosts, tests/worker/test_gates_bwrap.py::test_os_worker_is_fenced, tests/adapters/test_agent_sandbox.py::test_a_named_credential_is_launched_as_its_harness_declares_it[as-filed], tests/adapters/test_agent_sandbox.py::test_a_named_credential_is_launched_as_its_harness_declares_it[harness-filed-without], tests/executor/test_entry.py::test_a_sandboxed_item_freezes_its_harness_hosts_and_env_names_at_filing[sandboxed]
+enforced-by: tests/worker/test_egress.py::test_match[deny-wins], tests/worker/test_egress.py::test_match[wildcard-not-two-labels], tests/worker/test_egress.py::test_match[nothing-allowed], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[dns-rebound-to-loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[link-local-v4], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[v4-mapped-metadata-address], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[the-hosts-own-address], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[metadata-name], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[one-label-wildcard], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[exact], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[shared-address-space], tests/worker/test_egress.py::test_a_non_public_address_needs_an_exact_allow_entry[nat64-private], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[v4-compatible-loopback], tests/worker/test_egress.py::test_always_denied_addresses_even_under_an_exact_allow[6to4-loopback], tests/worker/test_egress.py::test_refusal_events_are_capped_per_session, tests/worker/test_egress.py::test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked[pipelined-request-dropped], tests/worker/test_egress.py::test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked[backslash-userinfo], tests/worker/test_egress.py::test_an_allowed_host_is_tunnelled_to_the_address_it_checked, tests/worker/test_egress.py::test_a_refusal_is_one_403_line_recorded_once_per_host, tests/worker/test_channel.py::test_a_sessions_socket_serves_the_proxy_and_records_against_its_item, tests/worker/backends/test_docker_relay.py::test_a_launch_under_network_joins_its_relay_and_mounts_the_shim, tests/worker/backends/test_docker_relay.py::test_a_network_sandbox_never_runs_without_its_relay, tests/worker/backends/test_docker_relay.py::test_the_relay_has_no_network_and_mounts_the_sockets_directory, tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[linux-native], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[vm], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[socket-refused-off-a-vm], tests/worker/backends/test_docker_relay.py::test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell[inconclusive], tests/worker/test_channel.py::test_closing_a_session_ends_the_tunnels_it_already_has[unix], tests/worker/test_channel.py::test_closing_a_session_ends_the_tunnels_it_already_has[tls], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_joins_two_relays_through_a_volume[docker-host.docker.internal], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_joins_two_relays_through_a_volume[podman-host.containers.internal], tests/worker/backends/test_docker_relay.py::test_the_tls_transport_refuses_before_the_listener_ever_started, tests/worker/test_ca.py::test_a_certificate_from_another_ca_is_refused, tests/worker/test_channel.py::test_a_session_certificate_reaches_its_own_session_over_tls[same-id-other-item], tests/worker/test_channel.py::test_a_session_certificate_reaches_its_own_session_over_tls[older-session], tests/worker/test_channel.py::test_a_certificate_naming_no_open_tls_session_gets_nothing[closed], tests/worker/test_channel.py::test_a_client_without_a_certificate_is_refused_at_the_handshake, tests/worker/backends/test_docker_relay.py::test_a_relay_that_did_not_start_is_refused_and_removed[unix-pulled], tests/worker/backends/test_docker_relay.py::test_a_relay_that_did_not_start_is_refused_and_removed[tls-pulled], tests/worker/test_backends.py::test_a_session_under_network_gets_its_route_before_it_is_wrapped[unix], tests/worker/test_backends.py::test_a_session_under_network_gets_its_route_before_it_is_wrapped[tls], tests/worker/test_backends.py::test_reattach_re_registers_a_tls_session_with_no_socket[repo], tests/worker/test_backends.py::test_network_without_a_channel_or_a_route_never_launches[channel], tests/worker/test_backends.py::test_network_without_a_channel_or_a_route_never_launches[route], tests/worker/test_backends.py::test_reattach_reopens_an_adopted_sessions_channel_from_its_row, tests/worker/test_backends.py::test_a_setup_command_under_network_uses_the_install_list_not_runtime, tests/worker/test_backends.py::test_a_setup_command_under_network_without_a_channel_or_route_never_runs[channel], tests/adapters/test_agent_sandbox.py::test_a_proxy_unaware_harness_under_network_is_refused_before_launch, tests/test_policy_sandbox_network.py::test_a_narrower_layer_cannot_change_inherited_network[loosened], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[docker-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[docker-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[podman-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_has_loopback_and_no_route_out[podman-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[docker-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[docker-forced-tls], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[podman-probed], tests/worker/test_egress_docker.py::test_a_worker_under_network_reaches_only_its_allowed_hosts[podman-forced-tls], tests/worker/test_backends.py::test_a_launch_under_a_kit_gets_its_lists_without_the_harness_hosts, tests/worker/test_gates_bwrap.py::test_os_worker_is_fenced, tests/adapters/test_agent_sandbox.py::test_a_named_credential_is_launched_as_its_harness_declares_it[as-filed], tests/adapters/test_agent_sandbox.py::test_a_named_credential_is_launched_as_its_harness_declares_it[harness-filed-without], tests/executor/test_entry.py::test_a_sandboxed_item_freezes_its_harness_hosts_and_env_names_at_filing[sandboxed]
 origin: src/kraft/worker/egress.py §EgressProxy.resolve_and_check -- sandbox Part 2, P4: a sandboxed worker sat on docker's default bridge with open egress, able to send the worktree and any credential it held anywhere, and on a cloud VM to reach the metadata address (169.254.169.254) for the VM's role credentials.
 
 ## REQ sandbox-callbacks-are-scoped-to-their-session
@@ -1845,8 +1950,17 @@ origin: src/kraft/adapters/forge/mr.py §read_mr_meta -- an MR must still open w
 
 When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
-and reviewed again before the chain goes on.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
+and reviewed again before the chain goes on. It SHALL do so as well when that
+node parks after the move, before it completes, even when the park's poller
+re-enters it first, and when the move is a workspace member's over a root that
+is done or still waiting. Over a root that parked, stopped or failed, the
+root's own outcome SHALL stand, and the member's move SHALL be held until the
+node next completes, unless that outcome is a merge-queue drop, which has its
+own restart. When the node stops for a person after the move, the item SHALL
+stay on that node, and the restart SHALL run the next time the node is walked,
+unless the node was skipped or a retry re-verified it. A restart SHALL be
+written whole or not at all.
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[completes], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[parks-on-the-review-wait], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[rate-limited], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[parks-and-its-poller-re-enters-first], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[rate-limited-and-its-poller-re-enters-first], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[a-member-moved-under-a-repaired-root], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[a-member-moved-under-a-rate-limited-root], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-rate-limit-on-the-root-parks-it-ci_poll], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-failure-on-the-root-is-its-own-ci_poll], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-stop-for-a-person-on-the-root-is-not-hidden-ci_poll], tests/executor/test_base_change.py::test_a_restart_cut_short_writes_none_of_itself, tests/executor/test_default_chain.py::test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite[pause], tests/executor/test_default_chain.py::test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite[question], tests/executor/test_default_chain.py::test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite[server-restart], tests/executor/test_default_chain.py::test_a_stop_after_a_rebase_keeps_what_a_restart_must_not_overwrite[skip], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-declared-restart-re-verifies-it-past-a-root-still-waiting-ci_poll], tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
 origin: config/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
 
 ## REQ an-undeclared-conflict-rebase-waits-for-the-rebased-heads-ci
@@ -1866,7 +1980,7 @@ with the reason `base_changed`; the restarted walk SHALL pass over each other on
 after an explicit conflict handler resolved a rebase conflict SHALL reopen every
 approved gate in its span, whether the conflict arose inside the walk or when
 `/retry` or `/resume` refreshed the worktree.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[but-the-final-gate], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[completes], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[but-the-final-gate], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
 origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision: a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
@@ -2025,25 +2139,163 @@ An automated-review task SHALL report ordinary pending, clean, actionable, or
 error results. Actionable feedback SHALL enter
 the declaring execution node's recovery or fix-loop controls; on the collect
 path the wait reports pending, settled, or error instead, and actionable
-feedback comes from the reading task.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[each-settles], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair, tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-only], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-over-an-earlier-review], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[glab-resolved-only]
+feedback comes from the reading task. A wait that sets `config.watch_ci` SHALL also end
+failed on a settled red pipeline.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_is_the_ci_wait_s_finding, tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_goes_to_on_failure_first, tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[each-settles], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair, tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-only], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-over-an-earlier-review], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[glab-resolved-only]
 
 ## REQ automated-review-implementation-is-not-template-configuration
 
-Templates MAY name which reviewers an automated-review task waits for, a bot
-login or a check name in its `reviewers`, and the wait's grace period.
+Templates MAY name, in an automated-review task's `config`: which reviewers it
+waits for, a bot login or a check name, in `reviewers`, whether Kraft
+replies to a bot, `replies`, whether it resolves a bot's fixed threads,
+`resolve_fixed`, the wait's `grace_period`, and whether it also
+watches the merge request's CI, `watch_ci`,
+which names what it looks at, not how it is read.
 Templates SHALL NOT expose how a review is read, such as webhook event names,
 commands, comment authors, free check-name keys, or API and CLI mechanics. The
 selected task implementation SHALL own those details.
-enforced-by: tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[webhook_event], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[check_name], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[comment_author], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[command], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-list], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-over-task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-says-none], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[item-over-repo-and-task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[none-anywhere], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[malformed-entry], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[grace-period-on-the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[grace-period-on-another-wait], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[glab], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[gh], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[glab]
+enforced-by: tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[webhook_event], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[check_name], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[comment_author], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[command], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-list], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-over-task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[repo-says-none], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[item-over-repo-and-task], tests/adapters/forge/test_run_review.py::test_the_nearest_layer_s_reviewers_reach_the_review_task[none-anywhere], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[malformed-entry], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[grace-period-on-the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[grace-period-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-with-no-ci-wait-after-it], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[glab], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[gh], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[glab]
+
+## REQ reviewer-entry-is-a-bot-or-a-check
+
+A reviewer entry, on a task's `config`, in `repos.yaml`'s `automated_review`
+or in an item's node override, SHALL be either a bot entry or a check entry by
+its shape, and a key SHALL be checked against that kind alone. A stored entry
+that names the other kind as null SHALL load as the kind it names. A bot entry
+MAY say whether Kraft replies to the bot (`replies`) and whether it resolves the
+threads whose fix it confirmed (`resolve_fixed`).
+enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-resolve-fixed], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies-and-resolve-fixed], tests/drafts/test_repos.py::test_a_save_keeps_the_yaml_only_automated_review_as_written, tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-bot-with-a-null-check], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-check-with-a-null-bot], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-a-key-it-lacks], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither]
+origin: src/kraft/automated_review.py §Reviewer
+
+## REQ forge-task-config-is-per-target
+
+A forge task's `config` SHALL take only the keys of its own target, and a
+target with none SHALL take no `config`. A key another target takes SHALL be
+refused when it has a value other than null or false, and dropped when it is
+null or false. Any other key SHALL be refused.
+enforced-by: tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[the-review-waits-own], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[another-targets-key], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[another-targets-clear], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-typo-even-unset], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-typo-even-null], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[empty-on-a-pipeline-wait], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-target-with-none], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-target-with-none-cleared], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[zero-is-not-false], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[an-unknown-key-on-a-target-with-none]
+origin: src/kraft/templates/models.py §ForgeTask
+
+## REQ flat-forge-keys-read-as-config
+
+A forge task's flat `reviewers`, `watch_ci`, `pipeline` and `wait.grace_period`
+SHALL be read as the same key under `config`. In an item's stored snapshot, one
+holding the value every snapshot dumped when unset SHALL be dropped, and none
+SHALL warn. A flat key beside the same key under `config` in one mapping SHALL
+be refused. Every layer a chain is resolved from, the instance's, an add-on's,
+a child add-on's and an extending chain's `overrides:`, SHALL be read in that
+form before layers merge, and a file read in the flat form SHALL warn once,
+naming the file and the key's path. A one-off chain SHALL be stored in that
+form when filed, and a retry's flat key SHALL be merged into the task's `config`.
+enforced-by: tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-null-as-written], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-null-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-empty-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[watch-ci-false-as-written], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[defaults-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[grace-period], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[grace-period-alone], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[an-agent-task-untouched], tests/templates/test_forge_config.py::test_lift_config_puts_config_where_the_first_moved_key_stood, tests/templates/test_forge_config.py::test_a_flat_key_beside_the_same_key_under_config_is_refused[reviewers], tests/templates/test_forge_config.py::test_a_flat_key_beside_the_same_key_under_config_is_refused[grace-period], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[v2.6], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[main], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[before-2.6], tests/templates/test_forge_config.py::test_a_flat_grace_period_reads_beside_a_retired_wait_timeout, tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-reviewers-on-the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-reviewers-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-beside-config], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[instance-flat-parent], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[instance-flat-child], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[addon-flat-parent], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[addon-flat-child], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[child-addon-flat-parent], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[inherited-chain-flat-child], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[overrides-flat-parent], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[overrides-flat-child], tests/templates/test_library_task_config.py::test_every_layer_is_lifted_before_layers_merge[a-flat-false-clears-an-inherited-true], tests/templates/test_library_task_config.py::test_a_retargeting_child_clears_its_parents_config[cleared], tests/templates/test_library_task_config.py::test_a_retargeting_child_clears_its_parents_config[not-cleared], tests/templates/test_library_task_config.py::test_a_flat_file_warns_naming_the_file_and_the_path, tests/templates/test_forge_config.py::test_the_lift_reaches_every_task_position_and_no_component_name, tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[nodes-a-number], tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[a-scalar-node], tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[overrides-a-list], tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[sections-of-the-wrong-type], tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[scalar-tasks-and-steps], tests/templates/test_forge_config.py::test_lift_tasks_skips_what_it_cannot_walk[a-scalar-added-node], tests/templates/test_one_off.py::test_prepare_lifts_the_flat_form, tests/templates/test_retry_override.py::test_a_retry_writes_a_pipeline_under_config[flat], tests/templates/test_retry_override.py::test_a_retry_writes_a_pipeline_under_config[under-config], tests/addons/test_review_task_config.py::test_moving_a_component_to_the_config_form_is_no_change
+origin: src/kraft/templates/models.py §lift_config
+
+## REQ kraft-saves-templates-in-the-config-form
+
+WHEN Kraft saves a chain or library file, the system SHALL write a flat
+forge task key in its `config:` form, keeping the file's block comments and
+layout, except in a file that uses YAML anchors, which SHALL be written as
+given with a warning. The first save over a file on disk that holds a flat key
+SHALL first copy it to `<file>.pre-config`, which SHALL NOT be overwritten; a
+save whose copy cannot be made SHALL write the text as given with a warning. A
+rewrite that fails SHALL write the text as given with a warning, never refuse
+the save. A file Kraft does not save SHALL NOT be rewritten. A publish that
+deletes or renames a chain SHALL delete its `<file>.pre-config`, and one whose
+apply step fails SHALL rebase the draft on the texts as written, so its retry
+is not refused as changed underneath.
+enforced-by: tests/test_config_write_template.py::test_a_flat_template_is_saved_in_the_config_form_with_its_comments[a-chain], tests/test_config_write_template.py::test_a_flat_template_is_saved_in_the_config_form_with_its_comments[the-shipped-library-shape], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[backup-unwritable], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[disk-not-utf8], tests/api/test_drafts.py::test_a_failing_apply_hook_answers_500_keeps_the_draft_and_the_retry_succeeds[a-flat-chain], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[no-flat-key], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[flat-on-disk-only], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[anchors], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[merge-key], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[rewrite-fails], tests/test_config_write_template.py::test_a_save_is_never_refused_for_the_lift[new-file], tests/test_config_write_template.py::test_a_second_save_keeps_the_first_backup, tests/api/test_settings_templates.py::test_a_chain_put_answers_the_text_it_wrote, tests/api/test_drafts.py::test_a_renamed_chain_keeps_its_draft_and_publishes_under_the_new_id, tests/api/test_drafts.py::test_an_edit_of_a_flat_library_publishes_the_config_form
+origin: src/kraft/config.py §write_template
+
+## REQ watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait
+
+IF a task sets `config.watch_ci` and it is not an `mr.automated_review` task in one of
+its node's own steps with an `mr.ci` task in a later one of those steps, THEN
+the system SHALL refuse the chain at load.
+enforced-by: tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-with-no-ci-wait-after-it], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[a-later-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[the-same-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[an-earlier-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[only-in-on-failure], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[only-in-the-fix-loop], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[watching-from-the-fix-loop], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[in-a-later-node]
+origin: src/kraft/templates/models.py §Chain._watch_ci_looks_ahead_to_its_ci_wait
+
+## REQ review-wait-red-pipeline-is-the-ci-wait-s-finding
+
+WHEN an `mr.automated_review` task that sets `config.watch_ci` reads a settled red
+pipeline that the CI wait would not first retry as an infrastructure failure,
+the system SHALL end the wait failed and report each failed job as a finding of
+the node's own `mr.ci` task, with that task's path as its source, so that it
+has the fingerprint, the CI-log marking and the recovery of the same red read by
+the CI wait.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_is_the_ci_wait_s_finding, tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_goes_to_on_failure_first
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-pushes-first
+
+WHEN an `mr.automated_review` task that sets `config.watch_ci` makes an observation,
+the system SHALL first push the item's branch and record the push, and SHALL end
+the wait settled, reading neither CI nor the bots, when the merge request is
+already merged.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[pending], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[merged], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[push-refused], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[watch-ci-off]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-reads-ci-without-acting-on-it
+
+WHILE an `mr.automated_review` task that sets `config.watch_ci` reads the merge
+request's pipeline, the system SHALL NOT rebase the branch, retry a job, count
+an infrastructure retry, pin a pipeline or record that CI is not configured,
+SHALL NOT read it when the repository's `ci_checks` is off, and SHALL leave every
+read but a settled red or a confirmed conflict, a read that fails for any reason
+but a rate limit included, to the node's CI wait.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[pending], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[green], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[no-pipeline-yet], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[red-for-an-older-head], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[infra-red], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[abandoned], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[read-error], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[ci-checks-off], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[rate-limited], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[watch-ci-off]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-ends-on-a-confirmed-conflict
+
+WHEN an `mr.automated_review` task that sets `config.watch_ci` reads a merge request
+confirmed to conflict with its base, the system SHALL end the wait settled, not
+failed, without reading the bots or writing what they said.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-cut-short-by-ci-records-no-heard-or-silent-bots
+
+WHEN an `mr.automated_review` task that sets `config.watch_ci` ends on a red pipeline
+or a confirmed conflict, the system SHALL NOT record which bots were heard or
+silent on that head.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ multi-repo-review-wait-watches-every-repository-first
+
+WHERE an item has several repositories and its `mr.automated_review` task sets
+`config.watch_ci`, the system SHALL push every repository's branch and read every
+repository's pipeline, skipping only those whose merge request merged, before it
+reads any bot, and SHALL report a red pipeline there without findings, as the CI
+wait does.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[the-root-red-behind-a-pending-member], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[every-pipeline-pending], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-merged-member-is-skipped], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-pointer-only-root-is-not-read]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-counts-its-limit-from-the-push
+
+WHERE an `mr.automated_review` task sets `config.watch_ci`, the system SHALL count the
+wait's timeout from when Kraft pushed the head the wait is about, or from that
+head's commit time when Kraft has no record of pushing it, and not from the
+wait's start.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-push], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-wait-start]
+origin: src/kraft/adapters/forge/run.py §_settle_review -- the person, 2026-11-20: "if it didn't post a review after the push in 10 mins, it's done."
+
+## REQ a-stop-on-red-ci-the-review-wait-saw-names-the-ci-wait
+
+WHEN a red pipeline that an `mr.automated_review` task watching CI read stops
+its node for a person, the system SHALL name the node's `mr.ci` task and the
+pipeline's failed jobs in the stop's reason, and not the review wait.
+enforced-by: tests/executor/test_walk_forge_cause.py::test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait[no-fix-loop], tests/executor/test_walk_forge_cause.py::test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait[blind-in-a-fix-loop-node]
+origin: src/kraft/executor/walk.py §_named_for_stop
 
 ## REQ automated-review-collects-when-a-later-task-reads-it
 
 WHERE a later task of an automated-review task's node declares the
 `bot_feedback` input, the system SHALL hold the wait until every named reviewer
 has finished with the latest pushed head, then write what the reviewers said for
-that task and report the wait settled, whatever they said.
-enforced-by: tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
+that task and report the wait settled, whatever they said, unless the wait sets
+`config.watch_ci` and a red pipeline or a confirmed conflict ends it first.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
 origin: config/library.yaml §await_automated_review
 
 ## REQ automated-review-settles-a-bot-nothing-reads
@@ -2054,14 +2306,17 @@ hold the wait for a bot reviewer until every named reviewer has finished with
 the latest pushed head, as on the collect path, each repository against its
 own head and with its own memory of the reviewers between checks. It SHALL then report actionable each bot's
 unresolved threads, a newest review that requests changes when the bot left no
-thread, and a check that finished without passing, and clean otherwise. A bot's
+thread, and a check that finished without passing, and clean otherwise, unless the wait sets
+`config.watch_ci` and a red pipeline ends it first. A bot's
 approval SHALL count as its activity. The wait's timeout SHALL settle it the
 same way, and SHALL NOT stop the item for human action, unless a named check is
 still unfinished then: that SHALL stop for human action, as a check alone does.
 On a multi-repo item, the findings SHALL reach the node's recovery as a
 single-repo item's do, each naming its path from the item's own checkout,
-or the member it was read on when it has no path.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout[a-member-s-thread], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout[the-root-s-thread], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[a-member-s-pathless-finding], tests/adapters/forge/test_run_review.py::test_a_member_s_check_finding_reaches_the_fix_loop_tagged_with_the_member, tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[quiet-is-clean], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[changes-requested], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[summary-unread], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[silent], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[each-settles], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[an-unread-repository-keeps-its-memory], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[unfinished-check-stops], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[file-without-line], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[changes-requested-with-threads], tests/adapters/forge/test_reviewer_feedback.py::test_reviewer_feedback_reads[glab-bot-approved]
+or the member it was read on when it has no path. For a bot with replies on, a
+`COMMENTED` review whose body is blank and whose comments all answer another
+comment SHALL NOT be its review of the head.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_is_the_ci_wait_s_finding, tests/adapters/forge/test_automated_review.py::test_a_reply_only_review_is_not_the_bot_s_review_where_kraft_replies[gh-replies-on], tests/adapters/forge/test_automated_review.py::test_a_reply_only_review_is_not_the_bot_s_review_where_kraft_replies[gh-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reply_only_review_is_not_the_bot_s_review_where_kraft_replies[gh-a-changes-requested-reply], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout[a-member-s-thread], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout[the-root-s-thread], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[a-member-s-pathless-finding], tests/adapters/forge/test_run_review.py::test_a_member_s_check_finding_reaches_the_fix_loop_tagged_with_the_member, tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[quiet-is-clean], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[changes-requested], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[summary-unread], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[silent], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[each-settles], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[an-unread-repository-keeps-its-memory], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[unfinished-check-stops], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[file-without-line], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[changes-requested-with-threads], tests/adapters/forge/test_reviewer_feedback.py::test_reviewer_feedback_reads[glab-bot-approved]
 origin: src/kraft/adapters/forge/run.py §_verdict -- Omid, 2026-10-29: a GitLab bot that only comments never approves, so on a chain without the triage step every item waited out the 30 minutes and stopped. Support every bot configuration; a bot silent until the timeout means carry on.
 
 ## REQ automated-review-names-a-bot-that-never-reviews
@@ -2084,13 +2339,22 @@ origin: config/library.yaml §await_automated_review
 
 ## REQ default-post-draft-flow-is-ordered
 
-The default chain SHALL create a draft merge request, await CI, run any
-declared automated-review task, decide with a triage step which of the review
-bots' feedback needs a change, address CI failures and the feedback that does,
-produce a work-item summary and review, and then request final-gate approval.
-After approval, it SHALL mark the merge request ready, await external approval,
-and merge.
+The default chain SHALL create a draft merge request, run any declared
+automated-review task, decide with a triage step which of the review bots'
+feedback needs a change, then await CI, address CI failures and the feedback
+that does, produce a work-item summary and review, and then request final-gate
+approval. After approval, it SHALL mark the merge request ready, await external
+approval, and merge.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order
+
+## REQ default-review-wait-settings-stay-on-its-node
+
+The default chain's review wait SHALL watch CI with a 10-minute cap, and its fix
+loop SHALL be allowed to start early, both set on the library node
+`post_draft_feedback`, while the library task `await_automated_review` SHALL
+keep `config.watch_ci` off and its 30-minute cap.
+enforced-by: tests/templates/test_library.py::test_the_default_review_wait_settings_stay_on_its_node
+origin: config/library.yaml §post_draft_feedback
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 
@@ -2098,7 +2362,8 @@ CI failures in the post-draft flow SHALL enter that execution node's recovery
 or fix-loop controls. Review-bot feedback SHALL enter the fix loop only as the
 findings of the triage step, and not the node's `on_failure`. After a
 successful repair, the system SHALL resynchronize the draft merge request and
-remeasure the node.
+remeasure the node. A reply round whose measurement fails SHALL take the node's
+`on_failure` while its recovery is unspent.
 enforced-by: tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[flagged], tests/adapters/forge/test_run_review.py::test_a_triaged_bot_comment_reaches_the_fix_loop[declined], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop]
 
 ## REQ missing-external-approval-is-normal-pending-state
@@ -2137,14 +2402,16 @@ enforced-by: tests/templates/test_workspace_publication.py::test_blocked_child_m
 ## REQ template-policy-may-replace-operational-defaults
 
 Template policy overrides MAY replace operational defaults, including timeouts
-and retry or wait timing, in either direction.
-enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/executor/test_policy_enforcement.py::test_a_fix_loops_bounds_come_from_its_nodes_policy[v1-policy-replaces-it], tests/executor/test_policy_enforcement.py::test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves
+and retry or wait timing, in either direction; the reply limits
+(`reply_cap_per_thread`, `reply_rounds_per_head`, `reply_timeout_minutes`) are
+operational numbers too, with code defaults.
+enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/test_policy_reply_limits.py::test_the_reply_keys_have_code_defaults[a-default-moves-it], tests/test_policy_reply_limits.py::test_an_override_above_the_administrator_maximum_is_refused[reply-cap], tests/executor/test_policy_enforcement.py::test_a_fix_loops_bounds_come_from_its_nodes_policy[v1-policy-replaces-it], tests/executor/test_policy_enforcement.py::test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves
 
 ## REQ work-item-policy-may-exceed-default-ceilings-within-admin-maximum
 
 An operator editing a work item MAY raise a normal policy ceiling for that work
 item, but SHALL NOT exceed an explicitly configured administrator maximum.
-enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum, tests/api/test_item_policy.py::test_intake_and_a_patch_set_the_items_own_override, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[attempts-over-maximum], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_override_past_its_bounds_is_refused_naming_the_field[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_items_safety_value_only_tightens_whatever_it_lands_on[allowlist-wider-than-the-ceiling-intersects], tests/executor/test_policy_enforcement.py::test_an_items_own_node_cap_binds_that_nodes_fix_loop, tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[intake-attempts], tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[patch-wall-clock]
+enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_within_admin_maximum, tests/api/test_item_policy.py::test_intake_and_a_patch_set_the_items_own_override, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[attempts-over-maximum], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_override_past_its_bounds_is_refused_naming_the_field[attempts-over-maximum], tests/templates/test_item_policy.py::test_an_items_safety_value_only_tightens_whatever_it_lands_on[allowlist-wider-than-the-ceiling-intersects], tests/executor/test_policy_enforcement.py::test_an_items_own_node_cap_binds_that_nodes_fix_loop, tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[intake-attempts], tests/api/test_item_policy.py::test_the_older_node_override_door_is_held_to_the_same_maxima[patch-wall-clock], tests/executor/test_reply_round_sequences.py::test_a_red_pipeline_in_a_reply_round_takes_the_node_s_recovery
 origin: src/kraft/templates/models.py §MaterializedChain.with_item_policy -- the check every door that sets a work item's own override makes (`POST /work-items`, `PATCH /work-items/{id}`, a chain switch), by `ResolvedChain.check_scopes`, the engine every layer resolves through. A PATCH on a running or waiting item binds from the next node entered (`walk.walk_node` re-reads the row) and the next observation of a wait (`waits.observe` rebounds an open wait).
 
 ## REQ policy-override-rules-are-field-specific
@@ -2433,7 +2700,7 @@ SHALL NOT hold the item again. The hold SHALL be
 written before any stop, and a rewind SHALL stand the item at `restart_from`
 before the walk enters it, so that no crash leaves the repair's commit one
 retry away from the forge.
-enforced-by: tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-after-it-committed], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-before-any-commit], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-before-the-gates-reopened], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-after-the-gates-reopened], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[before-a-rebased-conflict-s-rewind], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-repair-s-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-cap-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-restart], tests/executor/test_merge_rejection_resume.py::test_a_restart_back_on_merge_does_not_answer_the_old_drop_again
+enforced-by: tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-after-it-committed], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[during-the-repair-before-any-commit], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[restarting-after-the-gates-reopened], tests/executor/test_merge_rejection_resume.py::test_a_daemon_restart_mid_rejection_never_merges_the_repair_unseen[before-a-rebased-conflict-s-rewind], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-repair-s-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-cap-stop], tests/executor/test_merge_rejection_resume.py::test_the_cursor_leaves_merge_before_the_walk_stops_or_moves_on[the-restart], tests/executor/test_merge_rejection_resume.py::test_a_restart_back_on_merge_does_not_answer_the_old_drop_again
 origin: src/kraft/executor/walk.py §hold_interrupted_repair -- a retry's default target is the node the item stands on: left on `merge`, a retry pushes and merges code no gate saw.
 
 ## REQ a-repair-that-commits-nothing-stops-for-a-person

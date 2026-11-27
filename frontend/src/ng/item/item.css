@@ -96,7 +96,12 @@
 .item-card.is-muted .item-card-title { color: var(--text-sub); }
 .item-card .item-facts dt { color: var(--text-sub); }
 .item-card .item-input { max-width: 860px; }
-.item-card-text { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); }
+.item-card-text { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); white-space: pre-line; }
+.item-card-findings { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); }
+.item-card-findings li > * + * { margin-left: 6px; }
+.item-card-severity { font-weight: 600; }
+.item-card-finding-text { white-space: pre-line; }
+.item-card-finding-at { font-size: var(--fs-label); color: var(--text-sub); }
 .item-card-fix { overflow-wrap: anywhere; }
 .item-card-fix code { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .item-card-open { margin-left: auto; }
@@ -232,6 +237,17 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-files .is-mono { overflow-wrap: anywhere; }
 .ip-notes { margin: 0; padding-left: 16px; font-size: var(--fs-meta); color: var(--text); }
 .ip-review-note { margin: 0; font-size: var(--fs-meta); color: var(--text); white-space: pre-line; overflow-wrap: anywhere; }
+/* A gate's History: a button per round, newest first, the round shown marked. A row shows no note: the canvas previews it and the drawer holds the whole. */
+.ip-hist { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ip-hist-row { display: flex; flex-direction: column; gap: 3px; width: 100%; box-sizing: border-box; margin: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.ip-hist-row:is(:hover, :focus-visible) { background: var(--surface-2); }
+.ip-hist-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ip-hist-row[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ip-hist-head { display: flex; align-items: center; gap: 7px; }
+.ip-hist-n { color: var(--text); font-weight: 500; }
+.ip-hist-at { margin-left: auto; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.ip-hist-what { color: var(--text-sub); }
+.ip-hist-open { display: inline-block; margin: 4px 0 0 10px; font-size: var(--fs-meta); }
 
 /* Document viewer (prototype lines 278–283): a full-height drawer on the right over a scrim. */
 .dv-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }

@@ -1,7 +1,6 @@
 <!-- Overrides Docus's AppHeaderLogo.vue (docus 5.13.0), which wrote the title
      as plain text in the body font. The wordmark is the command a reader
-     types, `kraft`, after the prompt the StageStrip chain starts with, in
-     IBM Plex Mono. Type only: the app icon (public/icon.svg) is a sans K
+     types, `kraft`, in IBM Plex Mono. Type only: the app icon (public/icon.svg) is a sans K
      on a dark tile, which at 24px beside the mono name read as a second
      logo. The link around it (AppHeaderLeft.vue) is named "Kraft", so a
      screen reader hears that and not the prompt. -->

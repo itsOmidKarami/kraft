@@ -8,11 +8,11 @@ import sys
 
 import pytest
 from support.harness import entry_of, make_repo
-from support.remote import Peer, attach, memory_pair
+from support.remote import Peer, attach, memory_pair, until
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import protocol, registry
-from kraft.remote.hub import FULL_RETRY_S, Hub, Verdict
+from kraft.remote.hub import FULL_RETRY_S, Claim, Hub, Verdict
 
 TOKEN = "kwt_secret"
 
@@ -192,7 +192,7 @@ async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, 
     pings, if nobody read it."""
     bin_dir = stub_ssh(tmp_path / "bin")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    starts = tmp_path / "starts"
+    starts, drained = tmp_path / "starts", tmp_path / "drained"
     machine = (
         "import json, sys\n"
         f"open({str(starts)!r}, 'a').write('.')\n"
@@ -200,15 +200,18 @@ async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, 
         f"send({{'t': 'hello', 'protocol': {protocol.PROTOCOL_VERSION}, 'kraft': '2.3.0'}})\n"
         "sys.stdin.readline()\n"
         "sys.stderr.write('x' * 10_000_000)\n"
-        "sys.stderr.flush()\n"
+        "sys.stderr.flush()\n"  # blocks for good unless the hub reads stderr
+        f"open({str(drained)!r}, 'w').write('.')\n"
         "for line in sys.stdin:\n"
         "    if json.loads(line)['t'] == 'ping':\n"
         "        send({'t': 'pong'})\n"
     )
-    hub = Hub("2.3.0", remote_command=(sys.executable, "-c", machine), ping_s=0.2, dead_s=1.5)
+    hub = Hub("2.3.0", remote_command=(sys.executable, "-c", machine), ping_s=0.2, dead_s=30)
     hub.apply(registry.WorkersFile.model_validate({"workers": {"boxed": {"ssh": "boxed"}}}))
     assert (await hub.probe("boxed", timeout=20))["connected"]
-    await asyncio.sleep(3)  # past dead_s: only answered pings keep it online
+    # the machine got all of stderr out, which it only can if the hub read it; dead_s is long
+    # so a loaded test machine cannot read a late pong as a dead one
+    await until(drained.exists, timeout=30)
     assert _row(hub, "boxed")["online"]
     assert starts.read_text() == "."  # one connection, never redialled
     await hub.close()
@@ -612,3 +615,78 @@ async def test_applying_workers_yaml_hands_the_local_workers_enabled_to_its_link
     hub = Hub("2.3.0")
     hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
     assert local_link.current().enabled is enabled
+
+
+_OTHER = "kwt_other"
+
+
+def _two_machines():
+    return _file(
+        work={"token_sha256": registry.hash_token(_OTHER), "capacity": 2, "repos": ["kraft"]}
+    )
+
+
+async def test_a_test_group_runs_one_at_a_time_on_a_machine_but_each_machine_may_run_one():
+    hub = Hub("2.3.0")
+    hub.apply(_two_machines())
+    machines = [await _dial(hub), await _dial(hub, _OTHER)]
+    repos = _repos("kraft")
+    first = await hub.claim("any", repos, "a/1", group="heavy", poll_s=0.01)
+    second = await hub.claim("any", repos, "b/1", group="heavy", poll_s=0.01)
+    assert {first.machine, second.machine} == {"home", "work"}  # one per machine
+    assert hub.decide("any", repos, concurrency_group="heavy").wait == (
+        "waiting for test group heavy is held on 2 machines"
+    )
+    assert hub.decide("any", repos, concurrency_group="light").machine  # another group
+    assert hub.decide("any", repos).machine  # no group: neither waits nor makes wait
+    named = hub.decide(first.machine, repos, concurrency_group="heavy").wait
+    assert named == f"waiting for test group heavy: a is running it on {first.machine}"
+    hub.release(first)
+    assert hub.decide(first.machine, repos, concurrency_group="heavy").machine == first.machine
+    for machine, _w, accepted in machines:
+        await machine.close()
+        await accepted
+
+
+async def test_an_abandoned_claim_holds_nothing():
+    hub = Hub("2.3.0")
+    hub.apply(_two_machines())
+    machines = [await _dial(hub), await _dial(hub, _OTHER)]
+    repos = _repos("kraft")
+    held = [
+        await hub.claim("any", repos, key, group="heavy", poll_s=0.01) for key in ("a/1", "b/1")
+    ]
+    gone = {"now": False}
+    waiter = asyncio.create_task(
+        hub.claim("any", repos, "c/1", group="heavy", poll_s=0.01, abandon=lambda: gone["now"])
+    )
+    await asyncio.sleep(0.1)
+    assert not waiter.done()  # the group is held on both machines
+    gone["now"] = True
+    for claim in held:  # the group frees in the same step: abandon is read before decide
+        hub.release(claim)
+    with pytest.raises(protocol.StepAbandoned):
+        await asyncio.wait_for(waiter, 1)
+    assert hub.slots_used("home") == 0 and hub.slots_used("work") == 0  # no claim, no group entry
+    assert hub.decide("any", repos, concurrency_group="heavy").machine
+    for machine, _w, accepted in machines:
+        await machine.close()
+        await accepted
+
+
+async def test_a_claim_rebuilt_from_machine_and_key_frees_the_group_a_refused_reserve_held():
+    hub = Hub("2.3.0")
+    hub.apply(_file())
+    machine, _w, accepted = await _dial(hub)
+    await hub.claim("home", _repos("kraft"), "a/1", group="heavy", poll_s=0.01)
+    hub.release(Claim("home", "a/1"))  # as `Placement._reserved` gives it back
+    assert hub.decide("home", _repos("kraft"), concurrency_group="heavy").machine == "home"
+    hub.adopt("home", "a/2", "heavy")  # a run found after a restart
+    assert "a is running it" in hub.decide("home", _repos("kraft"), concurrency_group="heavy").wait
+    hub.release(Claim("home", "a/2"))
+    hub.adopt("home", "pre:7", "heavy")  # a key that is no `<item>/<session>` still names itself
+    assert (
+        "pre:7 is running it" in hub.decide("home", _repos("kraft"), concurrency_group="heavy").wait
+    )
+    await machine.close()
+    await accepted

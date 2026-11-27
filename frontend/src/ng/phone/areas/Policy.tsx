@@ -200,6 +200,9 @@ function Loops(e: Edits) {
       <Group title="Fix loops" note="Defaults for every fix loop that doesn't set its own. A chain, node or loop may set its own." rows={[
         pair(e, "attempts", KEYS.attemptsDefault, p.limits.max_attempts.default.value, KEYS.attemptsMax, p.limits.max_attempts.maximum.value),
         pair(e, "wall clock", KEYS.wallDefault, p.limits.timeout_minutes.default.value, KEYS.wallMax, p.limits.timeout_minutes.maximum.value),
+        pair(e, "replies per thread", KEYS.replyCapDefault, p.limits.reply_cap_per_thread.default.value, KEYS.replyCapMax, p.limits.reply_cap_per_thread.maximum.value, "used where a review bot has replies on; unset reads 2"),
+        pair(e, "reply rounds per head", KEYS.replyRoundsDefault, p.limits.reply_rounds_per_head.default.value, KEYS.replyRoundsMax, p.limits.reply_rounds_per_head.maximum.value, "used where a review bot has replies on; unset reads 2"),
+        pair(e, "reply wait", KEYS.replyTimeoutDefault, p.limits.reply_timeout_minutes.default.value, KEYS.replyTimeoutMax, p.limits.reply_timeout_minutes.maximum.value, "used where a review bot has replies on; unset reads 5 minutes"),
       ]} />
       <Group title={EVERY_FIX_LOOP} note={`The loops in published chains, and the numbers each one runs on. ${LOOP_WINS}`} rows={[
         single(e, KEYS.loopAttempts, "loops without their own: attempts", p.loops.default.attempts),

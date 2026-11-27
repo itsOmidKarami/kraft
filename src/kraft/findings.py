@@ -10,8 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import re
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from kraft.render import strip_ansi
@@ -73,6 +75,11 @@ class Finding:
     #: round; that must change what's readable, never what this finding *is*
     #: (Kraft-s7c04.34/.35 brainstorm).
     jobs: tuple[JobRef, ...] = ()
+    #: The review-bot threads this finding came from (`executor.replies`), as
+    #: their ids in the collection the reviewer was handed. Kept off
+    #: `fingerprint`, like `line` and `jobs`: a finding is the same defect
+    #: whichever threads name it.
+    threads: tuple[str, ...] = ()
 
     @property
     def fingerprint(self) -> str:
@@ -148,6 +155,7 @@ def _one(raw: object) -> Finding | None:
     file = raw.get("file")
     line = raw.get("line")
     same_as = raw.get("same_as")
+    threads = raw.get("threads")
     return Finding(
         severity=severity,
         message=message,
@@ -155,6 +163,11 @@ def _one(raw: object) -> Finding | None:
         line=line if isinstance(line, int) and not isinstance(line, bool) else None,
         source_plugin=source_plugin,
         same_as=same_as if isinstance(same_as, str) and _TAG.match(same_as) else None,
+        threads=(
+            tuple(t for t in threads if isinstance(t, str) and t)
+            if isinstance(threads, list)
+            else ()
+        ),
     )
 
 
@@ -200,7 +213,50 @@ def from_payload(raw: dict) -> Finding:
         # No shape check here, unlike `_one`: a payload was written by `asdict`
         # over a Finding that already passed one.
         same_as=raw.get("same_as"),
+        threads=tuple(raw.get("threads") or ()),
     )
+
+
+def prose_fingerprint(f: Finding) -> str:
+    """`f`'s identity from its own words, whatever `same_as` it claims: the raw
+    result file of a reviewer shown no tags is not passed through
+    `resolve_identity`, so its `same_as` is not to be believed."""
+    return replace(f, same_as=None).fingerprint
+
+
+def payload_of(f: Finding) -> dict:
+    """A finding as an event payload holds it: empty `threads` left out, so a record
+    written with replies off is the one written before them."""
+    out = asdict(f)
+    if not out["threads"]:
+        del out["threads"]
+    return out
+
+
+def _repo_path(path: str | None) -> str | None:
+    """A repository-relative POSIX path, normalised; "" for one outside the repository."""
+    if not path:
+        return None
+    norm = posixpath.normpath(path)
+    return "" if norm == ".." or norm.startswith("../") else norm
+
+
+def on_their_files(found: list[Finding], threads: Mapping[str, str | None]) -> list[Finding]:
+    """Each finding with only the thread ids that are in `threads` (a collection's
+    thread ids, to each one's file) and on the finding's own file: a pathless thread
+    only on a pathless finding. This keeps a finding to threads on its own file; it
+    does not stop one finding naming every bot thread on that file."""
+
+    def ok(f: Finding, t: str) -> bool:
+        if t not in threads:
+            return False
+        mine, theirs = _repo_path(f.file), _repo_path(threads[t])
+        return mine == theirs and mine != ""
+
+    return [
+        replace(f, threads=tuple(t for t in f.threads if ok(f, t))) if f.threads else f
+        for f in found
+    ]
 
 
 def resolve_identity(found: list[Finding], known: frozenset[str] | set[str]) -> list[Finding]:

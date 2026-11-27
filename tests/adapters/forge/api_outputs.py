@@ -120,6 +120,8 @@ def checks_page(contexts: dict, *, oid: str = "abc123") -> str:
 READ_BRANCH = "api*graphql*first: 30*"
 READ_NUMBER = "api*graphql*pullRequest(number: $n) { id*"
 READ_MORE = "api*graphql*node(id: $id)*"
+#: One review thread by node id (`GhCli._thread_comments`); not the checks rollup's `$id`.
+READ_THREAD = "api*graphql*node(id: $thread)*"
 FIND = "api*graphql*states: [OPEN, CLOSED, MERGED]*"
 
 
@@ -190,6 +192,21 @@ HEAD_MODIFIED = json.dumps(
                 "type": "UNPROCESSABLE",
                 "path": ["mergePullRequest"],
                 "message": "Head branch was modified. Review and try the merge again.",
+            }
+        ],
+    }
+)
+
+#: GitHub's GraphQL error for a pull request it is merging already; go-gh prints it
+#: as `GraphQL: Merge already in progress (mergePullRequest)`.
+MERGE_IN_PROGRESS = json.dumps(
+    {
+        "data": {"mergePullRequest": None},
+        "errors": [
+            {
+                "type": "UNPROCESSABLE",
+                "path": ["mergePullRequest"],
+                "message": "Merge already in progress",
             }
         ],
     }

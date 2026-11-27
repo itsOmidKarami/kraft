@@ -9,7 +9,8 @@ has nothing to exercise it without this.
 responses, each `{"status": "done"|"failed", "findings": [...]}`. The Nth
 invocation writes the Nth entry; past the end, the last entry repeats. The
 invocation count lives in a sidecar next to the plan, because `run_task` passes
-no round number into the child.
+no round number into the child. A plan path in `argv[1]` wins over the variable,
+so several reviewers in one chain can each keep a plan of their own.
 """
 
 import json
@@ -19,7 +20,9 @@ import sys
 
 
 def main() -> int:
-    plan_path = pathlib.Path(os.environ["KRAFT_FAKE_REVIEW_PLAN"])
+    plan_path = pathlib.Path(
+        sys.argv[1] if len(sys.argv) > 1 else os.environ["KRAFT_FAKE_REVIEW_PLAN"]
+    )
     plan = json.loads(plan_path.read_text())
 
     counter = plan_path.with_suffix(".count")

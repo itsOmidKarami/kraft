@@ -23,6 +23,7 @@ class ChainEvent(StrEnum):
     NODE_RECOVERY_STARTED = "node_recovery_started"
     RUN_FORKED = "run_forked"
     BASE_CHANGE_RESTART = "base_change_restart"
+    BASE_MOVE_HELD = "base_move_held"
     MERGE_REJECTION_RESTART = "merge_rejection_restart"
     WORKTREE_REBASE_VERIFIED = "worktree_rebase_verified"
     WORKTREE_REFRESH_SKIPPED = "worktree_refresh_skipped"
@@ -31,6 +32,8 @@ class ChainEvent(StrEnum):
     FIX_CYCLE_FINISHED = "fix_cycle_finished"
     FIX_CYCLE_REFUNDED = "fix_cycle_refunded"
     FINDINGS_MEASURED = "findings_measured"
+    #: A reply round: one more measurement of a node on the same head, to read the bots' answers.
+    REPLY_ROUND_STARTED = "reply_round_started"
     TEST_SCOPES_SELECTED = "test_scopes_selected"
     JUDGE_VERDICT = "judge_verdict"
     SWEEP_FAILED = "sweep_failed"
@@ -56,6 +59,7 @@ CHAIN_EVENT_TRAITS = total(
         ChainEvent.NODE_RECOVERY_STARTED: _PLAIN,
         ChainEvent.RUN_FORKED: EventTraits(restarts_run=True),
         ChainEvent.BASE_CHANGE_RESTART: EventTraits(restarts_run=True),
+        ChainEvent.BASE_MOVE_HELD: _PLAIN,
         ChainEvent.MERGE_REJECTION_RESTART: EventTraits(restarts_run=True),
         ChainEvent.WORKTREE_REBASE_VERIFIED: _PLAIN,
         ChainEvent.WORKTREE_REFRESH_SKIPPED: _PLAIN,
@@ -64,6 +68,7 @@ CHAIN_EVENT_TRAITS = total(
         ChainEvent.FIX_CYCLE_FINISHED: _PLAIN,
         ChainEvent.FIX_CYCLE_REFUNDED: _PLAIN,
         ChainEvent.FINDINGS_MEASURED: _PLAIN,
+        ChainEvent.REPLY_ROUND_STARTED: _PLAIN,
         ChainEvent.TEST_SCOPES_SELECTED: _PLAIN,
         ChainEvent.JUDGE_VERDICT: _PLAIN,
         ChainEvent.SWEEP_FAILED: _PLAIN,

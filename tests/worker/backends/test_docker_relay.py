@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from kraft import config
+from kraft.executor import walk
 from kraft.worker import ca, shim
 from kraft.worker.backends import docker
 from kraft.worker.sandbox import SandboxNotReady
@@ -28,14 +30,14 @@ OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 @pytest.fixture
 def calls(monkeypatch):
     """Every `docker_call` a test makes, answered `(0, "")` unless the test
-    says otherwise by name (`answers["run"] = (125, "")`); the image's
-    `Config.Env` holds `PATH=/img/bin`."""
+    says otherwise by name (`answers["run"] = (125, "")`) or by its last
+    argument (an image); the image's `Config.Env` holds `PATH=/img/bin`."""
     made: list[tuple[str, ...]] = []
     answers: dict[str, tuple[int, str] | None] = {"image": (0, '["PATH=/img/bin"]\n')}
 
     async def call(*args, timeout=None):
         made.append(args)
-        return answers.get(args[0], (0, ""))
+        return answers.get(args[-1], answers.get(args[0], (0, "")))
 
     monkeypatch.setattr(docker, "docker_call", call)
     return SimpleNamespace(made=made, answers=answers)
@@ -102,6 +104,7 @@ def test_the_relay_has_no_network_and_mounts_the_sockets_directory(monkeypatch):
 
     for flag in (
         "--network=none",
+        "--pull=never",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--read-only",
@@ -152,7 +155,7 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
         (True, "", "unix"),
         (False, "OperatingSystem: Docker Desktop", "tls"),
         (False, "", "does not say it runs in a VM"),
-        (None, "", "could not tell"),
+        (None, "", "relay check did not run"),
     ],
     ids=["linux-native", "vm", "socket-refused-off-a-vm", "inconclusive"],
 )
@@ -228,19 +231,37 @@ async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls)
     assert [c[0] for c in calls.made] == ["image"]
 
 
+@pytest.mark.parametrize(
+    "pulled", [True, False, None], ids=["pulled", "relay-image-not-pulled", "no-answer"]
+)
 @pytest.mark.parametrize("sock", [SOCK, None], ids=["unix", "tls"])
-async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock):
+async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock, pulled):
+    """A relay image that is not pulled is never pulled (`--pull=never`):
+    the refusal names the pull to run, as doctor does, inside what the
+    board keeps of it. A runtime that does not answer is not said to lack
+    it."""
     run_dirs = docker._run_dirs()
     run_dirs.ca.mkdir(parents=True)
     (run_dirs.ca / "tls-port").write_text("40123\n")
     calls.answers["run"] = (125, "")
-    with pytest.raises(SandboxNotReady, match="could not start the sandbox's egress relay"):
+    relay = config.SandboxHost.model_fields["relay_image"].default
+    if not pulled:
+        calls.answers[relay] = None if pulled is None else (1, "")
+    with pytest.raises(SandboxNotReady) as refused:
         await docker.DockerBackend().open_session("s1", POLICED, sock, work_item_id="w1")
-    assert calls.made[-2:] == [
+    said = f"kraft: {refused.value}"[: walk._STOP_CAUSE_MAX - 1]
+    assert ("could not start the sandbox's egress relay" in said) is (pulled is not False)
+    assert (f"pull {relay}" in said) is (pulled is False)
+    assert calls.made[-3:-1] == [
         ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
         ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]
     assert not ca.session_dir(run_dirs, "w1-s1").exists()
+    if pulled is False:  # a long image, behind a remote machine's longest name
+        image = "registry.example.com/" + "x" * 60 + "/socat@sha256:" + "0" * 64
+        calls.answers[image] = (1, "")
+        said = f"kraft: {'m' * 39}: {await docker.relay_not_pulled(docker.Runtime(), image)}"
+        assert f"docker pull {image}" in said[: walk._STOP_CAUSE_MAX - 1]
 
 
 @pytest.mark.parametrize(
@@ -330,31 +351,59 @@ def test_the_probe_believes_only_the_relays_own_answer(monkeypatch, returncode, 
 
 @pytest.fixture
 def healthy_but_relay(monkeypatch):
-    """`health` on a machine whose daemon answers and whose repository image
-    is pulled; `pulled["relay"]` says whether the relay image is."""
-    pulled = {"relay": True}
+    """`health` on a machine whose daemon answers; `pulled["relay"]` and
+    `pulled["img"]` say whether the relay image and the repository's are."""
+    pulled = {"relay": True, "img": True}
     relay = docker._forward._sandbox_host(os.environ).relay_image
 
     async def call(*args, timeout=None):
         if args[0] == "version":
             return 0, "29.3.1"
-        return (0, "sha") if args[-1] != relay or pulled["relay"] else (1, "")
+        named = "relay" if args[-1] == relay else args[-1]
+        return (0, "sha") if pulled.get(named, True) else (1, "")
 
     monkeypatch.setattr(docker, "docker_call", call)
     monkeypatch.setattr(docker, "detect_runtime", docker.Runtime)
     return SimpleNamespace(pulled=pulled, relay=relay)
 
 
-async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay, monkeypatch):
-    """A launch never pulls it: the probe runs `--pull=never`."""
+@pytest.mark.parametrize("image_pulled", [True, False], ids=["image-pulled", "image-not-pulled"])
+async def test_doctor_fails_when_the_relay_image_is_not_pulled(
+    healthy_but_relay, monkeypatch, image_pulled
+):
+    """A launch never pulls it: the probe runs `--pull=never`. With the
+    repository's image missing too, one run names both pulls."""
     monkeypatch.setattr(docker, "socket_channel", lambda image: True)
     backend = docker.DockerBackend()
     ok, detail = await backend.health(POLICED)
     assert ok and f"egress relay {healthy_but_relay.relay}" in detail
+    assert await backend.relay_missing() is None
 
-    healthy_but_relay.pulled["relay"] = False
+    healthy_but_relay.pulled.update(relay=False, img=image_pulled)
     ok, detail = await backend.health(POLICED)
     assert not ok and f"docker pull {healthy_but_relay.relay}" in detail
+    assert ("docker pull img" in detail) is not image_pulled
+    # What `kraft admin worker check` says, knowing no item's image.
+    assert (await backend.relay_missing()) in detail
+    mirror = healthy_but_relay.relay.replace("docker.io/", "mirror.gcr.io/")
+    assert f"`relay_image: {mirror}` in {docker.config_dir() / 'sandbox.yaml'}" in detail
+
+
+@pytest.mark.parametrize(
+    ("image", "names_mirror"),
+    [
+        (config.SandboxHost.model_fields["relay_image"].default, True),
+        ("docker.io/someone/socat:1", False),
+    ],
+    ids=["the-default-image", "an-image-the-operator-chose"],
+)
+def test_only_the_default_relay_image_is_sent_to_the_mirror(image, names_mirror):
+    longest = docker.Runtime(cli="docker", engine="podman", rootless=True, selinux="relabel")
+    refusal = docker.channel_refusal(longest, image, None)
+    mirror = image.replace("docker.io/", "mirror.gcr.io/", 1)
+    assert (f"`relay_image: {mirror}`" in refusal) is names_mirror
+    # As the session log writes it, and as the board cuts it.
+    assert f"docker pull {image}" in f"kraft: {refusal}"[: walk._STOP_CAUSE_MAX - 1]
 
 
 @pytest.mark.parametrize(

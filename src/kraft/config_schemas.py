@@ -11,6 +11,9 @@ resolution can know -- an unknown parent, a cycle, a skill, a policy ceiling --
 is `POST /templates/check`'s, not a schema's.
 
 A schema is never stricter than its loader: a file Kraft loads must validate.
+A forge task's `config` is the one place the schema reads a sibling key: its
+shape follows the task's `target` (`_forge_config`), and the flat keys `config`
+replaced stay, deprecated, as the loader still reads them.
 """
 
 from __future__ import annotations
@@ -139,7 +142,63 @@ def chain_schema() -> dict:
         },
         {"required": ["extends"], "not": {"required": ["nodes"]}},
     ]
+    _forge_config(schema["$defs"])
     return schema
+
+
+def _retired(key: str) -> dict:
+    return {
+        "deprecated": True,
+        "deprecationMessage": f"Retired: write it as config.{key}. Kraft still reads it, "
+        "with a warning, until the next major release.",
+    }
+
+
+def _forge_config(defs: dict) -> None:
+    """A forge task's `config` by its `target` (`forge-task-config-is-per-target`).
+    Another target's key validates only as a clear (`null` or `false`), as the
+    loader reads it; with no `target`, which a parent may supply, any shape."""
+    known = {k: {"enum": [None, False]} for k in sorted(models_mod.CONFIG_KEYS)}
+    defs["PipelineWaitConfig"]["properties"]["pipeline"]["type"] = ["string", "integer"]
+    shapes = {}
+    for target, model in models_mod.CONFIG_OF.items():
+        body = defs[model.__name__]
+        body["properties"] = {**known, **body["properties"]}
+        body["additionalProperties"] = False
+        shapes[target.value] = _ref(model.__name__)
+    none = {"type": "object", "properties": known, "additionalProperties": False}
+    either = lambda shape: {"anyOf": [{"type": "null"}, shape]}  # noqa: E731
+    task = defs["ForgeTask"]
+    task["properties"]["config"] = {
+        "description": "The target's own keys: `reviewers`, `watch_ci` and `grace_period` "
+        "on mr.automated_review, `pipeline` on ci.pipeline, none on any other target."
+    }
+    for key in ("reviewers", "pipeline", "watch_ci"):
+        task["properties"][key] = _retired(key)
+    defs["WaitPolicy"]["properties"]["grace_period"] = _retired("grace_period")
+    has = lambda target: {"required": ["target"], "properties": {"target": target}}  # noqa: E731
+    others = [a.value for a in models_mod.ForgeAction if a.value not in shapes]
+    task["allOf"] = [
+        *(
+            {"if": has({"const": t}), "then": {"properties": {"config": either(shape)}}}
+            for t, shape in shapes.items()
+        ),
+        {"if": has({"enum": others}), "then": {"properties": {"config": either(none)}}},
+        {
+            "if": {"not": {"required": ["target"]}},
+            "then": {
+                "properties": {"config": {"anyOf": [{"type": "null"}, *shapes.values(), none]}}
+            },
+        },
+    ]
+    _reviewer_null_other_name(defs)
+
+
+def _reviewer_null_other_name(defs: dict) -> None:
+    """A stored reviewer entry names the other kind as `null`
+    (`automated_review._Reviewer._null_other_name`)."""
+    defs["BotReviewer"]["properties"]["check"] = {"type": "null"}
+    defs["CheckReviewer"]["properties"]["bot"] = {"type": "null"}
 
 
 def library_schema() -> dict:
@@ -191,12 +250,14 @@ def harnesses_schema() -> dict:
 
 
 def repos_schema() -> dict:
-    return _file(
+    schema = _file(
         "Kraft connected repositories",
         {"repos": {"type": "array", "items": _ref("RepoEntry")}},
         [config_mod.RepoEntry],
         closed=False,
     )
+    _reviewer_null_other_name(schema["$defs"])
+    return schema
 
 
 SCHEMAS: dict[str, Callable[[], dict]] = {

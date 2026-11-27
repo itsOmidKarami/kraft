@@ -57,8 +57,32 @@ def _problems(cr, content: Path, map_text: str, links: list[str] = ()) -> list[s
     return problems + cr.check_map(entries, site) + cr.check_links(list(links), entries, site, {})
 
 
-def test_pages_are_served_at_their_path_without_number_prefixes(cr, content):
-    assert set(cr.pages(content)) == {"/guides/vscode", "/get-started/install", "/get-started"}
+def test_pages_are_served_at_their_path_without_number_prefixes_and_the_home_is_one(cr, content):
+    assert set(cr.pages(content)) == {"/", "/guides/vscode", "/get-started/install", "/get-started"}
+
+
+def test_a_marketing_page_is_a_page_with_the_ids_of_what_it_draws(cr, content):
+    # app/pages/why.vue draws components/why/WhyPage.vue, whose sections are
+    # its anchors; a page that draws no component has only its own.
+    app = content.parent / "app"
+    write(app, "pages/why.vue", '<template><WhyPage v-if="home" /></template>\n')
+    write(app, "components/why/WhyPage.vue", '<SiteBlock id="the-name" title="The name." />\n')
+    write(app, "pages/scale.vue", '<template><section id="slices" /></template>\n')
+    # A folder of pages is a page at its index (the blog); the blog's posts
+    # are its Markdown files, its README aside, and the feed is one more.
+    write(app, "pages/blog/index.vue", '<template><ol id="posts" /></template>\n')
+    write(app, "pages/blog/[slug].vue", "<template><article /></template>\n")
+    write(content.parent, "blog/a-post.md", "---\ntitle: A\n---\n")
+    write(content.parent, "blog/README.md", "# Writing a post\n")
+    site = cr.pages(content)
+    assert site["/why"] == {"the-name"}
+    assert site["/scale"] == {"slices"}
+    assert site["/blog"] == {"posts"}
+    assert sorted(a for a in site if a.startswith("/blog/")) == ["/blog/a-post", "/blog/feed.xml"]
+    moved = {"/get-started/why-kraft": "/why"}
+    section = "/get-started/why-kraft#why-the-name"
+    assert cr.check_map({**moved, section: "/why#the-name"}, site) == []
+    assert cr.check_map({**moved, section: "/why#nope"}, site)
 
 
 def test_anchors_are_the_ids_the_site_gives_headings(cr, content):

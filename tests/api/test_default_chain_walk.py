@@ -13,7 +13,7 @@ from support.harness import entry_of
 from kraft import waits
 from kraft.adapters import forge
 from kraft.api import deps
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import CheckReviewer
 
 #: A `now` every parked wait is due by, so the test never sleeps out a backoff.
 LATER = "2999-01-01T00:00:00+00:00"
@@ -55,7 +55,7 @@ def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
 def _review_check(*, finished: bool) -> forge.ReviewerFeedback:
     """The review check, running or passed: nothing for the triage to read."""
     check = {"name": "review", "finished": finished, "conclusion": "success", "output": ""}
-    return forge.ReviewerFeedback(AutomatedReview(check="review"), None, check=check)
+    return forge.ReviewerFeedback(CheckReviewer(check="review"), None, check=check)
 
 
 def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci(
@@ -68,7 +68,9 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_LABELS", "type::fix")
     fake = _on_a_fake_forge(
         monkeypatch,
-        ci_states=["pending", "success"],
+        # The review wait reads the pipeline on each of its two checks
+        # (`watch_ci`), then the CI wait's own first read is pending.
+        ci_states=["pending", "pending", "pending", "success"],
         feedback_script=[[_review_check(finished=False)], [_review_check(finished=True)]],
         approval_states=["pending", "approved"],
         merge_delay=1,
@@ -118,13 +120,13 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "post_merge_ci",
     ]
     ended = [e["payload"] for e in evts if e["type"] == "external_wait_ended"]
-    assert {e["task"] for e in ended} == {
-        "merge_request_feedback.ci.await_ci",
+    assert list(dict.fromkeys(e["task"] for e in ended)) == [
         "merge_request_feedback.automated_review.await_review",
+        "merge_request_feedback.ci.await_ci",
         "external_approval.main.await",
         "merge.main.merge",
         "post_merge_ci.main.await",
-    }
+    ]
     assert {e["outcome"] for e in ended} == {"settled"}
 
 

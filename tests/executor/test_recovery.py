@@ -11,7 +11,7 @@ from support.harness import entry_of, v1_node
 
 from kraft import executor
 from kraft import policy as _policy
-from kraft.executor import dispatch, prompts
+from kraft.executor import dispatch, prompts, walk
 
 NO_SETUP = entry_of({"setup_command": ""})
 
@@ -74,9 +74,32 @@ async def test_a_step_recovery_reruns_every_task_in_the_step_and_no_earlier_step
     assert script.calls.count("prep") == 1
 
 
-async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, script):
+@pytest.mark.parametrize(
+    ("loop", "finding", "after", "measured", "cycles"),
+    [
+        (None, None, [], [], []),
+        # A fix loop's re-measure is recorded at the repair's round, clean or not.
+        ({}, None, [], [-1], []),
+        # A finding below the loop's severities is recorded, and the node completes.
+        ({}, "minor", [], [-1], []),
+        # It passes with a finding the loop takes, as the default chain's triage does: the
+        # finding is fixed, at a paid cycle, and `on_failure` does not run again.
+        ({}, "important", ["cycle", "prep", "a"], [-1, 1], [1]),
+        ({"early": True}, "important", ["cycle", "prep", "a"], [-1, 1], [1]),
+    ],
+    ids=[
+        "no-fix-loop",
+        "clean-is-recorded",
+        "a-below-severity-finding-is-recorded",
+        "findings-enter-the-fix-loop",
+        "findings-enter-an-early-fix-loop",
+    ],
+)
+async def test_a_node_recovery_reruns_the_node_from_its_first_step(
+    item_on, script, loop, finding, after, measured, cycles
+):
     """`node-recovery-retries-the-entire-node`."""
-    script.plan = {"a": ["failed", "done"]}
+    fields = {} if loop is None else {"fix_loop": {"tasks": [_sub("cycle")], **loop}}
     it = await item_on(
         [
             v1_node(
@@ -85,12 +108,30 @@ async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, scri
                     {"id": "check", "tasks": [_sub("a")]},
                 ],
                 on_failure=_fix(),
+                **fields,
             )
         ]
     )
 
-    assert await _walk(it) == "completed"
-    assert script.calls == ["prep", "a", "fix", "prep", "a"]
+    async def reports(_row):
+        if finding and script.calls.count("a") == 2:
+            found = {"severity": finding, "message": "rename x", "source_plugin": "a"}
+            (it.run_dirs.results / "s-a.json").write_text(
+                json.dumps({"status": "done", "findings": [found]})
+            )
+            await it.session("s-a", "build.check.a", "done", round=walk._REPAIR_ROUND)
+
+    script.plan = {"a": ["failed", "done"]}
+    script.effects["a"] = reports
+
+    policy = _policy.Policy(loops={}, default=_policy.Cap(3, 3600))
+    assert await _walk(it, policy=policy) == "completed"
+    assert script.calls == ["prep", "a", "fix", "prep", "a", *after]
+    assert [e["payload"]["cycle"] for e in it.events("findings_measured")] == measured
+    assert [e["payload"]["cycle"] for e in it.events("fix_cycle_started")] == cycles
+    # A fix session is stamped with its paid cycle, never the repair's round: a -1 one
+    # would pair with the re-measure and count it as a fixed round.
+    assert script.rounds.get("cycle", []) == cycles
 
 
 @pytest.mark.parametrize(

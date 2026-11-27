@@ -19,6 +19,38 @@ IF a pending gate's artifact is not on disk, THEN the system SHALL still accept 
 decision on that gate.
 enforced-by: tests/api/test_artifact.py::test_approving_a_gate_with_no_artifact_ingests_nothing
 
+## REQ a-gates-past-rounds-stay-readable
+WHEN a person reads a work item, the system SHALL report each gate's rounds,
+oldest first, from the item's whole event log rather than a window of it: one
+round for each time the chain reached the gate and something ended it by an
+approval, a rejection, a skip or the item's end, with how it ended, who decided
+and the note it was decided with.
+enforced-by: tests/store/test_gates.py::test_a_gates_rounds[rejected-then-approved], tests/store/test_gates.py::test_a_gates_rounds[skip-ends-the-round], tests/store/test_gates.py::test_a_gates_rounds[skip-with-no-open-round], tests/store/test_gates.py::test_a_gates_rounds[completed-closes-a-pending-round], tests/store/test_gates.py::test_a_gates_rounds[unchanged-revision-has-no-request], tests/api/test_board.py::test_gate_rounds_reach_the_detail_payload
+origin: src/kraft/store/gates.py
+
+## REQ a-gate-round-reports-its-review-and-threads
+WHEN a person reads a work item, the system SHALL report with each gate round the
+newest review submitted at that gate after the previous round ended and up to
+the round's end, and the count, open count, per-label count and first three
+(must-fix first, then oldest) of the non-draft threads opened at that gate in
+the same window, so a review or thread belongs to exactly one round.
+enforced-by: tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-and-threads-belong-to-the-round-they-were-made-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[made-between-two-rounds-belongs-to-the-later], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-round-with-no-request-still-has-a-window], tests/store/test_gates.py::test_a_rounds_review_and_threads[drafts-and-other-gates-are-no-part-of-a-round], tests/store/test_gates.py::test_a_rounds_review_and_threads[first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-thread-shows-its-state-now-on-the-round-it-was-opened-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-claimed-thread-is-still-open], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-with-no-summary-has-an-empty-one], tests/store/test_gates.py::test_a_rounds_review_and_threads[an-unlabelled-thread-counts-in-the-total-only]
+origin: src/kraft/store/gates.py
+
+## REQ a-gate-round-carries-its-rejections-verdict
+WHEN a gate round ended in a rejection, the system SHALL report with it the verdict the
+rejection recorded (`review_threads` for Kraft's bounce on open threads), so a view can tell
+that bounce, whose note is those threads as text, from a person's note.
+enforced-by: tests/store/test_gates.py::test_a_rejections_verdict_rides_on_its_round[the-thread-bounce-names-itself], tests/store/test_gates.py::test_a_rejections_verdict_rides_on_its_round[a-plain-rejection-has-none]
+origin: src/kraft/store/gates.py
+
+## REQ a-rounds-threads-are-listed-by-the-same-window
+WHEN a person lists an item's threads for a gate and a round, the system SHALL
+answer with the threads that round's count in the item's gate rounds covers, and
+SHALL answer 404 for a round the gate does not have.
+enforced-by: tests/api/test_review_rounds.py::test_threads_of_a_round
+origin: src/kraft/api/routes/review.py
+
 ## REQ intake-copies-an-attachment
 WHEN intake accepts an attachment, the system SHALL copy it into Kraft's own
 storage.

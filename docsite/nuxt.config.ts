@@ -2,6 +2,10 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { contentRoutes, pagesMissingFrom } from './content-routes.mjs'
+import { sitePages } from './site-pages.mjs'
+import { blogRoutes } from './blog-posts.mjs'
+import { isHomeBuild } from './app/utils/home'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
 // the latest release's docs are at /, an older major's at /vN/ and main's at
@@ -11,7 +15,11 @@ import { fileURLToPath } from 'node:url'
 // each with the whole list (dev/docs_versions.py) and its own id from it.
 const baseURL = process.env.KRAFT_DOCS_BASE || '/'
 type DocsVersion = { id: string, label: string, base: string, tag: string, name: string }
-const versions: DocsVersion[] = JSON.parse(process.env.KRAFT_DOCS_VERSIONS || '[]')
+// A list without a label (written by hand) names each version by its id: the
+// version menu reads the label of every one, and a missing one failed the
+// render of every docs page.
+const versions: DocsVersion[] = (JSON.parse(process.env.KRAFT_DOCS_VERSIONS || '[]') as Partial<DocsVersion>[])
+  .map(v => ({ ...v, label: v.label ?? v.id }) as DocsVersion)
 // This build's id: latest, vN or next. Empty for a local or PR build, which
 // shows no version UI.
 const version = process.env.KRAFT_DOCS_VERSION || ''
@@ -43,6 +51,10 @@ const movedSections = redirects.filter(([from]) => from.includes('#'))
 const unreleased: { page: string | null, routes: Record<string, 'new' | 'updated'> } = version === 'next' || version === ''
   ? JSON.parse(execFileSync('python3', [fileURLToPath(new URL('../dev/gen_docs_unreleased.py', import.meta.url)), fileURLToPath(new URL('./content', import.meta.url))], { encoding: 'utf8' }))
   : { page: null, routes: {} }
+// Every page of this build's content. The prerender crawler follows links from
+// the build's root, and the root of /next/ and /vN/ is a redirect stub that
+// links to none, so the pages are listed to it instead (nitro.prerender.routes).
+const pageRoutes: string[] = contentRoutes(fileURLToPath(new URL('./content', import.meta.url)))
 const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
 
 // What a moved page's old address serves. The prerenderer writes a redirect
@@ -74,9 +86,18 @@ function forwardingPage(from: string, to: string): string {
 // which says the same. GitHub Pages serves this one file for a missing path
 // under / and under every other version alike, so it cannot know which docs
 // the reader wanted and links to all of them, at the addresses of the version
-// list, not this build's base. Styled inline, in the site's own colour tokens
+// list, not this build's base. A version's base redirects to the home, so each
+// link goes to that version's first docs page. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
+// The first docs page of a version: where the 404's link to it goes. Install,
+// since Why Kraft moved out of the docs to /why.
+const docsStart = (v: DocsVersion) => `${v.base}get-started/install`
+// Whether this build has that page: an older release's content may not.
+const contentDir = fileURLToPath(new URL('./content', import.meta.url))
+const hasDocsStart = existsSync(contentDir) && readdirSync(contentDir)
+  .filter(dir => /^(\d+\.)?get-started$/.test(dir))
+  .some(dir => readdirSync(join(contentDir, dir)).some(file => /^(\d+\.)?install\.md$/.test(file)))
 const missingPage = `<style>
 .nf{box-sizing:border-box;min-height:100vh;padding:1.5rem;display:flex;flex-direction:column;background:var(--ui-bg,#fff);color:var(--ui-text,#334155);font-family:'IBM Plex Sans',system-ui,sans-serif}
 .nf a{color:var(--ui-primary,#7c3aed);text-underline-offset:4px}
@@ -95,7 +116,7 @@ const missingPage = `<style>
 <p class="code">404</p>
 <h1>No page at this address</h1>
 <p>It may have been renamed or moved.</p>
-<p class="links">${versions.map(v => `<a href="${v.base}">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
+<p class="links">${versions.map(v => `<a href="${docsStart(v)}">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
 </main>
 </div>`
 
@@ -152,13 +173,21 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   hooks: {
     'nitro:init'(nitro) {
-      nitro.hooks.hook('prerender:done', () => addSectionIndexes(nitro.options.output.publicDir))
+      nitro.hooks.hook('prerender:done', () => {
+        addSectionIndexes(nitro.options.output.publicDir)
+        // A page the prerenderer was seeded with (nitro.prerender.routes) but
+        // did not write is a 404 once deployed, and its error is only a line
+        // in the log.
+        const expected = [...pageRoutes, ...(isHomeBuild(baseURL) ? blogRoutes.filter(r => !r.endsWith('.xml')) : [])]
+        const missing = pagesMissingFrom(nitro.options.output.publicDir, expected)
+        if (missing.length) throw new Error(`${missing.length} of ${expected.length} pages have no HTML: ${missing.join(', ')}`)
+      })
     },
     'content:file:afterParse'({ content }) {
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/site.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
@@ -202,8 +231,22 @@ export default defineNuxtConfig({
   // nuxt-llms writes no llms.txt or llms-full.txt without a domain, and Docus
   // infers none on GitHub Pages. Its links are the domain plus a router path,
   // so the domain carries this build's base ('', /v1 or /next).
+  // The marketing pages (site-pages.mjs) are no content, so llms.txt lists
+  // them from here, at the root of the domain where every build sends them.
   llms: {
     domain: `${origin}${baseURL.replace(/\/$/, '')}`,
+    sections: [{
+      title: 'Site',
+      description: 'What Kraft is, before the docs say how to use it.',
+      links: sitePages.map(p => ({ title: p.title, description: p.description, href: `${origin}${p.path}` })),
+    }, {
+      // Named, the docs are the only collection listed: without a section
+      // that names one, @nuxt/content lists every page collection, the blog's
+      // too (content.config.ts), whose posts have no raw/ copy to link to.
+      title: 'Docs',
+      contentCollection: 'docs',
+      contentFilters: [{ field: 'extension', operator: '=', value: 'md' }],
+    }],
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
   // only reads one at the domain root anyway. server/routes/robots.txt.ts
@@ -216,6 +259,9 @@ export default defineNuxtConfig({
     // site.url and takes a host only from NUXT_SITE_URL, which would also
     // override site.url above.
     sitemapBase: `${origin}${baseURL.replace(/\/$/, '')}`,
+    // The blog's pages (blog-posts.mjs), which server/plugins/sitemap.ts adds
+    // at the root as it does the marketing pages.
+    blogPages: blogRoutes.filter(r => !r.endsWith('.xml')),
     public: {
       // Read by the version menu and the banners. The bases are full paths,
       // not router paths: each version is a separate build, so a link to
@@ -230,6 +276,9 @@ export default defineNuxtConfig({
       // any middleware of ours and without looking at the fragment, so a
       // moved section of a moved page went to the page's new address.
       moved: Object.fromEntries(redirects),
+      // The marketing pages' titles and descriptions (composables/useSitePage.ts),
+      // and the sitemap's list of them (server/plugins/sitemap.ts).
+      sitePages,
     },
   },
   // The label icon of a ```yaml [config/x.yaml] block is Nuxt UI's
@@ -257,7 +306,8 @@ export default defineNuxtConfig({
   image: {
     provider: 'none',
   },
-  // IBM Plex, the site's type (assets/css/type.css). @nuxt/fonts (through
+  // IBM Plex, the site's type (assets/css/type.css), and Inter, which only the
+  // marketing pages use (assets/css/site.css). @nuxt/fonts (through
   // Docus) fetches these at build time and serves them from /_fonts/, so a
   // reader's browser never calls Google Fonts. Only the weights the CSS uses,
   // up to 600: type.css draws bold text at 600. Plex Sans has its italic for
@@ -266,6 +316,8 @@ export default defineNuxtConfig({
     families: [
       { name: 'IBM Plex Mono', weights: [400, 500, 600], styles: ['normal'] },
       { name: 'IBM Plex Sans', weights: [400, 500, 600], styles: ['normal', 'italic'] },
+      // The marketing pages' face (assets/css/site.css), self-hosted like Plex.
+      { name: 'Inter', weights: [400, 500, 600], styles: ['normal'] },
     ],
   },
   nitro: {
@@ -284,13 +336,22 @@ export default defineNuxtConfig({
       },
     },
     prerender: {
-      // No page links to a moved page's old address, so the crawler would
-      // never reach it on its own.
-      routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
+      // Every page of the content, so no build depends on the links of its
+      // root to find them (pageRoutes). No page links to a moved page's old
+      // address, so the crawler would never reach it on its own.
+      routes: ['/robots.txt', ...sitePages.map(p => p.path), ...(isHomeBuild(baseURL) ? blogRoutes : ['/blog']), ...pageRoutes, ...movedPages.map(([from]) => from)],
       // The version menu links to the same page in every other build, which
       // the crawler would take for one of this build's own pages and fail as
-      // a 404: a prefix match on each other version's base. The latest's is
-      // /, which would skip every page, so it is only ever matched exactly.
+      // a 404: a prefix match on each other version's base. The latest's is /,
+      // which would skip every page, and its root is no page to skip: every
+      // build has a page there (the home, or the redirect to it), and the docs
+      // logo links to it, so it is left to the crawler.
+      // The 404 page links to every version's first docs page, and a build
+      // without that page (an older release) 404s on all of them for the
+      // crawler, its own included. Not when it has the page: the latest's
+      // address is then this build's own route as well (the crawler sees
+      // routes without the base), and ignoring it would drop the page. Given
+      // as the version list has it and again under this build's own base.
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
@@ -300,7 +361,8 @@ export default defineNuxtConfig({
         /^\/demo(\/|$)/,
         new RegExp(`^${withBase('/demo')}(/|$)`),
         '/200.html',
-        ...versions.filter(v => v.id !== version).map(v => new RegExp(v.base === '/' ? '^/$' : `^${v.base}`)),
+        ...versions.filter(v => v.id !== version && v.base !== '/').map(v => new RegExp(`^${v.base}`)),
+        ...(hasDocsStart ? [] : versions.flatMap(v => [docsStart(v), withBase(docsStart(v))])),
       ],
     },
   },

@@ -12,6 +12,7 @@ last three, are for people who work on its code.
 ## In this section
 
 - [Security](/project/security): what Kraft does on your machine, the settings that make it safe to run, and its threat model.
+- [Security in depth](/project/security-in-depth): how each protection works: the network and browser checks, gates, sandbox, add-ons, token and login.
 - [Data and privacy](/project/data-and-privacy): what leaves your machine, and where Kraft keeps secrets and state.
 - [What's new](/project/whats-new): the headline change in each release since 2.0.
 - [Status and support](/project/status-and-support): which versions are supported, what the version numbers promise, and where to get help.

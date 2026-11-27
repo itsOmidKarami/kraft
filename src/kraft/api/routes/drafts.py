@@ -24,7 +24,7 @@ from kraft.api.routes import board, gates
 from kraft.drafts import authored, item, ops, policy_caps, resolve, store
 from kraft.policy import PolicyError
 from kraft.templates import catalogue, revision
-from kraft.templates.library import LIBRARY_FILE
+from kraft.templates.library import CHAINS_DIR, LIBRARY_FILE
 from kraft.templates.models import AgentTask
 from kraft.vocab import ENDED
 
@@ -290,10 +290,20 @@ async def publish_draft(area: str, key: str, request: Request):
         # ponytail: one file after another, each atomically; a crash between
         # two leaves a partial publish. The `/templates/*` saves don't take
         # this lock; a save racing a publish is caught by the next base check.
+        written: dict[str, str | None] = {}
+        warnings: list[dict] = []
         for name, text in draft["files"].items():
             path = st.templates_dir / name
+            written[name] = text
             if text is None:
                 path.unlink(missing_ok=True)
+                # A later chain of this name gets its own backup; restoring
+                # this one would bring back a chain that was deleted.
+                path.with_name(path.name + config_mod.PRE_CONFIG).unlink(missing_ok=True)
+            elif name == LIBRARY_FILE or name.startswith(f"{CHAINS_DIR}/"):
+                written[name], warning = config_mod.write_template(path, text)
+                if warning:
+                    warnings.append({"file": name, "message": warning})
             else:
                 config_mod.write_text(path, text)
         try:
@@ -302,6 +312,10 @@ async def publish_draft(area: str, key: str, request: Request):
             else:
                 await found.after_publish(request.app, draft["files"])
         except Exception as exc:  # noqa: BLE001 -- the files are written: say so, keep the draft
+            # What is on disk now may not be the draft's text (`write_template`):
+            # without this the retry would be refused as changed underneath.
+            base = {**draft["base"], **{f: store.digest(t) for f, t in written.items()}}
+            await st.db.write(lambda c: store.rebase(c, area, key, base))
             raise HTTPException(500, f"published, but applying it failed: {exc}") from exc
         await st.db.write(lambda c: store.delete(c, area, key))
     apply_mod.notify(request.app)
@@ -309,7 +323,12 @@ async def publish_draft(area: str, key: str, request: Request):
     # publish, which has no draft left to differ (R10b-02).
     published_changes = result["changes"]
     _, _, result = _state(st, area, key, None, [])
-    return {"published": sorted(draft["files"]), "changes": published_changes, "result": result}
+    return {
+        "published": sorted(draft["files"]),
+        "changes": published_changes,
+        "result": result,
+        "warnings": warnings,
+    }
 
 
 @api_router.post("/drafts/{area}/{key}/rebase")
@@ -532,6 +551,7 @@ async def put_item_draft(wid: str, body: Ops, request: Request):
 
 @api_router.delete("/work-items/{wid}/draft", status_code=204)
 async def discard_item_draft(wid: str, request: Request):
+    """Throw away the item's draft chain edits."""
     st = request.app.state
     _item_row(st, request, wid)
     if not await st.db.write(lambda c: store.delete_item(c, wid)):

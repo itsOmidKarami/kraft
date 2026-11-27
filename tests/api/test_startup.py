@@ -259,6 +259,8 @@ def test_probation_ends_by_itself(on_probation, short_probation, client):
 def test_confirm_ends_it(on_probation, client):
     from kraft import when_free
 
+    older = on_probation.run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}0"
+    older.mkdir()
     r = client.post("/api/update/confirm")
 
     assert (r.status_code, r.json()) == (200, {"confirmed": True})
@@ -267,7 +269,28 @@ def test_confirm_ends_it(on_probation, client):
     assert on_probation.started == [1] and on_probation.spawned == ["w1"]
     assert when_free.read_rollback(on_probation.run_dirs) is None
     assert when_free.outcome(st)["from"] == "2.2.0"
+    # The confirmed update's snapshot is the way back now; the one before it goes.
+    assert on_probation.snapshot.is_dir() and not older.exists()
     assert client.post("/api/update/confirm").status_code == 409
+
+
+@pytest.fixture
+def day_old_snapshot(tmp_path):
+    """The snapshot a confirmed update left a day ago. Made before the server
+    starts, so it comes before `client` in a test's arguments."""
+    from kraft import when_free
+
+    folder = RunDirs(tmp_path / "run").ensure().base / f"{when_free.SNAPSHOT_PREFIX}1"
+    (folder / "config").mkdir(parents=True)
+    day_ago = time.time() - 86400
+    os.utime(folder, (day_ago, day_ago))
+    return folder
+
+
+def test_a_confirmed_updates_snapshot_outlives_a_restart(day_old_snapshot, client):
+    """It is the way back to the version before, so only the next update replaces it."""
+    assert client.get("/api/health").status_code == 200
+    assert day_old_snapshot.is_dir()
 
 
 def test_shutdown_during_probation_is_clean(on_probation, client):

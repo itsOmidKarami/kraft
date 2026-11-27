@@ -4,6 +4,7 @@ agent chose is a person's call (#1198). A sibling of test_repos.py."""
 from __future__ import annotations
 
 import pytest
+from support.api import assert_refusal_hides_the_override
 from support.harness import make_repo, make_repo_with_submodule
 
 from kraft.api.routes.repos import HELD
@@ -11,6 +12,7 @@ from kraft.api.routes.repos import HELD
 _CALLERS = {
     "assistant": {"x-kraft-client": "mcp"},
     "worker": {"x-kraft-session-id": "w-o/abc123"},
+    "shell-agent": {"x-kraft-client": "agent-shell"},
     "person": {},
 }
 
@@ -66,6 +68,7 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         ("worker", {"enabled": True, "test_command": "pytest"}, 403),
         ("assistant", {"enabled": False}, 200),
         ("person", {"enabled": True}, 200),
+        ("shell-agent", {"enabled": True}, 403),
         ("worker", {"setup_command": "./configure"}, 403),
         ("on:worker", {"setup_command": "curl x | sh"}, 403),
         ("on:assistant", {"test_scopes": [{"paths": ["**"], "command": "x"}]}, 403),
@@ -79,6 +82,7 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         "worker-enables",
         "assistant-disables",
         "person-enables",
+        "shell-agent-enables",
         "worker-sets-commands-on-a-held-repo",
         "worker-sets-commands-on-an-enabled-repo",
         "assistant-sets-scopes-on-an-enabled-repo",
@@ -107,6 +111,8 @@ def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, st
     stored = client.get("/api/repos").json()["repos"][0]
     assert stored["enabled"] is (on or (status == 200 and patch.get("enabled", False)))
     if status == 403:
+        if caller == "shell-agent":
+            assert_refusal_hides_the_override(r)
         assert "a person's" in r.json()["detail"]
         assert all(stored.get(k) == held.get(k) for k in patch if k != "enabled")
 

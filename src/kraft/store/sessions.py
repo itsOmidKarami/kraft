@@ -346,6 +346,12 @@ def reusable_session(
     that same still-open pass, so this never costs the reuse Kraft-gl9d is
     for.
 
+    Also excluded: a session from before a reply round of its node began
+    (`reply_round_started`). A reply round is a fresh measurement of the same
+    node on the same head at the same round number, so the earlier
+    measurement's session matches on every other key; its triage must read
+    what the bots answered, not hand back the session that never saw it.
+
     Also excluded: a session with a sibling that is not itself `done`.
     `dispatch_node`'s subprocess branch mints one session per matching
     `test_scope`, all sharing this exact (node, hook point, round, head_sha)
@@ -421,6 +427,13 @@ def reusable_session(
         "  AND rejected.created_at > worker_sessions.created_at"
         ") "
         "AND NOT EXISTS ("
+        "  SELECT 1 FROM events round "
+        "  WHERE round.work_item_id = worker_sessions.work_item_id "
+        "  AND round.type = ? "
+        "  AND json_extract(round.payload, '$.node_id') = worker_sessions.node_id "
+        "  AND round.created_at > worker_sessions.created_at"
+        ") "
+        "AND NOT EXISTS ("
         "  SELECT 1 FROM worker_sessions sibling "
         "  WHERE sibling.work_item_id = worker_sessions.work_item_id "
         "  AND sibling.node_id = worker_sessions.node_id "
@@ -440,6 +453,7 @@ def reusable_session(
             ChainEvent.NODE_STARTED,
             ChainEvent.NODE_STARTED,
             GateEvent.REJECTED,
+            ChainEvent.REPLY_ROUND_STARTED,
         ),
     ).fetchone()
 

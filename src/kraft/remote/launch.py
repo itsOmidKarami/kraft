@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import subprocess
-from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
 from dataclasses import asdict
 
 from kraft import caps, events, ids, store
@@ -58,9 +58,15 @@ class Placement:
         resume: bool,
         can_park: bool,
         pin_node: bool = False,
+        concurrency_group: str | None = None,
+        abandon: Callable[[], bool] | None = None,
     ) -> None:
         self._db, self._row, self._node_id, self._hook_point = db, row, node_id, hook_point
         self._pin_node = pin_node
+        #: A test scope's group: the local worker counts as full while another session runs it.
+        self._concurrency_group = concurrency_group
+        #: True once the step is called off (its item is paused): `choose` raises `StepAbandoned`.
+        self._abandon = abandon
         self._group, self._repos, self._key = group, list(repos), session_key
         self._resume, self._can_park = resume, can_park
         self.runner = group
@@ -97,6 +103,8 @@ class Placement:
         try:
             while True:
                 self.wait = self.refusal = None
+                if self._abandon is not None and self._abandon():
+                    raise protocol.StepAbandoned()
                 if await self._try(runs, needs):
                     break
                 if self.refusal or (self._can_park and self.wait):
@@ -154,7 +162,13 @@ class Placement:
             while True:
                 try:
                     got = await runs.hub.claim(
-                        runner, self._repos, self._key, needs=needs, wait=False, exclude=exclude
+                        runner,
+                        self._repos,
+                        self._key,
+                        needs=needs,
+                        wait=False,
+                        exclude=exclude,
+                        group=self._concurrency_group,
                     )
                 except PlacementRefused as exc:
                     if not local_ok:
@@ -167,10 +181,45 @@ class Placement:
                     self.held, self.runner = got, runner if pinned else self._group
                     return True
                 exclude.add(got.machine)
-        if local_ok and link is not None and link.connected and link.take(self._key):
+        if (
+            local_ok
+            and link is not None
+            and link.connected
+            and link.take(self._key, self._concurrency_group)
+        ):
             self.held_local, self.runner = self._key, placement.LOCAL
             return True
         self.wait = f"waiting for {pinned}" if pinned else f"waiting for a machine in {self._group}"
+        if self._concurrency_group and remote_ok:  # a held group is the reason worth saying
+            verdict = runs.hub.decide(
+                pinned or self._group,
+                self._repos,
+                pinned=pinned,
+                needs=needs,
+                concurrency_group=self._concurrency_group,
+            )
+            if verdict.group_held:
+                self.wait = verdict.wait
+        if (
+            self._concurrency_group
+            and local_ok
+            and not self.wait.startswith("waiting for test group ")
+        ):
+            # The group is held only by the local worker: the remote verdict above cannot
+            # say so, and "waiting for a machine" names neither the group nor its holder.
+            # Only when the step may run there: a local worker outside the runner group
+            # cannot be what it waits for (it holds another scope of the same group).
+            if link is not None and (
+                holder := link.group_holder(self._concurrency_group, self._key)
+            ):
+                try:
+                    item = ids.parse_session_ref(holder)[0] or holder
+                except ValueError:  # a key that is not `<item>/<session>`: name it as it is
+                    item = holder
+                self.wait = (
+                    f"waiting for test group {self._concurrency_group}: "
+                    f"{item} is running it on local"
+                )
         return False
 
     def _mounts(self) -> list[str]:
@@ -232,6 +281,8 @@ async def placed(
     can_park: bool,
     needs: Mapping[str, str] | Collection[str] = frozenset(),
     pin_node: bool = False,
+    concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ) -> AsyncIterator[Placement]:
     """Place a step whose `runner` is a group around its launch, and give back whatever the
     launch did not take over, however it ends. See `Placement`. `pin_node`: a resumed step goes
@@ -239,6 +290,7 @@ async def placed(
     p = Placement(
         db, row, node_id, hook_point, runner, repos,
         session_key=session_key, resume=resume, can_park=can_park, pin_node=pin_node,
+        concurrency_group=concurrency_group, abandon=abandon,
     )  # fmt: skip
     try:
         await p.choose(needs)
@@ -271,6 +323,8 @@ async def run_placed(
     resume: bool,
     attempt,
     pin_node: bool = False,
+    concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ):
     """`await attempt(runner, claim, waited_s)` for a launch that cannot park (an escalation turn,
     a review): placed on a group's member first when `runner` names a group, and placed again
@@ -280,7 +334,8 @@ async def run_placed(
     async with placed(
         db, row, node_id, hook_point, runner, repos,
         session_key=ids.session_ref(row["id"], session_id),
-        resume=resume, can_park=False, pin_node=pin_node,
+        resume=resume, can_park=False, pin_node=pin_node, concurrency_group=concurrency_group,
+        abandon=abandon,
     ) as p:  # fmt: skip
         while True:
             try:
@@ -300,6 +355,9 @@ async def claim(
     time_cap,
     needs: Mapping[str, str] | Collection[str] = (),
     held: Claim | None = None,
+    hook_point: str = "",
+    concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ):
     """`(claim, refusal, time_cap)`. `held` is a slot `placed` already took and reserved: it is
     returned as it is. A refusal is text for the session's log; a wait is a
@@ -339,7 +397,16 @@ async def claim(
     try:
         while True:
             try:
-                got = await runs.hub.claim(runner, repos, key, pinned=pinned, needs=needs)
+                got = await runs.hub.claim(
+                    runner,
+                    repos,
+                    key,
+                    pinned=pinned,
+                    needs=needs,
+                    group=concurrency_group,
+                    abandon=abandon,
+                    on_wait=lambda text: _note(db, work_item_id, node_id, hook_point, text),
+                )
             except PlacementRefused as exc:
                 return None, str(exc), time_cap
             if protocol.RESERVE not in runs.hub.caps(got.machine):

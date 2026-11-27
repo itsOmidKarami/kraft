@@ -140,6 +140,9 @@ class Override(_Change):
     effort: StrictStr | None = None
     timeout_minutes: StrictInt | None = None
     max_attempts: StrictInt | None = None
+    reply_cap_per_thread: StrictInt | None = None
+    reply_rounds_per_head: StrictInt | None = None
+    reply_timeout_minutes: StrictInt | None = None
     time_cap_minutes: StrictInt | None = None
     total_time_cap_minutes: StrictInt | None = None
     token_budget: StrictInt | None = None

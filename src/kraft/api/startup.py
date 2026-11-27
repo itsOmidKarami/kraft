@@ -193,7 +193,8 @@ async def _probation_timer(app: FastAPI) -> None:
 async def end_probation(app: FastAPI) -> bool:
     """The new server has shown it can run: start the walks and pollers it held
     back, say the update was applied and drop the record. False when it was not
-    on probation. The snapshot stays `KEEP_SNAPSHOT_S` more, then goes."""
+    on probation. Its snapshot stays, as the way back, until the next update
+    is confirmed; any older one goes."""
     st = app.state
     if not st.probation:
         return False
@@ -213,15 +214,7 @@ async def end_probation(app: FastAPI) -> bool:
     when_free.clear_rollback(run_dirs)
     snapshot = record.get("config_snapshot")
     if snapshot:
-        keep_for = when_free.KEEP_SNAPSHOT_S
-        folder = str(Path(snapshot).parent)
-
-        async def drop() -> None:
-            await asyncio.sleep(keep_for)
-            await asyncio.to_thread(when_free.delete_snapshots, run_dirs)
-
-        st.snapshot_task = asyncio.ensure_future(drop())
-        when_free.delete_snapshots(run_dirs, keep=folder)
+        when_free.delete_snapshots(run_dirs, keep=str(Path(snapshot).parent))
     return True
 
 
@@ -578,13 +571,10 @@ async def _lifespan(app: FastAPI):
     for name in BACKGROUND_TASKS:
         setattr(app.state, name, None)
     app.state.probation_task = None
-    app.state.snapshot_task = None
     if app.state.probation:
         app.state.probation_task = asyncio.ensure_future(_probation_timer(app))
     else:
         start_background(app)
-        # Leftovers of an attempt that was confirmed or never made.
-        when_free.delete_snapshots(run_dirs, older_than_s=when_free.KEEP_SNAPSHOT_S)
     try:
         yield
     finally:
@@ -602,7 +592,6 @@ async def _lifespan(app: FastAPI):
         for task in (
             live_intake_task,
             app.state.probation_task,
-            app.state.snapshot_task,
             app.state.rate_limit_task,
             app.state.trigger_task,
             app.state.wait_task,

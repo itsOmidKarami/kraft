@@ -241,13 +241,9 @@ async def ensure_repo(
 async def update_repo(path: str, fields: dict) -> dict:
     """Change a connected repo's `fields` (`PATCH /repos`); the entry as saved."""
     response = await transport._send("PATCH", "/repos", params={"path": path}, json=fields)
-    try:
-        body = response.json() if response.content else {}
-    except ValueError:
-        body = {"detail": response.text}
     if response.status_code >= 400:
-        raise transport.status_error(response.status_code, str(body.get("detail", body)))
-    return body
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def _connected_path(path: str | None) -> str:
@@ -363,6 +359,26 @@ async def pause(work_item_id: str | None = None) -> dict:
     """Stop the running node's sessions. Only an active item can be paused."""
     target = await context._forbid_self_action(work_item_id)
     return await transport._act(f"/work-items/{transport.segment(target)}/pause")
+
+
+async def takeover_begin(work_item_id: str | None, *, pid: int, pid_start: float) -> dict:
+    """Take the lock a person's own agent session holds on a stopped item, for
+    the process `pid` (the `kraft item takeover` CLI, never the agent). Answers
+    the command to run, `{argv, cwd, session_id, resumed_from}`. No MCP tool: a
+    takeover is a terminal's."""
+    target = await context._forbid_self_action(work_item_id)
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/takeover",
+        {"pid": pid, "pid_start_time": pid_start},
+    )
+
+
+async def takeover_end(work_item_id: str | None = None) -> dict:
+    """End the item's takeover, whoever holds it: `{status, recorded, warnings}`.
+    Also the way out of a lock a crashed CLI left."""
+    target = await context._forbid_self_action(work_item_id)
+    answer = await transport._delete(f"/work-items/{transport.segment(target)}/takeover")
+    return answer if isinstance(answer, dict) else {}
 
 
 async def unblock(work_item_id: str | None = None, dependency: str | None = None) -> dict:
@@ -700,7 +716,8 @@ async def set_node_overrides(
     chain template sets per node -- without touching either of those -- plus
     the `model`/`effort` its agent tasks launch with and an `extra_prompt`
     appended to each of their instructions (Kraft-a7ers), and the `reviewers`
-    its automated-review wait reads, over the repository's. `clear`
+    its automated-review wait reads (each `{bot: LOGIN, replies, resolve_fixed}` or
+    `{check: NAME}`), over the repository's. `clear`
     sends `{}` for this node, dropping its overrides back to the template;
     naming a field sets it and keeps the node's other fields, as it always
     has (the PATCH route merges a node's fields). 409s once the node has
@@ -742,7 +759,9 @@ async def set_work_item_policy(
     policy: dict | None = None, *, clear: bool = False, work_item_id: str | None = None
 ) -> dict:
     """Set or clear a work item's own policy override (Kraft-ab1bh): item-wide
-    fields (`max_attempts`, `timeout_minutes`, `allowed_harnesses`; the time
+    fields (`max_attempts`, `timeout_minutes`, `allowed_harnesses`, the reply
+    limits `reply_cap_per_thread`, `reply_rounds_per_head` and
+    `reply_timeout_minutes`; the time
     caps `time_cap_minutes` and `total_time_cap_minutes`, and the safety
     fields, which only tighten) plus
     `paths: {canonical path: {field: value}}` for one node, step or task. It

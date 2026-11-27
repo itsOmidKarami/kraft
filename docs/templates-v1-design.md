@@ -351,6 +351,20 @@ tasks:
       Never drop the -x line, never skip a commit, never abort. If you cannot
       resolve it, stop and say why: a person takes it from there.
 
+  # Opt-in `on_base_changed.on_conflict` handler: the base moved and Kraft's own
+  # rebase conflicted while the item waited on CI. The note it is sent with
+  # names the branch, both bases, what landed upstream and the rebase to re-run.
+  # No chain of ours names it; a chain that wants it says so.
+  resolve_rebase_conflict:
+    kind: agent
+    harness: claude
+    profile: strong
+    prompt: >-
+      Re-run the rebase the note names and resolve each conflict so both this
+      branch's work and what landed upstream survive. Finish the rebase and
+      leave the branch on the new base. If you cannot resolve it, report
+      status: failed and say why: a person takes it from there.
+
   strict_judge:
     kind: agent
     harness: claude
@@ -396,8 +410,9 @@ tasks:
     scope: each_repository
     policy:
       total_time_cap_minutes: 30
-    wait:
+    config:
       grace_period: 60s
+    wait:
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -472,13 +487,10 @@ nodes:
     kind: exec
     steps:
       - id: tests
-        tasks:
-          - id: test_changed_scopes
-            extends: verify_changed_scopes
+        tasks: [{id: test_changed_scopes, extends: verify_changed_scopes}]
       - id: review
-        tasks:
-          - id: code_review
-            extends: code_review
+        read_only: true
+        tasks: [{id: code_review, extends: code_review}]
     fix_loop:
       tasks:
         - id: repair
@@ -491,39 +503,33 @@ nodes:
   post_draft_feedback:
     kind: exec
     steps:
-      - id: ci
-        tasks:
-          - id: await_ci
-            extends: await_mr_ci
       - id: automated_review
         tasks:
           - id: await_review
             extends: await_automated_review
+            # This node's own: the library task keeps watch_ci off and 30 minutes.
+            config:
+              watch_ci: true
+            policy:
+              total_time_cap_minutes: 10
       - id: review_feedback
         read_only: true
-        tasks:
-          - id: triage
-            extends: triage_review_feedback
+        tasks: [{id: triage, extends: triage_review_feedback}]
+      - id: ci
+        tasks: [{id: await_ci, extends: await_mr_ci}]
     on_failure:
       steps:
         - id: repair
-          tasks:
-            - id: repair_feedback
-              extends: repair_mr_checks
+          tasks: [{id: repair_feedback, extends: repair_mr_checks}]
         - id: sync
-          tasks:
-            - id: sync_mr
-              extends: sync_draft_mr
+          tasks: [{id: sync_mr, extends: sync_draft_mr}]
     fix_loop:
+      early: true
       steps:
         - id: repair
-          tasks:
-            - id: repair
-              extends: repair_mr_feedback
+          tasks: [{id: repair, extends: repair_mr_feedback}]
         - id: sync
-          tasks:
-            - id: sync
-              extends: sync_draft_mr
+          tasks: [{id: sync, extends: sync_draft_mr}]
       judge:
         id: judge
         extends: strict_judge
@@ -576,6 +582,10 @@ nodes:
     message: Review and approve the specification.
     artifact: spec
     reject_to: spec
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: plan
     kind: exec
@@ -588,6 +598,10 @@ nodes:
     message: Review and approve the implementation plan.
     artifact: plan
     reject_to: plan
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   # The chain was chosen at intake, before the spec and plan
   # existed. Now both are approved, one agent reads them against the nodes
@@ -604,6 +618,10 @@ nodes:
     message: Review the proposed change to the rest of this chain.
     artifact: chain_revision
     reject_to: chain_revision
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: implementation
     extends: implementation
@@ -622,6 +640,10 @@ nodes:
     message: Approve creating a draft merge request.
     artifact: work_brief
     reject_to: implementation
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   # Its own node, not a task before `open`: a node wholly produces one kind or
   # declares none, and `open` produces nothing.
@@ -638,13 +660,9 @@ nodes:
     kind: exec
     steps:
       - id: rebase
-        tasks:
-          - id: rebase
-            extends: mr_rebase
+        tasks: [{id: rebase, extends: mr_rebase}]
       - id: open
-        tasks:
-          - id: open
-            extends: open_draft_mr
+        tasks: [{id: open, extends: open_draft_mr}]
 
   - id: merge_request_feedback
     extends: post_draft_feedback
@@ -663,6 +681,10 @@ nodes:
     message: Review the complete work item and merge-request summary.
     artifact: review_brief
     reject_to: implementation
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: mark_ready
     kind: exec

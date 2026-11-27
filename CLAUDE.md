@@ -9,7 +9,7 @@ just setup      # uv sync + npm ci; Kraft workers run `just setup setup-plugins`
 just setup-plugins  # superpowers, impeccable and the other plugins for every agent (opt-in)
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend typecheck + unit tests
-just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
+just test-py 3.12  # the unit tier on another Python (CI runs 3.12 to 3.15); `requires-python` is the floor
 just lint       # ruff check + format check
 just vale       # docs style: British spelling, contractions, one word per term
 ```
@@ -53,9 +53,9 @@ item title (or description) containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its o
 ### The `kraft` command
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
-non-MCP agent gets the same surface; `item abandon`, `item archive` and
-`item restore` are the `item` verbs with no tool. `--json` prints the raw API
-payload on every verb except `console`, `view watch`, `repo path`, and the `admin` ones
+non-MCP agent gets the same surface; `item abandon`, `item archive`,
+`item restore` and `item takeover` are the `item` verbs with no tool. `--json` prints the raw API
+payload on every verb except `console`, `view watch`, `repo path`, `item takeover` (interactive; `--release` accepts it), and the `admin` ones
 that manage the server process (`start`, `stop`, `restart`, the service verbs,
 `update`, `mcp`, `permission-hook`), `admin addon enable` and `disable`, and
 `admin init` (it accepts `--json` and
@@ -74,6 +74,7 @@ kraft item retry [ID] [--steer "..."] [--sandbox-from-config [--yes]]  # the onl
 kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped it (its own or its policy's), and retry
 kraft item skip [ID] [--head H] [--note "..."]  # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
+kraft item takeover [ID] [--release]      # open a stopped item's Claude Code session yourself, in its worktree; --release frees a lock a killed terminal left
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --reason "..." --yes  # drop an item, deleting its worktree and branch; the reason is kept and closes its bead
 kraft item archive [ID ...] [--reclaimable] [--yes]  # archive finished items, deleting their worktrees; previews, then needs --yes
@@ -82,7 +83,7 @@ kraft item set-chain [ID] --chain C | --chain-file P  # a not-yet-started item's
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
 kraft item mr-label LABEL...                # label this item's merge request
-kraft item rerun-ci [ID] --reason "..."      # a fix-loop repair re-runs CI that failed outside the code
+kraft item rerun-ci [ID] --reason "..."      # re-run CI that failed outside the code: a fix-loop repair, or you on a fix loop or ci.pipeline wait stopped for you (then retries)
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
@@ -95,7 +96,7 @@ kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N] [--agent ID|main]  # a worker session's log; --json is NDJSON
 kraft view storage                          # worktree disk use against the quota and limit, item by item
-kraft view events [ID] [--after N] [--type T]
+kraft view events [ID] [--after N] [--type T] [--all -f]  # --all: every item's events from now, NDJSON with --json
 kraft view watch                            # live board, needs a terminal
 kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown (in place: commits only, no untracked)
 kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
@@ -217,7 +218,7 @@ under a heading or at a cell's end. A heading that is an old one under a new
 name gets `<!-- renamed from: Old heading -->` instead, and text newly written
 about something the latest release already shipped gets `<!-- not new: why -->`.
 `dev/check_docs_added_in.py` fails `lint` on a new heading with neither.
-CONTRIBUTING.md's "User-facing docs" has the details.
+docs/writing-docs.md's "Page rules" has the details.
 
 ### The test tree mirrors the source tree
 

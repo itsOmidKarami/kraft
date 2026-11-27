@@ -21,6 +21,7 @@ from support.api import (
     _post_default,
     _set_status,
     _status_of,
+    assert_refusal_hides_the_override,
 )
 
 from kraft.adapters.forge import ForgeError
@@ -526,8 +527,9 @@ def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
         ({}, True),
         ({"X-Kraft-Session-Id": "w-other/s-worker"}, False),
         ({"X-Kraft-Client": "mcp"}, False),
+        ({"X-Kraft-Client": "agent-shell"}, False),
     ],
-    ids=["person", "worker", "mcp-assistant"],
+    ids=["person", "worker", "mcp-assistant", "shell-agent"],
 )
 def test_only_a_persons_retry_resets_a_cap_counter(client, repo, headers, by_person):
     """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the route asks
@@ -547,6 +549,46 @@ def test_only_a_persons_retry_resets_a_cap_counter(client, repo, headers, by_per
     resets = [e["payload"] for e in evts if e["type"] == "cap_counters_reset"]
     expected = {"by": "human", "counters": {"ci_infra:merge_request_feedback": 2}}
     assert resets == ([expected] if by_person else [])
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        (
+            "post",
+            lambda wid, repo: f"/api/work-items/{wid}/retry",
+            lambda wid, repo: {"sandbox_from_config": True},
+        ),
+        (
+            "put",
+            lambda wid, repo: f"/api/work-items/{wid}/draft",
+            lambda wid, repo: {
+                "ops": [
+                    {
+                        "op": "override",
+                        "path": "work_brief.main.author",
+                        "task_config": {"prompt": "x"},
+                    }
+                ]
+            },
+        ),
+        (
+            "patch",
+            lambda wid, repo: f"/api/repos?path={repo}",
+            lambda wid, repo: {"forge_account": "corp"},
+        ),
+    ],
+    ids=["retry-sandbox-from-config", "chain-draft", "repo-forge-account"],
+)
+def test_a_refused_person_only_call_does_not_name_the_override(client, repo, method, url, body):
+    wid = _post_default(client, repo)
+    # Connected by a person, so a PATCH reaches the guard instead of a 404.
+    connected = client.post("/api/repos", json={"path": str(repo), "test_command": "pytest"})
+    path = connected.json()["path"]
+    r = getattr(client, method)(
+        url(wid, path), json=body(wid, path), headers={"X-Kraft-Client": "agent-shell"}
+    )
+    assert_refusal_hides_the_override(r)
 
 
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):

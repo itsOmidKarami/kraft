@@ -7,13 +7,24 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, escalate, events, executor, inplace, reviewed_head, storage, store
+from kraft import (
+    caps,
+    ci_reruns,
+    escalate,
+    events,
+    executor,
+    inplace,
+    reviewed_head,
+    storage,
+    store,
+)
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft import slices as slice_plans
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
+from kraft.api.schemas import WorkItemDetail, WorkItemList
 from kraft.cap_levels import SCOPE_CAP_FIELDS
 from kraft.slices import SliceSplit, parse_slices
 from kraft.templates.forks import ChainPath
@@ -288,6 +299,16 @@ def raisable(stop_payload: dict | None) -> bool:
     return scope == "work_item" or (scope == "usd" and budget.get("path") == "")
 
 
+def _ci_rerunnable(row, chain) -> bool:
+    """Whether `POST /ci-rerun` takes a person's re-run of the item now: a fix
+    loop stopped for them on merge-request CI, or a stop at a `ci.pipeline`
+    wait's red or broken pipeline."""
+    node = ci_reruns.node_of(chain, row["current_node_id"])
+    if ci_reruns.waits_on_mr_ci(node):
+        return ci_reruns.stopped_for_a_person(row)
+    return bool(ci_reruns.pipeline_waits(node)) and ci_reruns.pipeline_stopped_for_a_person(row)
+
+
 def item_actions(
     app,
     row,
@@ -332,6 +353,7 @@ def item_actions(
         budget_stop=bool((stop_payload or {}).get("budget")),
         raisable=raisable(stop_payload),
         mr_closed=row["stop_kind"] == StopKind.MR_CLOSED and mr_ref is not None,
+        ci_rerunnable=chain is not None and _ci_rerunnable(row, chain),
         walk_live=deps.task_is_live(app, row["id"]),
         escalation_live=escalation_live,
         agent_paused=agent_paused,
@@ -358,8 +380,11 @@ async def budget_today(request: Request):
     return {"spent_usd": spent_usd, "cap_usd": budget.daily_usd}
 
 
-@api_router.get("/work-items")
+@api_router.get("/work-items", responses={200: {"model": WorkItemList}})
 async def list_work_items(request: Request):
+    """The board: every top-level work item with its status and current node. Archived items
+    are left out unless `archived=true`, which lists only them; abandoned ones need
+    `include_abandoned=true`."""
     st = request.app.state
     # Read outside `_read`: that closure runs on the database thread and has no
     # request to ask.
@@ -1471,8 +1496,10 @@ _ENDINGS = (
 )
 
 
-@api_router.get("/work-items/{wid}")
+@api_router.get("/work-items/{wid}", responses={200: {"model": WorkItemDetail}})
 async def get_work_item(wid: str, request: Request):
+    """One work item: its status, chain, current node, pending gate, cost and links. The object
+    a client reads most."""
     from kraft.api.routes import lifecycle
 
     st = request.app.state
@@ -1594,6 +1621,9 @@ async def get_work_item(wid: str, request: Request):
         # What started each pass after a node's first, for the nodes that ran
         # more than once: one pass is nothing to tell apart.
         "node_passes": {node: ps for node, ps in passes[1].items() if len(ps) > 1},
+        # Every round of every gate (`store.gate_rounds`), read from the events
+        # table, not the page's window of the newest events.
+        "gate_rounds": st.db.read(lambda c: store.gate_rounds(c, wid)),
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), kept once it
         # stops on the implementation node or finishes it; None before that node
@@ -1718,6 +1748,7 @@ async def get_events(
     before_seq: int | None = None,
     limit: int | None = None,
 ):
+    """The item's event log in order, a page at a time with `after_seq` or `before_seq`."""
     st = request.app.state
     deps._work_item_row(st, wid)
     if after_seq is not None and before_seq is not None:
@@ -1733,6 +1764,8 @@ async def get_events(
 
 @api_router.get("/work-items/{wid}/documents")
 async def get_work_item_documents(wid: str, request: Request):
+    """The documents this item has produced or was filed with: specs, plans, review briefs and
+    session summaries."""
     st = request.app.state
     deps._work_item_row(st, wid)  # 404s on an unknown work item
     return {"work_item_id": wid, "documents": st.indexer.documents_for_work_item(wid)}

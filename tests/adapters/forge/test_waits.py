@@ -43,8 +43,10 @@ def _trail(run_forge, task="on.ci.poll") -> list[tuple[str, str | None, str | No
     [
         (forge.ForgeError("glab fell over"), "failed"),
         (forge.CliUnavailable("glab is not installed or not on PATH"), "config_error"),
+        # git_auth.stamp names a refused token on an error that read as a drop.
+        (forge.ForgeError("refused", reason="auth", no_answer=True), "failed"),
     ],
-    ids=["flaky", "cannot-start"],
+    ids=["flaky", "cannot-start", "stamped-a-refused-token"],
 )
 async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge, error, status):
     """A flaky CLI lands as a failed node, a CLI that never started as a stop for a

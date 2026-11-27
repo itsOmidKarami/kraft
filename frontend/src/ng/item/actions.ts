@@ -27,6 +27,8 @@ export const act = {
   restore: (id: string) => post(`${at(id)}/restore`),
   duplicate: (id: string) => post<{ id: string; duplicate_warning?: string }>(`${at(id)}/duplicate`),
   reopenMr: (id: string) => post(`${at(id)}/reopen-mr`),
+  /** A fix loop stopped on CI that failed outside the code: re-run the failed jobs, then retry. */
+  rerunCi: (id: string) => post(`${at(id)}/ci-rerun`, { reason: "re-run by a person: CI failed outside the code" }),
   openWorktree: (id: string) => post(`${at(id)}/open-worktree`, { editor: null }),
   /** A budget stop's way on: raise the cap and retry in one call. */
   raiseBudget: (id: string, budgetUsd: number | null) => post(`${at(id)}/budget/raise`, { budget_usd: budgetUsd }),

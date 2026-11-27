@@ -127,9 +127,9 @@ async def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unkno
     assert result[0] == "waiting"
 
 
-async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
-    run_forge, item_on, database, repo, tmp_path, monkeypatch
-):
+async def _items_on_the_merge(run_forge, item_on, database, repo, tmp_path, monkeypatch):
+    """w2 (active) and w4 (waiting) stand on the merged commit, w3 on another;
+    w2 has a live session. Returns `(items, tracker, signalled)`."""
     from kraft.worker import reattach
 
     signalled = []
@@ -161,12 +161,24 @@ async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken
         lambda c: c.execute("UPDATE work_items SET current_node_id = 'mr_checks' WHERE id = 'w2'")
     )
     await items["w2"].session("s2", "mr_checks.main.ci", running=(4242, 1.0))
-    fake = forge.FakeForge(
+    return items, tracker, signalled
+
+
+def _failed(*names):
+    return forge.FakeForge(
         ci_states=["failed"],
-        ci_failed_jobs=[(forge.FailedJob("build", "failed", "script_failure"),)],
+        ci_failed_jobs=[tuple(forge.FailedJob(n, "failed", "script_failure") for n in names)],
     )
 
-    assert (await run_forge(fake, "merge_watch", repo=repo))[0] == "done"
+
+async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
+    run_forge, item_on, database, repo, tmp_path, monkeypatch
+):
+    items, tracker, signalled = await _items_on_the_merge(
+        run_forge, item_on, database, repo, tmp_path, monkeypatch
+    )
+
+    assert (await run_forge(_failed("build"), "merge_watch", repo=repo))[0] == "done"
 
     assert {w: it.status() for w, it in items.items()} == {
         "w2": "paused",
@@ -178,6 +190,56 @@ async def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken
     assert signalled == [4242]
     filed = await beads.search("post-merge", cwd=str(tracker))
     assert any("post-merge pipeline broke" in b["title"] for b in filed), filed
+
+
+@pytest.mark.parametrize(
+    ("failed", "publish_jobs", "paused", "bead_title", "log_line"),
+    [
+        (("deploy",), (), True, "post-merge pipeline broke", None),
+        (
+            ("deploy",),
+            ("deploy", "deploy-*"),
+            False,
+            "post-merge publish failed",
+            "only publish job(s) failed (deploy)",
+        ),
+        (("build", "deploy"), ("deploy", "deploy-*"), True, "post-merge pipeline broke", None),
+    ],
+    ids=["default-pauses", "configured-glob-exempts", "mixed-still-pauses"],
+)
+async def test_merge_watch_pauses_items_unless_only_publish_jobs_failed(
+    run_forge,
+    item_on,
+    database,
+    repo,
+    tmp_path,
+    monkeypatch,
+    failed,
+    publish_jobs,
+    paused,
+    bead_title,
+    log_line,
+):
+    items, tracker, signalled = await _items_on_the_merge(
+        run_forge, item_on, database, repo, tmp_path, monkeypatch
+    )
+
+    result = await run_forge(
+        _failed(*failed), "merge_watch", repo=repo, post_merge_publish_jobs=publish_jobs
+    )
+
+    assert result[0] == "done"
+    assert {w: it.status() for w, it in items.items()} == (
+        {"w2": "paused", "w3": "active", "w4": "paused"}
+        if paused
+        else {"w2": "active", "w3": "active", "w4": "waiting"}
+    )
+    assert bool(items["w2"].events("paused_by_broken_base")) is paused
+    assert signalled == ([4242] if paused else [])
+    filed = await beads.search("post-merge", cwd=str(tracker))
+    assert any(bead_title in b["title"] for b in filed), filed
+    if log_line:
+        assert log_line in run_forge.log("s1")
 
 
 async def test_merge_watch_does_not_pin_a_pipeline_read_for_a_different_commit(run_forge, repo):

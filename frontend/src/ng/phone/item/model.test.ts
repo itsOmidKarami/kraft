@@ -49,12 +49,20 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     // A paused item's Steer is a resume with the note.
     ["paused, the server refusing resume", mk("paused", null, { actions: ["steer", "skip", "cancel"] }), [null, null]],
     ["failed, the server refusing escalate", mk("failed", stop("failed"), { actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    // A `ci.pipeline` wait's red pipeline: Re-run CI leads, as on a stuck stop.
+    ["failed, the server admitting rerun_ci", mk("failed", stop("failed"), { actions: ["retry", "rerun_ci", "complete", "cancel"] }), ["retry", "rerun-ci"]],
     ["gate, the server refusing reject", mk("needs_you", stop("gate", { node: "plan_approval" }), { actions: ["approve"] }), [null, "review"]],
     // A budget the item could raise, which the server will not: Retry, as on a cap it cannot raise.
     ["budget, the item's own cap, the server refusing raise_budget", mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
     ["mr closed, the server refusing reopen_mr", mk("needs_you", stop("mr_closed"), { actions: ["cancel"] }), [null, "cancel"]],
     // No merge request on file to reopen: Retry, as the desktop header falls back.
     ["mr closed, nothing on file to reopen", mk("needs_you", stop("mr_closed"), { actions: ["retry", "skip", "escalate", "complete", "cancel"] }), ["cancel", "retry"]],
+    // A fix loop stopped on CI that failed outside the code: Re-run CI where the server takes it, which retries.
+    ["stuck, the server admitting rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] }), ["retry", "rerun-ci"]],
+    ["stuck, the server refusing rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "escalate", "cancel"] }), ["escalate", "retry"]],
+    // At its cap on CI: Re-run CI in Steer's place, the raise or Retry still the way on.
+    ["cap, the server admitting rerun_ci", mk("needs_you", stop("cap"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] }), ["rerun-ci", "retry"]],
+    ["cap, the server refusing rerun_ci", mk("needs_you", stop("cap"), { actions: ["retry", "escalate", "cancel"] }), ["steer", "retry"]],
     ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 
@@ -86,10 +94,15 @@ describe("kebabOf", () => {
     expect(k.map((a) => a.id)).toEqual(["settings", "open-mr", "duplicate", "complete", "cancel"]);
     expect(k.at(-1)).toMatchObject({ id: "cancel", danger: true });
     expect(k.find((a) => a.id === "open-mr")?.label).toBe("Open MR !142");
+    // A GitHub pull request reads #N in the ⋮ sheet, as on the board row.
+    const kGh = kebabOf(mk("running", null, { mr_ref: { number: 142, url: "https://github.com/o/r/pull/142" } }));
+    expect(kGh.find((a) => a.id === "open-mr")?.label).toBe("Open MR #142");
   });
   it("does not repeat a button the bar has, and archives only an ended item", () => {
     expect(kebabOf(mk("failed", stop("failed"))).map((a) => a.id)).not.toContain("escalate");
     expect(kebabOf(mk("running", null)).map((a) => a.id)).not.toContain("archive");
+    // Re-run CI and Retry take the bar on a stuck stop the server re-runs: Escalate moves to ⋮, not away.
+    expect(kebabOf(mk("needs_you", stop("stuck"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] })).map((a) => a.id)).toContain("escalate");
     expect(kebabOf(mk("cancelled")).map((a) => a.id)).toContain("archive");
   });
   it.each([
@@ -155,11 +168,15 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });
+    expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "https://github.com/o/r/pull/7" } }))).toMatchObject({ tone: "ok", where: "MR #7 merged", text: undefined });
     expect(cardOf(mk("done"))).toMatchObject({ text: "The chain finished. No merge request was opened." });
   });
   it("names the closer of a closed MR, the reason of a cancel and a broken base from the events", () => {
     const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
     expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
+    // A GitHub pull request reads #N in the title, from the stop's URL or the item's MR ref.
+    expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142, url: "https://github.com/o/r/pull/142" } })), [ev("mr_closed", { by: "dana" })])?.title).toBe("MR #142 was closed on the forge");
+    expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } }), { mr_ref: { number: 142, url: "https://github.com/o/r/pull/142" } }), [ev("mr_closed", { by: "dana" })])?.title).toBe("MR #142 was closed on the forge");
     expect(cardOf(mk("cancelled"), [ev("work_item_cancelled", { reason: "wrong repo" })])?.facts).toContainEqual(["reason", "wrong repo"]);
     expect(cardOf(mk("cancelled", null, { ended_reason: "refiled as w9" }), [ev("work_item_abandoned", { reason: "refiled as w9" })]))
       .toMatchObject({ title: "Abandoned", facts: [["reason", "refiled as w9"]] });
@@ -233,7 +250,7 @@ describe("the failed card's cause (R15b-01)", () => {
 });
 
 describe("nodeSub: a chain row's words", () => {
-  const graph = (i: ReturnType<typeof detail>) => chainGraph(i, [], Date.parse("2026-09-13T10:00:00Z")).nodes;
+  const graph = (i: ReturnType<typeof detail>) => chainGraph(i, Date.parse("2026-09-13T10:00:00Z")).nodes;
   // R15b-03: a gate skipped with `kraft item skip` was never approved, here as in its review path.
   it.each([
     ["approved by you reads approved", false, "approved"],

@@ -210,7 +210,8 @@ def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
     ci = "merge_request_feedback.ci.await_ci"
     cli.main(["item", "create", "t", "--policy", "max_attempts=3",
               "--policy", f"{ci}.total_time_cap_minutes=60",
-              "--policy", "deny_tools=[WebFetch]", "--json"])  # fmt: skip
+              "--policy", "deny_tools=[WebFetch]", "--policy", "reply_timeout_minutes=3",
+              "--json"])  # fmt: skip
     wid = json.loads(capsys.readouterr().out)["id"]
 
     def stored():
@@ -220,6 +221,7 @@ def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
     assert stored() == {
         "max_attempts": 3,
         "deny_tools": ["WebFetch"],
+        "reply_timeout_minutes": 3,
         "paths": {ci: {"total_time_cap_minutes": 60}},
     }
     cli.main(["item", "set-policy", wid, "--policy", "verification.max_attempts=2", "--json"])

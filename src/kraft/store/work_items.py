@@ -1210,6 +1210,45 @@ def set_current_step(conn: sqlite3.Connection, work_item_id: str, step: int) -> 
     conn.execute("UPDATE work_items SET current_step = ? WHERE id = ?", (step, work_item_id))
 
 
+def begin_measurement(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    node_id: str,
+    round: int,
+    *,
+    since: int | None = None,
+) -> None:
+    """Open a measurement of a node whose fix loop starts early.
+
+    Stored as JSON `{node_id, round, since}`: the round it runs at, and the
+    events `seq` it began after, which is what finds the record it later amends.
+    `since` defaults to the newest event's `seq`."""
+    if since is None:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+        since = row[0]
+    stored = json.dumps({"node_id": node_id, "round": round, "since": since})
+    conn.execute("UPDATE work_items SET measurement = ? WHERE id = ?", (stored, work_item_id))
+
+
+def end_measurement(conn: sqlite3.Connection, work_item_id: str) -> None:
+    """Close the item's open measurement (its record is written, or it completed)."""
+    conn.execute("UPDATE work_items SET measurement = NULL WHERE id = ?", (work_item_id,))
+
+
+def stored_measurement(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
+    """The stored measurement with the step cursor as `"step"`, or None.
+
+    Raw: whether it still counts as open is `dispatch.open_measurement`'s call."""
+    row = conn.execute(
+        "SELECT measurement, current_step FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row is None or row["measurement"] is None:
+        return None
+    return {**json.loads(row["measurement"]), "step": row["current_step"]}
+
+
 def set_ci_pipeline_ref(conn: sqlite3.Connection, work_item_id: str, ref: str) -> None:
     """Pin `on.ci.poll` to the pipeline it last saw, stored as
     "<head_sha>:<pipeline_id>" (Kraft-ivh1). GitLab only -- GitHub's
@@ -1239,6 +1278,64 @@ def set_escalation_session(
     conn.execute(
         "UPDATE work_items SET escalation_session_id = ?, updated_at = ? WHERE id = ?",
         (cli_session_id, _now(), work_item_id),
+    )
+
+
+_TAKEOVER_COLUMNS = (
+    "takeover_pid, takeover_pid_start, takeover_session_id, takeover_resumed_from, "
+    "takeover_branch, takeover_tip, takeover_started_at"
+)
+
+
+def take_takeover_lock(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    *,
+    pid: int,
+    pid_start: float,
+    session_id: str,
+    resumed_from: str | None,
+    branch: str,
+    tip: str,
+) -> None:
+    """Record that a person has the item's agent session open (`kraft item
+    takeover`). The CLI's own `pid` holds it, never the agent's: closing the
+    terminal hangs up both. The caller has already refused a second one, in the
+    same write."""
+    conn.execute(
+        "UPDATE work_items SET takeover_pid = ?, takeover_pid_start = ?, "
+        "takeover_session_id = ?, takeover_resumed_from = ?, takeover_branch = ?, "
+        "takeover_tip = ?, takeover_started_at = ? WHERE id = ?",
+        (pid, pid_start, session_id, resumed_from, branch, tip, _now(), work_item_id),
+    )
+
+
+def takeover_lock(conn: sqlite3.Connection, work_item_id: str) -> sqlite3.Row | None:
+    """The item's `takeover_*` columns, or None when no takeover holds it.
+    Raw: whether the pid behind it is alive is `takeover.live`'s call."""
+    row = conn.execute(
+        f"SELECT {_TAKEOVER_COLUMNS} FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    return row if row is not None and row["takeover_pid"] is not None else None
+
+
+def clear_takeover_lock(conn: sqlite3.Connection, work_item_id: str) -> None:
+    conn.execute(
+        "UPDATE work_items SET takeover_pid = NULL, takeover_pid_start = NULL, "
+        "takeover_session_id = NULL, takeover_resumed_from = NULL, takeover_branch = NULL, "
+        "takeover_tip = NULL, takeover_started_at = NULL WHERE id = ?",
+        (work_item_id,),
+    )
+
+
+def set_cli_session_id(
+    conn: sqlite3.Connection, work_item_id: str, session_row_id: str, cli_session_id: str
+) -> None:
+    """Leave a takeover's CLI session on the paused worker row it forked from,
+    so the next resume continues it (`dispatch._resumable_session`)."""
+    conn.execute(
+        "UPDATE worker_sessions SET cli_session_id = ? WHERE work_item_id = ? AND id = ?",
+        (cli_session_id, work_item_id, session_row_id),
     )
 
 

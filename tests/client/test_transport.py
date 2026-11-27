@@ -264,6 +264,11 @@ _ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
             httpx.Response(500, text="Internal Server Error"),
         ),
         (
+            lambda: client.update_repo("/r", {}),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, text="<html>proxy</html>"),
+        ),
+        (
             lambda: client.pause(work_item_id="w1"),
             client.Failure.BAD_RESPONSE,
             httpx.Response(200, text="<html>proxy</html>"),
@@ -279,6 +284,7 @@ _ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
         "blank-note",
         "no-item",
         "text-500",
+        "text-200-patch",
         "text-200-post",
         "update-not-object",
     ],
@@ -382,3 +388,49 @@ def test_a_remote_server_that_is_not_there_says_so_without_advice_for_this_machi
     with pytest.raises(client.ClientError) as caught:
         asyncio.run(client.transport._get("/work-items"))
     assert str(caught.value) == "no Kraft server at https://kraft.example:443"
+
+
+_DROPPED = ("CLAUDECODE", "AGENT", "AI_AGENT", "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX")
+
+
+@pytest.fixture
+def plain_env(monkeypatch):
+    """No KRAFT_CLIENT/KRAFT_SESSION_ID and none of the dropped variables, `CLAUDECODE` among
+    them: an IDE's terminal sets it for a person. The autouse fixture in `support.agent_shell`
+    clears it for every test too."""
+    for name in ("KRAFT_CLIENT", "KRAFT_SESSION_ID", *_DROPPED):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+@pytest.mark.parametrize(
+    "variable", ["CLAUDE_CODE_CHILD_SESSION"], ids=["claude-code-child-session"]
+)
+def test_agent_shell_environments_tag_the_call(plain_env, variable):
+    plain_env.setenv(variable, "1")
+    assert client.transport.http().headers["X-Kraft-Client"] == "agent-shell"
+
+
+@pytest.mark.parametrize(("explicit", "sent"), [("cli", "cli"), ("mcp", "mcp")], ids=["cli", "mcp"])
+def test_an_explicit_kraft_client_outranks_shell_detection(plain_env, explicit, sent):
+    plain_env.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    plain_env.setenv("KRAFT_CLIENT", explicit)
+    assert client.transport.http().headers["X-Kraft-Client"] == sent
+
+
+def test_a_plain_terminal_sends_no_client_header(plain_env):
+    assert "X-Kraft-Client" not in client.transport.http().headers
+
+
+@pytest.mark.parametrize("variable", _DROPPED)
+def test_dropped_agent_variables_do_not_tag_the_call(plain_env, variable):
+    plain_env.setenv(variable, "1")
+    assert "X-Kraft-Client" not in client.transport.http().headers
+
+
+def test_a_workers_session_id_is_sent_beside_shell_detection(plain_env):
+    plain_env.setenv("KRAFT_SESSION_ID", "w1/s1")
+    plain_env.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    headers = client.transport.http().headers
+    assert headers["X-Kraft-Session-Id"] == "w1/s1"
+    assert headers["X-Kraft-Client"] == "agent-shell"

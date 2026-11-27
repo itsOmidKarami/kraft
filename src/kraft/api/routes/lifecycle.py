@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,21 +28,29 @@ from kraft import (
     start_queue,
     storage,
     store,
+    takeover,
     when_free,
 )
+from kraft import harness as harness_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
-from kraft.api import api_router, deps, item_ids
+from kraft.api import api_router, deps, item_ids, perimeter
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
-from kraft.executor import gates, stops, walk
+from kraft.executor import dispatch, gates, stops, walk
 from kraft.executor import slices as slices_mod
 from kraft.policy import NO_CAP, PolicyError
 from kraft.remote import runs as remote_runs
 from kraft.templates.forks import ChainPath, PathError, override_record
-from kraft.templates.models import AgentTask, GateNode
+from kraft.templates.models import (
+    PATH_SEPARATOR,
+    AgentTask,
+    GateNode,
+    pipeline_variable,
+    resolve_reads,
+)
 from kraft.templates.retry import (
     AGENT_TASK_FIELDS,
     RetryOverrideError,
@@ -108,6 +117,12 @@ class MrLabels(BaseModel):
 class CiRerun(BaseModel):
     #: What the repair saw: a job that died before any check of the code ran.
     reason: str
+
+
+class Takeover(BaseModel):
+    #: The `kraft item takeover` CLI's own process, which holds the lock.
+    pid: int
+    pid_start_time: float
 
 
 class Steer(BaseModel):
@@ -605,6 +620,7 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._work_item_row(st, wid)
     reason = (body.reason if body else "").strip() or None
     if row["status"] not in admitting(Verb.ABANDON):
@@ -908,6 +924,62 @@ async def pause_work_item(wid: str, request: Request):
     return {"id": wid, "paused_sessions": ids}
 
 
+def _takeover_caller(st, request: Request, wid: str) -> None:
+    """A takeover is a person's terminal on this machine: never a worker
+    session, never a remote peer."""
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "takeover runs on the machine Kraft runs on")
+    deps.forbid_self_action(st, request, wid, escalation_may=False)
+
+
+@api_router.post("/work-items/{wid}/takeover")
+async def takeover_work_item(wid: str, body: Takeover, request: Request):
+    """Take the lock a person's own agent session holds on a stopped item, and
+    answer with the command to run. The CLI runs it on its terminal and ends the
+    takeover with `DELETE`. The item's status does not change; no secret crosses:
+    the answer is a command line, a folder and two ids."""
+    st = request.app.state
+    _takeover_caller(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    try:
+        prepared = await takeover.prepare(
+            st.db,
+            st.run_dirs,
+            row,
+            harness_mod.load(None),
+            launch=deps.launch(st, row["repo"]),
+            pid=body.pid,
+            pid_start=body.pid_start_time,
+            starting=start_queue.starting(request.app),
+            walk_running=deps.task_is_live(request.app, wid),
+        )
+    except takeover.TakeoverRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "argv": prepared.argv,
+        "cwd": prepared.cwd,
+        "session_id": prepared.session_id,
+        "resumed_from": prepared.resumed_from,
+    }
+
+
+@api_router.delete("/work-items/{wid}/takeover")
+async def end_takeover(wid: str, request: Request):
+    """End the item's takeover: free it, and leave the person's session for the
+    next `resume` to continue when one was written. Also the way out of a lock a
+    crashed CLI left (`kraft item takeover ID --release`). Answers 200 with
+    nothing recorded when no takeover holds the item."""
+    st = request.app.state
+    _takeover_caller(st, request, wid)
+    deps._work_item_row(st, wid)
+    released = await takeover.release(st.db, st.run_dirs, wid, harness_mod.load(None))
+    return {
+        "status": released.status,
+        "recorded": released.recorded,
+        "warnings": released.warnings,
+    }
+
+
 @api_router.post("/work-items/{wid}/unblock")
 async def unblock_work_item(wid: str, request: Request, body: Unblock | None = None):
     """Stop the item coming after what it still waits on, or after the one
@@ -915,6 +987,7 @@ async def unblock_work_item(wid: str, request: Request, body: Unblock | None = N
     wait for is released by the scheduler's next pass (`kraft.start_queue`)."""
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.UNBLOCK):
         raise HTTPException(
@@ -1350,7 +1423,10 @@ def steerable(st, row) -> bool:
 
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
+    """Send a note to the agent of a paused item or one that needs context, so its next run
+    reads it."""
     st = request.app.state
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.STEER) or (
         row["status"] == WorkItemStatus.NEEDS_HUMAN and not board._needs_context_stop(st, wid)
@@ -1372,6 +1448,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] is None:
         # #1198: an agent does not start a person's item on a disabled repo.
@@ -1835,6 +1912,7 @@ async def _retry(wid: str, body: Retry, request: Request):
 
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     asked = body  # as the caller sent it: a queued retry is made again from this
     if held := held_refusal(row):
@@ -2333,6 +2411,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if store.is_child(row):
         raise HTTPException(
@@ -2445,6 +2524,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     refuse_unjoined(st, deps._work_item_row(st, wid), "skip")
     # /skip has no live task to gate a race the way spawn does for every other
     # door: paused/needs_human have none yet, and claim_for_run's to_status
@@ -2791,6 +2871,7 @@ async def reopen_mr(wid: str, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["stop_kind"] != StopKind.MR_CLOSED:
         raise HTTPException(
@@ -2853,6 +2934,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     and leaves the item where no door leads back onto its chain."""
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._work_item_row(st, wid)
     reason = reason.strip()
     if not reason:
@@ -2896,6 +2978,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    await deps.refuse_if_taken_over(st, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.ESCALATE):
         raise HTTPException(409, held_refusal(row) or "work item is not needs_human or paused")
@@ -3083,6 +3166,92 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     return {"work_item_id": wid, "labels": list(labels)}
 
 
+async def _rerun_pipeline(st, wid: str, row, node, reason: str, request: Request):
+    """A person's re-run of the pipeline a `ci.pipeline` wait stopped on, then
+    a retry of the node, whose wait reads that same pipeline again. Only a
+    person's: the id is one a worker chose, and a re-run is a write with the
+    server's token (#1301), so neither the item's sessions, an escalation turn
+    nor an assistant may ask for it. Not when the id's writer is in this node:
+    a plain Retry runs it again, and it starts a fresh pipeline."""
+    node_id = node.id
+    if not ci_reruns.pipeline_stopped_for_a_person(row):
+        raise HTTPException(
+            409,
+            f"{node_id} waits on a pipeline by id, which only a person re-runs, "
+            "and only once the item has stopped for them",
+        )
+    when_free.refuse_if_claimed()
+    # The item's own sessions are refused here too: none of them is a person.
+    if (who := _decided_by_caller(request)) != "human":
+        raise HTTPException(
+            403,
+            f"re-running a pipeline a worker named is a person's call, not an {who}'s",
+        )
+    ids = []
+    for wait in ci_reruns.pipeline_waits(node):
+        pipeline = wait.task.pipeline
+        name = pipeline_variable(pipeline)
+        if name is not None:
+            reads = resolve_reads(node_id, wait.task.reads)
+            if any(r.startswith(f"{node_id}{PATH_SEPARATOR}") for r in reads):
+                raise HTTPException(
+                    409,
+                    f"{wait.path} reads its pipeline id from a task in {node_id}: "
+                    "Retry runs that task again, and it starts a fresh pipeline",
+                )
+            declared = dispatch.declared_variables(row, reads)
+            pipeline = await asyncio.to_thread(
+                outputs.lookup_variable, st.run_dirs, wid, reads, name, declared
+            )
+        if pipeline and not re.fullmatch(r"[0-9]+", pipeline):
+            # As the wait refuses it: a worker's value goes into a forge API path
+            # read with the server's token, and is never echoed.
+            raise HTTPException(409, f"{wait.path}: the pipeline id must be digits only")
+        if pipeline:
+            ids.append(pipeline)
+    if not ids:
+        raise HTTPException(409, f"no pipeline id is set for {node_id}'s wait")
+    repos = st.db.read(
+        lambda c: c.execute(
+            "SELECT repo_path FROM work_item_repos WHERE work_item_id = ? AND role = 'root'",
+            (wid,),
+        ).fetchone()
+    )
+    # The repository the wait reads with: a workspace's root, else the item's folder.
+    repo = Path(repos["repo_path"]) if repos else inplace.item_folder(st.run_dirs, row)
+    if not repo.is_dir():
+        raise deps.worktree_missing(row)
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    jobs: list[str] = []
+    reran: list[str] = []
+    try:
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
+        for pipeline in ids:
+            ci = await forge.pipeline_status(repo=repo, pipeline_id=pipeline)
+            # Nothing failed (or nothing ran, which fails no job): GitLab's
+            # retry would answer a pipeline with no failed job as if it had re-run one.
+            if ci.state != "failed" or not ci.failed_jobs:
+                continue
+            reran += await forge.retry_jobs(repo=repo, ci=ci)
+            jobs += [j.name for j in ci.failed_jobs]
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if not reran:
+        raise HTTPException(
+            409, f"pipeline {', '.join(ids)}: no failed job here can be re-run by Kraft"
+        )
+    payload = {
+        "node_id": node_id,
+        "cycle": None,
+        "reason": reason,
+        "pipelines": ids,
+        "jobs": jobs,
+        "reran": reran,
+    }
+    await st.db.write(lambda c: events.append(c, wid, ForgeEvent.CI_RERUN_REQUESTED, payload))
+    return await _retry(wid, Retry(), request)
+
+
 @api_router.post("/work-items/{wid}/ci-rerun")
 async def ci_rerun(wid: str, body: CiRerun, request: Request):
     """Re-run the CI jobs that failed outside the code.
@@ -3097,27 +3266,43 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
     One re-run per fix attempt, and only inside an open one: `max_attempts`
     bounds how often a real code failure could be re-run. This shares no state
     with the forge-flagged self-retry (`ci_infra:<node_id>`).
+
+    A person calls it too, on an item whose fix loop stopped for them on that
+    node (`ci_reruns.stopped_for_a_person`): the failed jobs re-run, then the
+    node retries the way `POST /retry` with no `path` does, so it waits on
+    that run. Like `reopen_mr`, the item's own worker session may not make
+    that call; an escalation turn may, as it may retry.
     """
     st = request.app.state
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(422, "a re-run needs a reason")
     row = deps._work_item_row(st, wid)
-    worktree = inplace.item_folder(st.run_dirs, row)
-    if not worktree.is_dir():
-        raise deps.worktree_missing(row)
+    await deps.refuse_if_taken_over(st, wid)
     node_id = row["current_node_id"]
     node = ci_reruns.node_of(store.materialized_chain_of(row), node_id)
+    if not ci_reruns.waits_on_mr_ci(node) and ci_reruns.pipeline_waits(node):
+        return await _rerun_pipeline(st, wid, row, node, reason, request)
+    # Ahead of the worktree: an item on any other node is a 409, not a 404.
     if not ci_reruns.waits_on_mr_ci(node):
         raise HTTPException(
             409,
             f"{node_id} does not wait on merge-request CI; only its fix loop can re-run CI",
         )
-    cycle = st.db.read(lambda c: ci_reruns.open_fix_cycle(c, wid, node_id))
-    if cycle is None:
-        raise HTTPException(409, f"no fix attempt is running on {node_id}")
-    if st.db.read(lambda c: ci_reruns.reruns(c, wid, node_id, after_seq=cycle["seq"])):
-        raise HTTPException(409, "CI was already re-run in this fix attempt")
+    by_person = ci_reruns.stopped_for_a_person(row)
+    if by_person:
+        when_free.refuse_if_claimed()
+        deps.forbid_self_action(st, request, wid)
+        cycle = None
+    else:
+        cycle = st.db.read(lambda c: ci_reruns.open_fix_cycle(c, wid, node_id))
+        if cycle is None:
+            raise HTTPException(409, f"no fix attempt is running on {node_id}")
+        if st.db.read(lambda c: ci_reruns.reruns(c, wid, node_id, after_seq=cycle["seq"])):
+            raise HTTPException(409, "CI was already re-run in this fix attempt")
+    worktree = inplace.item_folder(st.run_dirs, row)
+    if not worktree.is_dir():
+        raise deps.worktree_missing(row)
 
     branch = store.branch_for(row)
     repo_entry = deps.launch(st, row["repo"]).repo_entry
@@ -3146,10 +3331,13 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
 
     payload = {
         "node_id": node_id,
-        "cycle": cycle["payload"].get("cycle"),
+        # None for a person's: no fix attempt is open.
+        "cycle": cycle["payload"].get("cycle") if cycle else None,
         "reason": reason,
         "jobs": [j.name for j in ci.failed_jobs],
         "reran": list(reran),
     }
     await st.db.write(lambda c: events.append(c, wid, ForgeEvent.CI_RERUN_REQUESTED, payload))
+    if by_person:
+        return await _retry(wid, Retry(), request)
     return {"work_item_id": wid, "reran": list(reran), "jobs": payload["jobs"]}

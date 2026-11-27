@@ -19,6 +19,7 @@ Ctrl-C to tear the server down. The temp dir is left behind for inspection.
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import pathlib
@@ -33,12 +34,22 @@ import urllib.request
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 
+# CI waits 60s for the lines `main` prints, however late this process started:
+# repeat, so a hang in these imports or in setup leaves its stack in the log.
+if __name__ == "__main__":
+    faulthandler.dump_traceback_later(15, repeat=True)
+
 from support.harness import (  # noqa: E402
     fake_templates_dir,
     isolated_bd,
     make_repo,
     make_repo_with_engineering,
 )
+
+#: The server child's interpreter flags. -X faulthandler: SIGABRT dumps its
+#: stack (`_dump_and_terminate`, and CI's failure step). -u: what it printed
+#: reaches the log even when it is killed.
+CHILD_FLAGS = ("-X", "faulthandler", "-u")
 
 
 def _listeners_on(port: int | str) -> list[str]:
@@ -125,22 +136,40 @@ def _raise_interrupt(_signum, _frame) -> None:
 
 
 def _terminate(proc: subprocess.Popen) -> None:
-    """Signal the whole process group so detached agent/git children die too."""
+    """Signal the whole process group so detached agent/git children die too.
+
+    The child was started with `start_new_session=True`, so its pid is the
+    group's id: that still names the group once the child itself is reaped,
+    where `os.getpgid(proc.pid)` would fail and orphan the rest of it."""
     # Kraft's kill resends SIGTERM to the group 0.2s after the first; the
     # handler would raise again out of `proc.wait` and skip the SIGKILL below.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             proc.kill()
         proc.wait()
+
+
+def _dump_and_terminate(proc: subprocess.Popen) -> None:
+    """Make a stalled child print every thread's stack, then end its group.
+
+    The child runs with `-X faulthandler`, which dumps on SIGABRT before the
+    process aborts. Wait for that before the group SIGTERM, which could
+    otherwise kill the child halfway through its dump."""
+    proc.send_signal(signal.SIGABRT)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    _terminate(proc)
 
 
 def main() -> int:
@@ -200,13 +229,21 @@ def main() -> int:
     # Own process group: the orchestrator spawns detached agent/git children,
     # and terminating only the direct child orphans them (Kraft-2ih).
     proc = subprocess.Popen(
-        [sys.executable, "-m", "kraft"], cwd=REPO, env=env, start_new_session=True
+        [sys.executable, *CHILD_FLAGS, "-m", "kraft"],
+        cwd=REPO,
+        env=env,
+        start_new_session=True,
     )
 
     health = f"http://127.0.0.1:{PORT}/api/health"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
+            print(
+                f"the orchestrator exited (code {proc.returncode}) before it was healthy",
+                file=sys.stderr,
+                flush=True,
+            )
             return proc.returncode or 1
         try:
             with urllib.request.urlopen(health, timeout=1) as r:
@@ -215,7 +252,8 @@ def main() -> int:
         except OSError:
             time.sleep(0.3)
     else:
-        _terminate(proc)
+        print("the orchestrator is not healthy after 30s; its stack:", file=sys.stderr, flush=True)
+        _dump_and_terminate(proc)
         sys.exit("server did not become healthy in 30s")
 
     # The poll above proves something answered, not that it was ours. If the
@@ -240,6 +278,7 @@ def main() -> int:
     )
     urllib.request.urlopen(req, timeout=10).close()
 
+    faulthandler.cancel_dump_traceback_later()
     print(f"\n  server up on http://127.0.0.1:{PORT}  (temp: {tmp})")
     print(f"  KRAFT_E2E_REPO={repo}")
     print(f"  KRAFT_E2E_BASE=http://127.0.0.1:{PORT}\n", flush=True)

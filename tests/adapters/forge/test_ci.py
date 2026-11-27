@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from kraft.adapters import forge
+from kraft.adapters.forge import ci
 
 MR = forge.MR(1, "http://x")
 
@@ -61,14 +62,28 @@ async def test_render_ci_verdict(tmp_path, fake_kw, head_sha, expected):
 
 
 @pytest.mark.parametrize(
-    "reason, expected",
-    [("runner_system_failure", "infra"), ("script_failure", "failed")],
-    ids=["infra-red", "code-red"],
+    "jobs, expected",
+    [
+        (
+            (forge.FailedJob("build", "failed", "runner_system_failure"),),
+            "infra",
+        ),
+        (
+            (forge.FailedJob("build", "failed", "script_failure"),),
+            "failed",
+        ),
+        (
+            (
+                forge.FailedJob("summary", "failed", "script_failure"),
+                forge.FailedJob("e2e", "cancelled", "cancelled_no_steps"),
+            ),
+            "infra",
+        ),
+    ],
+    ids=["infra-red", "code-red", "summary-after-cancelled-before-runner"],
 )
-async def test_render_ci_tells_infra_red_from_code_red(tmp_path, reason, expected):
-    ci = forge.CIStatus(
-        state="failed", url="u", failed_jobs=(forge.FailedJob("build", "failed", reason),)
-    )
+async def test_render_ci_tells_infra_red_from_code_red(tmp_path, jobs, expected):
+    ci = forge.CIStatus(state="failed", url="u", failed_jobs=jobs)
 
     _, verdict = await forge.ci.render_ci(
         ci, forge=forge.FakeForge(), repo=tmp_path, branch="b", head_sha=None
@@ -126,3 +141,30 @@ async def test_a_re_read_right_after_an_infra_kick_is_never_abandoned(tmp_path):
     )
 
     assert verdict == "waiting"
+
+
+@pytest.mark.parametrize(
+    ("name", "patterns", "expected"),
+    [
+        ("deploy", ["deploy", "deploy-*"], True),
+        ("Deploy", ["deploy"], True),
+        ("docs / deploy", ["deploy"], True),
+        ("deploy-pages", ["deploy-*"], True),
+        ("publish-docs", ["publish-*"], True),
+        ("build", ["deploy", "deploy-*"], False),
+        ("deploy-and-test", ["deploy"], False),
+        ("deploy", [], False),
+    ],
+    ids=[
+        "exact",
+        "case-insensitive",
+        "workflow-slash-job",
+        "glob-suffix",
+        "publish-glob",
+        "build-is-not-publish",
+        "glob-is-anchored",
+        "no-patterns-no-publish-job",
+    ],
+)
+def test_is_publish_job(name, patterns, expected):
+    assert ci.is_publish_job(name, patterns) is expected

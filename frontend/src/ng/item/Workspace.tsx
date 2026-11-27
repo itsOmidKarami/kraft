@@ -76,6 +76,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const docs = useDocuments(item.id, runVersion(raw));
   const [artifact, setArtifact] = useState(false);
   const [produced, setProduced] = useState<{ kind: string; path: string } | null>(null);
+  // A gate round's whole note, in the drawer; the button that opened it takes focus back on close.
+  const [roundNote, setRoundNote] = useState<{ title: string; by: string; content: string } | null>(null);
+  const noteButton = useRef<HTMLElement | null>(null);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -162,11 +165,11 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const reviewMarks = useOneOffMarks((m) => m.marks);
   const marks = useMemo(() => ({ view: draft?.draft.view ?? null, pending: draft?.draft.pending ?? null, own: new Set(raw.chain_definition.nodes.map((n) => n.id)) }), [draft?.draft.view, draft?.draft.pending, raw]);
   const graph = useMemo(() => {
-    const g = chainGraph(item, events, now);
+    const g = chainGraph(item, now);
     const marked = draft ? { ...g, nodes: markNodes(g.nodes, marks) } : g;
     // While the one-off review is open: the nodes it is about.
     return Object.keys(reviewMarks).length ? { ...marked, nodes: marked.nodes.map((n) => (reviewMarks[n.id] ? { ...n, mark: reviewMarks[n.id] } : n)) } : marked;
-  }, [item, events, now, draft, marks, reviewMarks]);
+  }, [item, now, draft, marks, reviewMarks]);
   const selectedNode = place.sel.kind === "chain" ? undefined : place.sel.node;
   const reserve = size.overlay ? 0 : pane_.open ? size.width : 40;
   const cover = size.overlay && pane_.open ? size.width : 0;
@@ -208,6 +211,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const pane = paneContent({
     item: shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
+    pass: place.pass,
+    // A History row of a gate opens the gate's view on that round: from the chain overview too, which has no `?pass=` of its own.
+    setPass: (n) => go({ ...place, node: selNode, sel: selNode ? { kind: "node", node: selNode } : place.sel, pass: n }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
     agent: place.agent,
@@ -242,7 +248,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
       {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} names onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
-          <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
+          <GateView {...gateView(item, viewing, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }), read: (note, button) => { noteButton.current = button; setRoundNote(note); }, readReview: (doc, button) => { noteButton.current = button; setRoundNote(doc); } }, place.pass)} right={reserve}
+            onRound={(n) => go({ ...place, pass: n })}
             onGate={() => pick({ kind: "node", node: viewing.id })}
             onReviewer={() => pick(reviewerSel(item, viewing))}
             onBackground={() => dispatch({ type: "background" })}
@@ -331,6 +338,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
       {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc), item.chain_definition.nodes) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
       {produced && <DocViewer source={{ kind: "produced", workItemId: item.id, produces: produced.kind, by: produced.path }} onClose={() => setProduced(null)} />}
+      {roundNote && <DocViewer source={{ kind: "text", ...roundNote }} returnTo={() => noteButton.current} onClose={() => setRoundNote(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id, by: producerOf(materialized(item), item.pending_gate ?? "") ?? undefined }} onClose={() => setArtifact(false)} />}
     </div>
   );

@@ -1,8 +1,8 @@
 {
   "name": "kraft",
   "displayName": "Kraft",
-  "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code.",
-  "version": "2.5.0",
+  "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code or an editor built on it, such as VSCodium or Cursor.",
+  "version": "2.6.0",
   "publisher": "kraft-sdlc",
   "license": "Apache-2.0",
   "icon": "media/kraft.png",
@@ -254,7 +254,7 @@
       },
       {
         "command": "kraft.signIn",
-        "title": "Sign in to a server…",
+        "title": "Sign in to a server\u2026",
         "category": "Kraft"
       },
       {
@@ -433,7 +433,7 @@
       },
       {
         "view": "kraft.board",
-        "contents": "Kraft runs your coding agent from spec to merge request, and stops at a gate, a decision that is yours. This repo isn't connected to it.\n[Connect this repo](command:kraft.connectRepo)\nFor test and setup commands, use the web UI or `kraft repo connect`.\n[Show all repos](command:kraft.toggleAllRepos)\n[What is Kraft?](https://kraft-sdlc.dev/get-started/why-kraft)",
+        "contents": "Kraft runs your coding agent from spec to merge request, and stops at a gate, a decision that is yours. This repo isn't connected to it.\n[Connect this repo](command:kraft.connectRepo)\nFor test and setup commands, use the web UI or `kraft repo connect`.\n[Show all repos](command:kraft.toggleAllRepos)\n[What is Kraft?](https://kraft-sdlc.dev/why)",
         "when": "kraft.welcome == connect && !kraft.readOnly"
       }
     ],
@@ -925,7 +925,7 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "ws": "^8.22.1"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",
@@ -937,7 +937,7 @@
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.28.0",
     "mocha": "^11.0.0",
-    "ovsx": "^1.3.0",
+    "ovsx": "^1.4.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.12"
   },

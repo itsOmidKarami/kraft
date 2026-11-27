@@ -1,6 +1,6 @@
 ---
 name: run-slices
-description: "Controls a sliced Kraft Lite run as its controller, with one child session building each slice of the plan. Use when `kraft-lite:next` reaches a Kraft Lite chain's slice gate (`state.gate.slice_gate` true, `sliced` null), when `state` reports `sliced.action: run_slices`, when a large plan should be split across sessions, or when resuming or checking in on a sliced run."
+description: "Controls a sliced Kraft Lite run as its controller, with one child session building each slice of the plan. Use when `kraft-lite:next` reaches a Kraft Lite chain's slice gate (`state.gate.slice_gate` true, `sliced` null), when `state` reports `sliced.action: run_slices`, when a plan's parts that stand alone should be split across sessions, when resuming a sliced run, or when a `kraft-lite:run-slices check-in` message or a child's report arrives, or a slice's PR is ready to review or merge; a read-only progress question is `kraft-lite:status`."
 ---
 
 # Running slices as the controller
@@ -8,13 +8,14 @@ description: "Controls a sliced Kraft Lite run as its controller, with one child
 If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
 it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
-You are the **controller**. Each **slice** is one or more plan tasks, built by a
-**child** session that walks the **child chain** (the nodes `kl.py` gives a
-child from this run's frozen chain, as `kraft-lite:build-slice` lists them).
-Children report to you; you answer them, review and merge their work into the
-**feature branch**, and keep the run's truth in `.kraft-lite/`, copied to the
-**state branch** after every change. Your conversation is not state: after a
-compaction or a restart, read `state`, `slices` and `decisions` again.
+You are the **controller**. Each **slice** is a part of the plan that stands
+alone (section 1), built by a **child** session. The child walks the **child
+chain**: the nodes `kl.py` gives it from this run's frozen chain, as
+`kraft-lite:build-slice` lists them. Children report to you; you answer them,
+review and merge their work into the **feature branch**, and keep the run's
+truth in `.kraft-lite/`, copied to the **state branch** after every change. Your
+conversation is not state: after a compaction or a restart, read `state`,
+`slices` and `decisions` again.
 
 In prose and checklists below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and a `KL` command carries `--chain-id <id>`
@@ -29,6 +30,10 @@ section 2: [Claude Code](references/claude-code.md), [Codex](references/codex.md
 ability its guide marks unconfirmed, follow [discover.md](references/discover.md)
 before any fallback.
 
+Entered at the slice gate: section 1. After a restart or a compaction: section 4.
+On a check-in or a child's message: section 5. A slice to review or merge:
+section 6.
+
 ## 1. When to slice
 
 At the **slice gate**, the last gate before the first build node, which `state`
@@ -40,25 +45,56 @@ Unsliceable: tell the user its reason and draw nothing. At any other node: tell
 the user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go
 on with `kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.
 
-A plan with no `## Slices` section and few enough tasks for one session's
-context is not sliced: say so, delete any `.kraft-lite/proposals/<chain-id>.json`
-left by an earlier round, then `KL gate` and invoke `kraft-lite:gate`; the
-chain continues as one.
+Slice only what stands alone: a part that uses no other part's work and is
+coherent enough for its own tests and its own build, verify and review loop.
+Groundwork and `after` order the parts that must come first; a part that needs a
+sibling's work with no `after` doesn't stand alone. A slice of one or two tasks
+almost never qualifies, and six slices are plenty.
+Smaller independent tasks run as subagents in one session, which is the default;
+a strained context is a reason to look for such parts, not a reason to slice. A
+plan whose parts don't stand alone is not sliced: say so, delete any
+`.kraft-lite/proposals/<chain-id>.json` left by an earlier round, then `KL gate`
+and invoke `kraft-lite:gate`; the chain continues as one.
 
-1. Read the plan's `## Slices` section (bullets like `- **Slice 2: <title>.**
-   Tasks 3–5. Comes after slice 1.`). With none, propose a grouping.
+1. `KL plan-slices` reads the plan's `## Slices` section, in Kraft's grammar
+   (`- **Slice 1: <title>.** Tasks 2-4.`, keys 1 to n), and prints the
+   proposal's `slices`: take them as printed. A task in no slice is groundwork:
+   it prints a first `groundwork` slice that the others come after. A refused
+   section: tell the user its reason. With no section (`slices` null) or a
+   refused one, propose a grouping by the rule above.
 2. Draw the proposal: each slice's tasks, what it comes after, which slices run
    in parallel, and one owning slice for every shared helper, fixture or file
    two slices would both create. The other slice waits for it or uses it from
-   the owner's branch.
+   the owner's branch. Every plan task is in exactly one slice. Independent
+   slices are the default. `after` (in a plan, a last sentence
+   `Comes after slice 1.`) is Lite's own, for a slice built on another's merged
+   work: Kraft can't slice a plan that uses it.
 3. Add the mode: the user's words for this run if they named one, logged with
    `KL decide --question "Mode for this run" --answer "<their words>" --why "set by the user"`,
    else the mode `KL settings` prints. Add the feature branch (`feature` mode: a
-   new branch from the base branch, named by the repo's own rules; `main` mode:
-   `null`) and the state branch (section 7). The feature branch is never the
-   state branch.
+   new branch from the base branch; `main` mode: `null`) and the state branch
+   (section 7). The feature branch is never the state branch.
+   **Branch names**, locally and in the cloud: the run's name is a name by the
+   repo's own rules, else `kraft/<chain-id>`; in `feature` mode it is the feature
+   branch. The state branch is the run's name plus `-state`; each slice's branch
+   is the run's name plus `-slice-<key>`, and once a slice starts, the branch
+   `KL slices` records for it. A run's name that is neither the feature branch
+   nor the state branch less `-state`:
+   `KL decide --question "Run name" --answer "<name>" --why "branch names"`.
+   Before writing the proposal, read this session's instructions: a cloud
+   session that may push only to its own branch makes that branch the state
+   branch, without asking. The feature branch keeps its name; such a session
+   asks for its push approval now (section 2's line), and with none asks the
+   user whether to run in `main` mode, logging their answer as the mode above. A child falls back the same way, to its
+   session branch as its slice branch (`kraft-lite:build-slice`). The slice
+   gate shows these names; only the run's name can be renamed there, and the
+   rest follow from it, except a state branch that is this session's own.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
+   Then `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`: it
+   refuses a proposal that leaves a plan task out. Fix the proposal until it
+   passes. `approve --slices` runs the same check, and refuses an uncovered
+   proposal.
 5. `KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own
    artifact with the proposal beside it, and records the user's answer: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a
@@ -72,7 +108,7 @@ Copy this and tick it off; while a line is unticked, no child starts.
 
 ```
 - [ ] Abilities confirmed from the guide, a local guide, or discover.md, or its fallback named: start, message, be messaged, archive, check in later. Each one with no guide, or that its guide leaves unconfirmed, looked for as discover.md says before its fallback. A missing ability is never a block.
-- [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and locally the state branch.
+- [ ] One user approval for every branch this run pushes outside this session's own: the feature branch (`feature` mode), and the state branch unless it is this session's own.
 - [ ] Setup and the scoped test command run once here, and the working setup line written down.
 - [ ] The user has finished giving instructions for this run: ask, and hear "go".
 - [ ] Every command taken from a local guide (`.kraft-lite/harnesses/`) listed to the user in that ask.
@@ -99,14 +135,16 @@ of them are merged: one branch cannot hold two slices' unmerged work.
 For each key you start:
 
 1. `KL slice-set --slice <key> --status starting --branch <slice-branch> --fork <sha>`,
-   where `<sha>` is the commit it is cut from (`git rev-parse origin/<branch>`).
+   where `<sha>` is the commit it is cut from (`git rev-parse origin/<branch>`,
+   after `git fetch origin <branch>`).
    Export state (section 7).
 2. Start the session from that commit, where the user said children run for
-   this run (locally or in the cloud), else where this session runs. Its own
-   branch is the slice branch; its title is `<chain-id> <key>: <slice title>`;
+   this run (locally or in the cloud), else where this session runs. Its
+   branch is the slice branch (section 1, Branch names); its title is `<chain-id> <key>: <slice title>`;
    it is tagged with the chain id where the guide confirms tags; it has
    **an explicit model** (middle tier).
-3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
+3. `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`
+   (a child that falls back reports its branch later: section 5).
    Started from `early`, also
    `KL decide --slice <key> --question "Start <key> from <slice>'s branch?" --answer "Forked from <branch> at <sha>" --why "..."`.
    Export state.
@@ -154,7 +192,8 @@ The starting instructions, in this order:
 7. **Models:** the policy in section 11, with the model set on every subagent.
 8. **Tests:** the scoped test paths for its plan tasks, which its
    `kraft.verify_changed_test_scopes` task runs under the slice layer.
-9. **Branches and PRs:** push only its own slice branch; its target, named:
+9. **Branches and PRs:** push only its slice branch, named, or its session
+   branch where it falls back; its PR body's first line `Kraft Lite slice: <chain-id> <key>`; its target, named:
    the feature branch, or in `main` mode the base branch. Its PR goes into the
    target, and so does its `kraft.mr_rebase`. It rebases, and force-pushes its
    own branch, as `kraft-lite:build-slice` says. The repo's rules, quoted from
@@ -176,16 +215,26 @@ the user's merges. When the user merges a slice, the steps after a merge
 
 Before any other write and before starting anything:
 
-1. Fetch the state branch, `KL import --from <state-checkout>/kraft-lite-state`,
-   then `KL chains` for the chain id. An empty `chains` before the import is a
-   missing import: never `start` a new chain. An import refused as exported by
-   an older Kraft Lite is a run from before V1 chains: tell the user it must be
-   finished on the previous Kraft Lite version, and write nothing.
+1. Find the state checkout (section 7): in a cloud session, this checkout when
+   it holds `kraft-lite-state/`, else a `-state` branch on origin
+   (`git ls-remote origin 'refs/heads/*-state'`), fetched and added as a
+   worktree as section 7 says, that holds `kraft-lite-state/`; locally, the
+   worktree of the `-state` branch in `git worktree list`. With none, or with
+   several and no chain id to choose by, ask the user and write nothing;
+   likewise when this session may not push to the one found. Fetch the state branch,
+   `KL import --from <state-checkout>/kraft-lite-state`, then `KL chains` for
+   the chain id; with several unfinished chains, ask which. An empty `chains`
+   before the import is a missing import: never `start` a new chain. An import
+   refused as exported by an older Kraft Lite is a run from before V1 chains:
+   tell the user it must be finished on the previous Kraft Lite version, and
+   write nothing.
 2. `KL slices`. For every `starting` or `running` slice, and every `waiting`
    one in `ready` or `early`, find its session, in the ways the guide
    confirms: the recorded session id; a session whose title or name carries
-   `<chain-id>` and `<key>`; the chain-id tag; and its slice branch on the remote
-   (`git ls-remote origin <slice-branch>`) as evidence a child ran.
+   `<chain-id>` and `<key>`; the chain-id tag; and, as evidence a child ran, its
+   slice branch on the remote (`git ls-remote origin <slice-branch>`) or an open
+   PR into the target whose body opens `Kraft Lite slice: <chain-id> <key>`, whose
+   branch is the slice's.
    - Found: `KL slice-set --slice <key> --status running --session <id> --branch <slice-branch>`.
    - Not found, and `starting`, `running`, or its slice branch on the remote:
      never start it blindly. Hold it with
@@ -200,12 +249,15 @@ Before any other write and before starting anything:
 
 A check-in is armed while any slice is not merged; in `main` mode, until the
 nodes `sliced.action` marks `await_user_merges` close. Its message, word for word:
-`kraft-lite:run-slices check-in, chain <id>: read state first.` Every check-in:
+`kraft-lite:run-slices check-in, chain <id>: read state first.` Arm it with your
+guide's "Check in later", about 20 minutes out, then end the turn: the check-in
+wakes you, even after the session is reclaimed. Never wait on CI or a child
+inside a turn. Every check-in:
 
 ```
 - [ ] `KL state` and `KL slices`. Past the first build node: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
-- [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments.
-- [ ] Per running child: its status summary (fields in the guide), and `git fetch` + `git log` of its branch. Never its full transcript.
+- [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments: the open PRs into the target whose body opens `Kraft Lite slice: <chain-id> <key>`, whatever branch they are on. One on another branch than `KL slices` records: `KL slice-set --slice <key> --branch <its branch>`.
+- [ ] Per running child: its status summary where the guide has one, else `git fetch` + `git log` of its branch. Never its full transcript (it overflows your context).
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
 - [ ] `main` mode: each `ready_to_merge` slice's PR. One the user merged takes the steps after a merge (section 6).
 - [ ] Answer every question (below). Export state.
@@ -222,8 +274,12 @@ Answering a question:
 - Critical or costly to undo: `KL decide --held --slice <key> --question "..." --why "..."`,
   and tell the child to keep working on everything else.
 - A user-only decision: see below.
+- A child reports it builds on its own session branch, not the slice branch it
+  was given (section 1, Branch names): `KL slice-set --slice <key> --branch <its branch>`,
+  then export state. A child asking whether to push there after a refused push
+  is answered by you, not held: "use your session branch".
 - A fix loop over its cap arrives with its traces: re-steer the child once, and
-  log it with `decide`, or hold it for the user. A binding in
+  log it with `decide`; if it comes back over the cap, hold it for the user. A binding in
   `.kraft-lite/bindings.yaml` that a child's `start` or `state` refuses is
   configuration: its question opens `For the user: configuration`, and it goes
   to the user.
@@ -233,7 +289,7 @@ Answering a question:
 ### User-only decisions, and silence
 
 **You never answer a question that belongs to the user, and nothing but the
-user's own answer answers it: silence never does.** A push outside the child's own branch, merging
+user's own answer answers it: silence never does.** A push outside the child's own branch (its slice branch, or its session branch once it falls back), merging
 to the base branch, and anything `settings` gives the user, are theirs. In a
 cloud session, a push the child was not given can only be approved by the user,
 inside that child's own session: your "authorized" is refused there.
@@ -262,11 +318,14 @@ Red flags - stop and hold the question: you are about to type "I've authorized",
 ## 6. Reviewing and merging
 
 Starting a review: `KL slice-set --slice <key> --status in_review`. Your review
-is the slice's PR review, on the strongest tier. Read CI at the head you review
-and the scoped test paths the PR body lists, and run no tests or checks
-yourself. What neither covers goes to the child as a finding. Once your review
-has no findings or only small ones, start what `KL slices` lists, as section 3
-says.
+is the slice's PR review, on the strongest tier. Read it against the slice's plan
+tasks, the spec and the repo's rules, starting from the child's "look at first",
+and check it keeps to the files and helpers its slice owns (section 1, step 2).
+Read CI at the head you review and the scoped test paths the PR body lists, and
+run no tests or checks yourself. What neither covers goes to the child as a
+finding. Once your review has no findings or only small ones, start what
+`KL slices` lists, as section 3 says. A small finding is a fix that changes
+nothing a later slice builds on.
 
 - Findings to fix: send them to the child, `KL slice-set --slice <key> --status running`,
   and review again when it reports the fix. `KL slices` then lists in
@@ -305,12 +364,23 @@ mode, ready to merge or merged):
 2. `KL decisions --unreported --mark`, to mark it reported.
 3. `KL close`, and export state. The rest of the chain then runs per
    `state.sliced.action`, through `kraft-lite:next`, which says where its tasks run.
+4. Wrap up (section 9).
 
 ## 7. State branch
 
-In a cloud session the state branch is this session's own branch, and this
-checkout is its checkout. Locally it is the feature branch's name plus `-state`
-(in `main` mode, a name for the run plus `-state`), in its own worktree. After every change to slices or decisions, check that
+The state branch is the run's name plus `-state` (section 1), in its own
+worktree: `git worktree add -b <state-branch> <path> origin/<base branch>` before
+the first export. Once it exists (a shallow clone fetches only what it names):
+`git fetch origin +<state-branch>:refs/remotes/origin/<state-branch>`, then
+`git worktree add -B <state-branch> <path> origin/<state-branch>`.
+A cloud session that may push only to its own branch uses that branch, and this
+checkout is its checkout. A first push refused anyway, before the slice gate:
+make this session's own branch the state branch in the proposal, and show the
+proposal again. After the gate, the state branch is fixed: tell the user, start
+no child, and on their word rewind to the slice gate `KL slices` names in its
+`shape`, with `KL reject --note "state branch push refused" --from-node <slice gate>`
+(`kraft-lite:gate`; it retires the slices), then propose again with this
+session's own branch. After every change to slices or decisions, check that
 `git -C <state-checkout> branch --show-current` prints the state branch (switch
 to it if not; never commit state on another branch), then:
 
@@ -330,15 +400,19 @@ marks what it reports, and gives the report its shape.
 
 ## 9. Wrap-up
 
-List the branches safe to delete (merged slices; the state branch once done)
-for the user to delete. In `feature` mode, the MR node opens the feature PR.
+When every slice is done, list the merged slices' branches for the user to
+delete; when `kraft-lite:next` reports the chain done, the state branch too,
+saying so when it is this session's own branch. In
+`feature` mode, the MR node opens the feature PR: open none yourself.
 
 ## 10. No guide, or no session tools
 
 With no guide for this harness, or an ability its guide marks unconfirmed,
 follow [discover.md](references/discover.md) first. With no way to start a child
 even then: say so, and walk the slices here, one after another, in `ready`
-order, with the same review, merge and state steps.
+order, with the same review, merge and state steps. Build each as its child
+would: follow `kraft-lite:build-slice` on the slice's own branch, with this
+session as its controller, so every question it would send is yours to answer.
 
 ## 11. Models
 

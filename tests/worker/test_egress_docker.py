@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import own_files
+from support.sandbox_image import pull_failure
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
@@ -61,9 +62,8 @@ def _unavailable(cli: str, why: str):
 def _pulled(cli: str, image: str) -> None:
     if subprocess.run([cli, "image", "inspect", image], capture_output=True).returncode == 0:
         return
-    pulled = subprocess.run([cli, "pull", "-q", image], capture_output=True, text=True)
-    if pulled.returncode != 0:
-        _unavailable(cli, f"e2e: {cli} could not pull {image}: {pulled.stderr.strip()}")
+    if why := pull_failure(cli, image):
+        _unavailable(cli, f"e2e: {cli} could not pull {image}: {why}")
 
 
 def _dead(pid: int) -> bool:

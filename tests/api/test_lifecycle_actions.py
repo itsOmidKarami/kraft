@@ -21,6 +21,9 @@ DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 ACTION = {"budget_raise": "raise_budget"}
 #: Doors that answer 200 and change nothing, so `actions` leaves them out:
 #: archive on an archived item, and unblock on one that comes after nothing.
+#: Doors no surface is offered: `kraft item takeover` is a terminal's, and what decides
+#: it is read per item, which `actions` never does.
+NOT_LISTED = {"takeover"}
 NO_OP = {("archived", "archive")} | {
     (state, "unblock") for state, row in DOORS["states"].items() if not row.get("depends_on")
 }
@@ -43,7 +46,10 @@ def test_actions_are_the_doors_this_table_lists(client, repo, state):
         str(a)
         for a in ItemAction
         if any(
-            ACTION.get(door, door) == a and state in spec["takes"] and (state, door) not in NO_OP
+            ACTION.get(door, door) == a
+            and state in spec["takes"]
+            and (state, door) not in NO_OP
+            and door not in NOT_LISTED
             for door, spec in DOORS["doors"].items()
         )
     ]

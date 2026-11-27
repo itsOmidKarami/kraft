@@ -379,6 +379,7 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
     """Textual's theme picker lists its own themes, none of them Kraft's."""
 
     async def scenario(app, pilot):
+        await pilot.pause()  # the Board takes focus, so Textual offers Maximize
         commands = {c.title: c for c in app.get_system_commands(app.screen)}
         commands["Light"].callback()
         await pilot.pause()
@@ -386,7 +387,8 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
 
     titles, theme, side = console.run(scenario)
     assert "Theme" not in titles
-    assert {"Dark", "Light"} <= set(titles)
+    assert not {"Maximize", "Minimize", "Screenshot"} & set(titles)
+    assert {"Dark", "Light", "Keys", "Quit"} <= set(titles)
     assert (theme, side) == ("kraft-light", console_app.theme.LIGHT["side"])
 
 

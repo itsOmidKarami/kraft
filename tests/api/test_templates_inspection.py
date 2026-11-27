@@ -138,7 +138,11 @@ def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
     # Expanded: the library task's own fields are here and `extends` is gone.
     assert "extends" not in spec["tasks"][0]
     assert spec["tasks"][0]["skill"] == "kraft:spec"
-    assert body["task_paths"][:2] == ["spec.main.author", "plan.main.author"]
+    assert body["task_paths"][:3] == [
+        "spec.main.author",
+        "spec_approval.auto_review",
+        "plan.main.author",
+    ]
     # Not materialized: no target, no policy, and the gates an attachment
     # would satisfy are still in the chain.
     assert set(body) == {

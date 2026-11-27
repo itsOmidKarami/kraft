@@ -81,9 +81,9 @@ def test_every_skill_invokes_the_helper_by_plugin_root(texts, name):
 
 
 def test_the_readme_describes_the_chain_it_actually_ships():
-    """The README counts nodes and gates. The chain is generated, so those
+    """The guide counts nodes and gates. The chain is generated, so those
     numbers drift the moment a node is added."""
-    readme = (PLUGIN / "README.md").read_text()
+    readme = (PLUGIN.parents[1] / "docsite/content/3.guides/5.kraft-lite.md").read_text()
     words = {
         "two": 2,
         "three": 3,
@@ -101,11 +101,11 @@ def test_the_readme_describes_the_chain_it_actually_ships():
         "nineteen": 19,
         "twenty": 20,
     }
-    nodes = re.search(r"`default` chain:\s+(\w+)\s+nodes", readme)
-    gates = re.search(r"(\w+)\s+of\s+them\s+gates", readme)
-    assert nodes and gates, "the README no longer states the counts this test guards"
-    assert words[nodes.group(1)] == len(CHAIN["nodes"])
-    assert words[gates.group(1)] == sum(node["kind"] == "gate" for node in CHAIN["nodes"])
+    nodes = re.search(r"`default`:\s+(\w+)\s+nodes", readme)
+    gates = re.search(r"(\w+)\s+are\s+gates", readme)
+    assert nodes and gates, "the guide no longer states the counts this test guards"
+    assert words[nodes.group(1).lower()] == len(CHAIN["nodes"])
+    assert words[gates.group(1).lower()] == sum(node["kind"] == "gate" for node in CHAIN["nodes"])
 
 
 def test_the_skills_distinguish_unstarted_from_done(texts):
@@ -189,9 +189,12 @@ def test_core_skills_name_no_harness_tool(name):
 @pytest.mark.parametrize("name", ["run-slices", "build-slice"])
 def test_the_slice_skills_name_no_repo_rule_and_no_superpowers_skill(texts, name):
     """The slice skills ship into any repo. A repo's rules come from its own
-    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry."""
+    CLAUDE.md and CONTRIBUTING.md, and installed skills through the registry.
+    `kraft/<chain-id>` is Kraft Lite's own branch name for a repo with no rule,
+    not Kraft's, so it alone is let through."""
+    text = texts[name].replace("`kraft/<chain-id>`", "")
     for banned in ("superpowers:", "kraft/", "screenshot", "just test", "just lint"):
-        assert banned not in texts[name], f"{name} says {banned!r}"
+        assert banned not in text, f"{name} says {banned!r}"
 
 
 def test_the_build_slice_skill_asks_the_controller_not_the_human(texts):
@@ -263,6 +266,7 @@ def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
     is one the controller improvises."""
     for verb in (
         "approve --slices",
+        "plan-slices",
         "slice-set",
         "--status running --session",
         "--status in_review",

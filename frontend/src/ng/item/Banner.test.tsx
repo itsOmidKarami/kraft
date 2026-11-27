@@ -1,5 +1,6 @@
 import { render as rtlRender, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
+import type { ItemAction } from "../../types/vocab.generated";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -7,7 +8,7 @@ import { Banner, QuestionCard } from "./Banner";
 import { acceptWrites, detail, stubFetch } from "./testkit";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/ci-rerun");
 
 afterEach(() => vi.unstubAllGlobals());
 // The banner's Review navigates: every render is inside a router.
@@ -62,6 +63,56 @@ describe("Banner", () => {
     expect(screen.queryByRole("button", { name: "Raise cap" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Open config" }));
     expect(onRaise).toHaveBeenCalled();
+  });
+
+  // A fix loop at its cap on merge-request CI: Re-run CI beside the raise, only where the server lists rerun_ci.
+  describe("re-running CI from a cap stop", () => {
+    const LIMIT = { path: "merge_request_feedback", key: "max_attempts", value: 3, maximum: null };
+    const capped = (over = {}, actions?: ItemAction[]) => detail({ display_status: "needs_you", stop: stop("cap", { node: "merge_request_feedback", reason: "fix loop exhausted", ...over }), ...(actions ? { actions } : {}) });
+    const RERUN: ItemAction[] = ["retry", "rerun_ci", "escalate", "cancel"];
+
+    it.each([
+      ["naming its limit, beside Raise cap", { limit: LIMIT }, "Raise cap"],
+      ["naming no limit, beside Open config", {}, "Open config"],
+    ])("offers Re-run CI on a cap stop %s", (_name, over, other) => {
+      render(<Banner item={capped(over, RERUN)} onRaise={() => {}} reload={() => {}} />);
+      expect(screen.getByRole("button", { name: "Re-run CI" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: other })).toBeInTheDocument();
+    });
+
+    it.each([
+      ["the server not listing rerun_ci", capped({ limit: LIMIT }, ["retry", "escalate", "cancel"])],
+      ["an older server sending no actions", capped({ limit: LIMIT })],
+      ["a budget stop, rerun_ci listed", detail({ display_status: "needs_you", stop: stop("budget", { scope: "work_item" }), actions: [...RERUN, "raise_budget"] })],
+    ])("offers no Re-run CI for %s", (_name, item) => {
+      render(<Banner item={item} onRaise={() => {}} reload={() => {}} />);
+      expect(screen.queryByRole("button", { name: "Re-run CI" })).toBeNull();
+    });
+
+    it("posts the re-run, then reloads", async () => {
+      const calls = stubFetch(WRITES);
+      const reload = vi.fn();
+      render(<Banner item={capped({ limit: LIMIT }, RERUN)} onRaise={() => {}} reload={reload} />);
+      await userEvent.click(screen.getByRole("button", { name: "Re-run CI" }));
+      await waitFor(() => expect(reload).toHaveBeenCalled());
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
+    });
+
+    it("takes one click while the re-run is on its way", async () => {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+      render(<Banner item={capped({ limit: LIMIT }, RERUN)} onRaise={() => {}} reload={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: "Re-run CI" }));
+      expect(screen.getByRole("button", { name: "Re-run CI" })).toBeDisabled();
+    });
+
+    it("shows why the server refused it, and does not reload", async () => {
+      stubFetch({ "POST /work-items/w1/ci-rerun": [409, { detail: "CI is success: nothing failed to re-run" }] });
+      const reload = vi.fn();
+      render(<Banner item={capped({ limit: LIMIT }, RERUN)} onRaise={() => {}} reload={reload} />);
+      await userEvent.click(screen.getByRole("button", { name: "Re-run CI" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("CI is success: nothing failed to re-run");
+      expect(reload).not.toHaveBeenCalled();
+    });
   });
 
   describe("raising the limit a cap stop names", () => {

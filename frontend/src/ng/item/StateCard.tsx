@@ -9,7 +9,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { CHECKOUT_FREES, IN_USE_BY, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../board/rowText";
+import { CHECKOUT_FREES, IN_USE_BY, mrRefText, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine, strandedOneOff } from "./status";
 import { actionPath, taskName } from "./paths";
 import { standingNode } from "./cursor";
@@ -19,6 +19,7 @@ import { totals } from "./Top";
 import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, hintText, keptLine } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
+import { useNow } from "../useNow";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, slicesWaitText, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
@@ -51,8 +52,9 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
   // A failed card's Retry takes a steer, as the pane's Retry did before the card took that over.
   const [steer, setSteer] = useState("");
   const events = useEndEvents(item);
+  const now = useNow();
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, now, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -129,12 +131,17 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run, stee
 /** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
  *  (`forgeHint`; the repo's settings hold no token), a stranded claim just a retry, and any other
  *  infrastructure stop, or one naming no cause, a way to the repo's settings. */
-function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
-  const retries = when(admits(item, "retry", true), retry);
+function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }, run: Run) {
+  // A `ci.pipeline` wait's red or broken pipeline: re-running it is the way on, and it retries.
+  const rerun = admits(item, "rerun_ci", false);
+  const retries = [
+    ...when(rerun, { label: "Re-run CI", primary: true, run: () => run(act.rerunCi(item.id)) }),
+    ...when(admits(item, "retry", true), { ...retry, primary: !rerun }),
+  ];
   return failedFix(item) === "repo" ? [...retries, { label: CHECK_REPO_SETTINGS, run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = standingNode(item.chain_definition.nodes, stop?.node);
@@ -161,7 +168,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
         </>
       ),
       facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
-      actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
+      actions: [...failedActions(item, retry, h, run), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
       // What Retry does, in the card's words: the task it restarts. The branch and the spend are already facts above.
       note: retries ? `Restarts ${retry.target}${item.branch ? " on the kept branch" : ""}` : undefined,
     };
@@ -170,7 +177,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const harness = str(facts.harness);
     const allowed = list(facts.fallback_allowed);
     const fs: [string, ReactNode][] = [];
-    if (stop.resume_at) fs.push(["next retry", until(stop.resume_at)]);
+    if (stop.resume_at) fs.push(["next retry", until(stop.resume_at, h.now)]);
     if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used (policy: rate-limit retries)`]);
     if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} ${allowed.length === 1 ? "is" : "are"} allowed by the harness list`]);
     return {
@@ -192,7 +199,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   if (status === "waiting" && stop?.kind === "wait")
     return {
       tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,
-      facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
+      facts: stop.resume_at ? [["next check", until(stop.resume_at, h.now)]] : [],
       actions: [],
     };
   if (status === "needs_you" && stop?.kind === "conflict") {
@@ -214,17 +221,18 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   }
   if (status === "needs_you" && stop?.kind === "mr_closed") {
     const ref = str(facts.ref) ?? (item.mr_ref ? String(item.mr_ref.number) : "");
+    const refText = ref ? mrRefText({ number: Number(ref), url: str(facts.url) ?? item.mr_ref?.url ?? null }) : "!";
     const closed = [...events].reverse().find((e) => e.type === "mr_closed");
     const opened = [...events].reverse().find((e) => e.type === "mr_opened");
     const by = str(closed?.payload.by);
     return {
-      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR !${ref} was closed on the forge`,
+      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR ${refText} was closed on the forge`,
       where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
       node: stop.node,
       text: MR_SYNC_STOPPED,
       facts: [],
       actions: [
-        ...when(admits(item, "reopen_mr", true), { label: `Reopen !${ref}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
+        ...when(admits(item, "reopen_mr", true), { label: `Reopen ${refText}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
         ...when(!!opened?.node_id && admits(item, "retry", true), { label: "Open a new MR", run: () => run(act.retry(item.id, { path: opened!.node_id! })) }),
         ...when(admits(item, "cancel", true), { label: "Cancel item…", run: h.onCancel }),
       ],
@@ -233,11 +241,16 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   // Any other stop that needs you: a stuck fix loop, a question with no text, a kind a later server adds.
   // A gate, a question, a cap and a budget have their banner or question card; this one has its own way on (R11a-01).
   if (status === "needs_you" && stop && !(["gate", "budget", "cap"] as string[]).includes(stop.kind) && !(stop.kind === "question" && item.needs_context_question)) {
+    // A fix loop stopped on CI that failed outside the code: re-running it is the way on, and it retries.
+    const rerun = admits(item, "rerun_ci", false);
+    const findings = judgedFindings(item, events);
     return {
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, node: stop.node,
       facts: spent ? [spent] : [],
+      body: findings.length ? <FindingRows item={item} findings={findings} /> : undefined,
       actions: [
-        ...when(admits(item, "retry", true), retryFrom(item, node, run)),
+        ...when(rerun, { label: "Re-run CI", primary: true, run: () => run(act.rerunCi(item.id)) }),
+        ...when(admits(item, "retry", true), { ...retryFrom(item, node, run), primary: !rerun }),
         ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate }),
       ],
     };
@@ -268,7 +281,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const total = h.files?.length ? totals(h.files) : null;
     const took = item.running_time ? elapsed(item.running_time.running_s * 1000) : null;
     const facts: [string, ReactNode][] = [
-      ...(mr ? [["merge request", <><LinkButton href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</LinkButton>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
+      ...(mr ? [["merge request", <><LinkButton href={mr.url} target="_blank" rel="noreferrer">{mrRefText(mr)}</LinkButton>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
       ...(h.files?.length ? [["changes", <>{plural(h.files.length, "file")} <span className="item-add">+{total!.add}</span> <span className="item-del">−{total!.del}</span></>] as [string, ReactNode]] : []),
       ...(spent ? [spent] : []),
       ...(took ? [["took", took] as [string, ReactNode]] : []),
@@ -298,11 +311,16 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
         ],
       };
     }
+    // A cancelled item that never started made nothing: no branch, no
+    // worktree, no findings or threads to keep (#1343). `neverStarted()`
+    // only matches a paused item, so this reads `started_at` itself: it
+    // stays null until the chain's first node starts.
+    const neverRan = !item.started_at;
     return {
       tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
-      text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
+      text: neverRan ? "The run never started, so nothing was made yet. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain." : "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
-        ["work kept", "the branch, the worktree until it is archived, findings and threads"],
+        ...(neverRan ? [] : [["work kept", "the branch, the worktree until it is archived, findings and threads"] as [string, ReactNode]]),
         ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
         ["reason", item.ended_reason || str(ev?.payload.reason) || NO_REASON_GIVEN],
       ],
@@ -316,10 +334,11 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
 }
 
 /** The events a card needs that the detail does not carry (who closed the MR,
- *  which node opened it, the cancel's reason, why it paused): read once, for those cards only. */
+ *  which node opened it, the cancel's reason, why it paused, the findings a
+ *  judge stopped on): read once, for those cards only. */
 function useEndEvents(
   item: ItemDetail,
-  wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed",
+  wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed" || item.stop?.kind === "stuck",
 ): KraftEvent[] {
   const [events, setEvents] = useState<KraftEvent[]>([]);
   useEffect(() => {
@@ -435,6 +454,38 @@ function NotStartedCard({ item }: { item: ItemDetail }) {
 }
 
 /** Where "Open the full log" goes: the failed task's pane on its Log tab, or the node's when the task is not in the chain. */
+type Finding = { severity: string; message: string; file?: string | null; line?: number | null; source_plugin?: string | null };
+
+/** The findings the fix-loop judge stopped on, when this stop is its verdict:
+ *  the node's latest, whose reasoning the reason carries. Any other stop, a
+ *  stall or a cap, would read an older verdict's findings as its own. */
+export function judgedFindings(item: ItemDetail, events: KraftEvent[]): Finding[] {
+  const stop = item.stop;
+  const verdict = events.filter((e) => e.type === "judge_verdict" && e.payload.node_id === stop?.node).at(-1)?.payload;
+  const said = str(verdict?.reasoning);
+  if (verdict?.verdict !== "stop_needs_human" || !said || !(stop?.reason ?? "").includes(said)) return [];
+  return Array.isArray(verdict.findings) ? (verdict.findings as Finding[]) : [];
+}
+
+/** One row per finding: its severity, what it says (a failed command's runs to lines), where, and the log of the
+ *  task that found it: `source_plugin`, the task's path, as a job's label is a failed command's own text. */
+function FindingRows({ item, findings }: { item: ItemDetail; findings: Finding[] }) {
+  return (
+    <ul className="item-card-findings" aria-label="Findings">
+      {findings.map((f, i) => {
+        const sel = f.source_plugin ? pathSel(f.source_plugin, item.chain_definition.nodes) : null;
+        return (
+          <li key={i}>
+            <span className="item-card-severity">{f.severity}</span> <span className="item-card-finding-text">{f.message}</span>
+            {f.file && <code className="item-card-finding-at">{f.line ? `${f.file}:${f.line}` : f.file}</code>}
+            {sel && <Link className={linkButtonClass({ inline: true })} aria-label={`log: ${f.message.split("\n")[0]}`} to={placeUrl(item.id, { sel, tab: "log" })}>log</Link>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function logLink(item: ItemDetail): string {
   const stop = item.stop;
   const sel = stop?.task ? pathSel(stop.task, item.chain_definition.nodes) : null;

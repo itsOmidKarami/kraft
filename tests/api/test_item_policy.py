@@ -248,3 +248,40 @@ def test_the_patch_a_cap_stops_limit_names_raises_a_stopped_item_within_the_maxi
     else:
         assert field in got.json()["detail"]
         assert _stored(bounded, wid) is None
+
+
+@pytest.mark.parametrize(
+    ("override", "status", "detail"),
+    [
+        pytest.param({"reply_cap_per_thread": 3}, 201, None, id="stored-and-read-back"),
+        pytest.param(
+            {"paths": {"verification.tests": {"reply_cap_per_thread": 3}}},
+            422,
+            "policy.paths.verification.tests.reply_cap_per_thread",
+            id="step-path-refused",
+        ),
+        pytest.param(
+            {"reply_cap_per_thread": 9},
+            422,
+            "policy.reply_cap_per_thread",
+            id="over-maximum-refused",
+        ),
+        pytest.param(
+            {"paths": {_CI: {"reply_timeout_minutes": 3}}}, 201, None, id="timeout-on-a-task-path"
+        ),
+    ],
+)
+def test_the_reply_keys_on_an_item_policy(bounded, repo, override, status, detail):
+    bounded.app.state.instance_policy = InstancePolicy.from_input(
+        InstancePolicyInput.model_validate(
+            {"maxima": {"reply_cap_per_thread": 4, "tasks": {"total_time_cap_minutes": 10080}}}
+        )
+    )
+
+    filed = _file(bounded, repo, policy=override)
+
+    assert filed.status_code == status, filed.text
+    if detail is None:
+        assert _stored(bounded, filed.json()["id"]) == override
+    else:
+        assert filed.json()["detail"].startswith(f"{detail}: ")

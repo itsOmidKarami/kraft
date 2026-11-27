@@ -21,6 +21,7 @@ async def get_apply(request: Request):
 
 @api_router.post("/apply/reload")
 async def post_apply_reload(request: Request):
+    """Reread the template library, policy and intake settings from disk, with no restart."""
     await apply_mod.reload(request.app)
     return apply_mod.pending(request.app.state)
 
@@ -109,11 +110,14 @@ async def _update_state(request: Request, channel: str | None, *, force: bool) -
 
 @api_router.get("/update")
 async def get_update(request: Request, channel: str | None = None):
+    """The installed version, the newest release on the update channel and whether an update is
+    marked or running."""
     return await _update_state(request, channel, force=False)
 
 
 @api_router.post("/update/check")
 async def post_update_check(request: Request, channel: str | None = None):
+    """Look for a newer release now, instead of waiting for the next scheduled check."""
     return await _update_state(request, channel, force=True)
 
 
@@ -156,6 +160,7 @@ async def post_update_mark(body: MarkBody, request: Request):
 
 @api_router.delete("/update/mark")
 async def delete_update_mark(request: Request):
+    """Clear the mark that installs the update when nothing is running."""
     when_free.unmark(request.app.state)
     return await _update_state(request, None, force=False)
 

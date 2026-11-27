@@ -143,6 +143,8 @@ def test_a_gate_decision_with_no_gate_named_decides_the_pending_one(wired, tmp_p
         lambda wid: client.pause(work_item_id=wid),
         lambda wid: client.resume(work_item_id=wid),
         lambda wid: client.skip(work_item_id=wid),
+        lambda wid: client.takeover_begin(wid, pid=os.getpid(), pid_start=0.0),
+        lambda wid: client.takeover_end(wid),
         lambda wid: client.raise_budget(50.0, work_item_id=wid),
         lambda wid: client.submit_review("comment", work_item_id=wid),
         lambda wid: client.add_review_comment("hi", work_item_id=wid),
@@ -153,6 +155,8 @@ def test_a_gate_decision_with_no_gate_named_decides_the_pending_one(wired, tmp_p
         "pause",
         "resume",
         "skip",
+        "takeover_begin",
+        "takeover_end",
         "raise_budget",
         "submit_review",
         "add_review_comment",
@@ -170,6 +174,22 @@ def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, m
 
     with pytest.raises(PermissionError, match="its own work item"):
         run_with_app(wired, scenario)
+
+
+def test_takeover_calls_reach_the_takeover_route(wired, tmp_path):
+    """Begin is the POST and end the DELETE of `/work-items/{id}/takeover`: an
+    item nothing ran on is refused in words, and freeing one nobody holds
+    answers with nothing recorded."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        wid = (await client.create_work_item("never ran", repo=str(repo)))["id"]
+        with pytest.raises(client.ClientError, match="nothing has run on this step yet"):
+            await client.takeover_begin(wid, pid=os.getpid(), pid_start=0.0)
+        return await client.takeover_end(wid)
+
+    ended = run_with_app(wired, scenario)
+    assert ended == {"status": "paused", "recorded": False, "warnings": []}
 
 
 def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path):

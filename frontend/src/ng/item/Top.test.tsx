@@ -108,6 +108,14 @@ describe("Brief", () => {
     expect(screen.getByText("Cache embeddings.")).toBeInTheDocument();
   });
 
+  // A brief is plain text: the collapsed one shows the same characters as the expanded one, only clipped (#1117).
+  it("shows the brief's own characters while collapsed", () => {
+    const brief = "Rename `__init__` and keep **args**";
+    render(<Brief id="w1" brief={brief} onSaved={() => {}} />);
+    expect(document.querySelector(".item-brief-text")).toHaveTextContent(brief, { normalizeWhitespace: false });
+    expect(document.querySelector(".item-brief-text")).not.toHaveClass("is-open");
+  });
+
   it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
     const calls = stubFetch(WRITES);
     const onSaved = vi.fn();

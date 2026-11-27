@@ -27,9 +27,10 @@
 /* At most 3 lines, as the desktop row's tail: the whole reason stays in the DOM, and the item page shows it. */
 .ph-card-tail { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ph-card-children { margin: 0; padding: 0 0 0 40px; list-style: none; display: flex; flex-direction: column; font-size: var(--fs-meta); }
-.ph-card-child { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-height: 36px; align-items: center; padding: 0; border: 0; background: none; color: var(--text-sub); font: inherit; text-align: left; }
+.ph-card-child { display: grid; grid-template-columns: 2ch minmax(0, 1fr) minmax(0, max-content); column-gap: 8px; width: 100%; min-height: 44px; align-items: baseline; align-content: center; padding: 4px 0; border: 0; background: none; color: var(--text-sub); font: inherit; text-align: left; }
+.ph-card-child-key { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
 .ph-card-child-title { min-width: 0; overflow-wrap: anywhere; }
-.ph-card-child-status { flex: none; color: var(--text-muted); }
+.ph-card-child-status { color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
 .ph-card-slices { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-card-tail.ph-is-hot { color: var(--warn); }
 .ph-card-tail.ph-is-running { color: var(--run); }

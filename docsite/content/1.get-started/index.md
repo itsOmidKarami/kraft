@@ -6,19 +6,18 @@ description: Decide whether Kraft fits, install it and run your first work item.
 ---
 
 Want to see the interface first? Open the [demo](/demo/). Still deciding
-whether Kraft is for you? Read [Why Kraft](/get-started/why-kraft) and the
+whether Kraft is for you? Read [Why Kraft](/why) and the
 [FAQ](/get-started/faq). Ready to try it? [Install](/get-started/install)
-Kraft, then run [your first work item](/get-started/first-work-item), and after
+Kraft, then run [your first work item](/get-started/first-work-item) to its gate, and after
 it [the real chain](/get-started/the-real-chain) through its gates to a merged
 merge request. If something goes wrong, see
 [Troubleshooting](/troubleshooting). To upgrade from 1.4, see
-[Upgrade from 1.4](/guides/run/upgrade-from-1-4), and
+[Coming from 1.4](/guides/run/coming-from-1-4), and
 [What's new](/project/whats-new) for what each release brings.
 
 ## In this section
 
-- [Why Kraft](/get-started/why-kraft): what it does that a session, a loop or a skill doesn't, and when not to use it.
 - [Install](/get-started/install): install Kraft with uv, Homebrew, the install script, or from source, start the server, and register it with Claude Code.
-- [Your first work item](/get-started/first-work-item): part 1 of 2: connect a repo and run a work item end to end on the quick-task chain.
+- [Your first work item](/get-started/first-work-item): part 1 of 2: connect a repo, and run a work item on a short chain with one gate until you approve it.
 - [The real chain](/get-started/the-real-chain): part 2 of 2: run the default chain, approve its gates, and review the change to a merged merge request.
 - [FAQ](/get-started/faq): short answers on what Kraft works with, what it costs, and how to write a spec.

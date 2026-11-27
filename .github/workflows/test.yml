@@ -29,7 +29,7 @@ permissions:
 
 env:
   BD_VERSION: "1.2.2"
-  # Every job but the `test` matrix runs on the newest supported Python. With a
+  # Every job but the `test` matrix runs on 3.14, the Python CI builds with. With a
   # floor of 3.12, an unpinned `uv sync` would take whatever 3.12+ the runner
   # has. The `test` matrix sets its own at job level.
   UV_PYTHON: "3.14"
@@ -41,11 +41,11 @@ jobs:
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
     # the test job checks). `python` is false for those and for one that also
     # changes frontend/, with nothing else and no .py file among them: no
-    # Python moved, so the unit tier runs on the newest Python alone and the
-    # real-CLI tier skips. `pythons` is the unit tier's matrix: all three on a
-    # push to main, the floor and the newest on a pull request (3.13 sits
-    # between them, and a failure on it alone was as rare as on 3.12 or 3.14
-    # alone, and read as a flake), the newest alone when `python` is false.
+    # Python moved, so the unit tier runs on 3.14 alone (the Python CI builds
+    # with) and the real-CLI tier skips. `pythons` is the unit tier's matrix:
+    # all four on a push to main, the floor and 3.14 on a pull request (main
+    # still runs 3.13 and 3.15; a failure on 3.13 alone was as rare as on 3.12
+    # or 3.14 alone, and read as a flake), 3.14 alone when `python` is false.
     # Pushes to main run everything, and so does a PR if
     # this job fails: nothing is trimmed or skipped except on an explicit
     # 'false'. The unit tests that read the docs still run on a docs-only
@@ -66,7 +66,7 @@ jobs:
           code=true
           python=true
           # No spaces: the value is one `name=value` line in $GITHUB_OUTPUT.
-          pythons='["3.12","3.13","3.14"]'
+          pythons='["3.12","3.13","3.14","3.15"]'
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             pythons='["3.12","3.14"]'
             git fetch --no-tags --depth=1 origin "$BASE"
@@ -102,7 +102,7 @@ jobs:
           # them took minutes on a slow day. A git command that wants an old
           # file fetches it then (`git archive <tag>` below: about 3s).
           filter: blob:none
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -120,7 +120,7 @@ jobs:
       # Needs the release tags the checkout above fetches (fetch-depth: 0).
       - run: uv run python dev/check_docs_added_in.py
       # The docs style (.vale.ini): the same paths as the justfile's vale_paths.
-      - run: uv run vale docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md vscode/README.md
+      - run: uv run vale docsite/content docsite/blog README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md docs/agent-tooling.md docs/ci.md docs/maintainers.md docs/writing-docs.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md plugins/herdr/README.md addons/kraft-superpowers/README.md
       # An add-on of Kraft's own collection that changed against the pull
       # request's base, or across a push to main, has a higher version.
       - run: uv run python dev/check_addon_versions.py ${{ github.event_name == 'push' && format('--base {0}', github.event.before) || '' }}
@@ -128,15 +128,15 @@ jobs:
 
   test:
     # The unit tier on the supported Pythons (`requires-python` in pyproject.toml
-    # is the floor, 3.12; the newest is 3.14), each in four shards
+    # is the floor, 3.12; the newest is 3.15), each in four shards
     # (`KRAFT_TEST_SHARD`, read by the repo-root conftest.py). One wheel serves
     # all of them, so this is the only place a version gap shows. `changes`
-    # picks the Pythons: all three on a push to main, the floor and the newest
-    # on a pull request, and when it fails, all three. A pull request that
-    # changes no Python runs the newest alone: every unit test still runs,
+    # picks the Pythons: all four on a push to main, the floor and 3.14
+    # on a pull request, and when it fails, all four. A pull request that
+    # changes no Python runs 3.14 alone: every unit test still runs,
     # since some read frontend/ files, but nothing in it can differ by Python
-    # version. Coverage and junit come from the newest Python only, one file
-    # per shard, and `test-report` below puts them together. fail-fast off, so
+    # version. Coverage and junit come from 3.14 only, one file per
+    # shard, and `test-report` below puts them together. fail-fast off, so
     # one leg's failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/4)
     needs: changes
@@ -145,7 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(needs.changes.outputs.pythons || '["3.12", "3.13", "3.14"]') }}
+        python-version: ${{ fromJSON(needs.changes.outputs.pythons || '["3.12", "3.13", "3.14", "3.15"]') }}
         shard: [1, 2, 3, 4]
     # Job-level, so it beats the workflow's UV_PYTHON for `uv run` too: `uv run`
     # rebuilds the venv whenever UV_PYTHON names another version than the one
@@ -157,7 +157,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -242,7 +242,7 @@ jobs:
       - if: >-
           github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: mikepenz/action-junit-report@8a133bfa3ecb0ea9024c1e2ae788b4c25f6cdb9d # v6.6.2
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6.7.1
         with:
           report_paths: junit-*.xml
       # On pull_request it posts or updates the PR comment; on push to main it
@@ -253,7 +253,7 @@ jobs:
           needs.test.result == 'success' &&
           (github.event_name == 'push' ||
            github.event.pull_request.head.repo.full_name == github.repository)
-        uses: py-cov-action/python-coverage-comment-action@e5fb2218463c3377f3504b0c5b5646ed53da7a2f # v4.5
+        uses: py-cov-action/python-coverage-comment-action@281cb0dcb5b15d4773037d51873558fddc5a7df8 # v4.7
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MERGE_COVERAGE_FILES: true
@@ -274,7 +274,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -390,7 +390,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -417,13 +417,80 @@ jobs:
       - name: install bubblewrap
         # The os sandbox's tests run bwrap as the runner's own user. Ubuntu 24.04
         # blocks unprivileged user namespaces for it without an AppArmor profile.
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        # When apt can't fetch from its mirror (2026-11-11: the runners could not
+        # resolve azure.archive.ubuntu.com for hours, and `apt-get update` only
+        # warns), the package lists still name the file and its SHA256: fetch it
+        # from the Ubuntu archive, or a mirror off ubuntu.com when that name
+        # doesn't resolve either, and install it only if the sum matches.
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y bubblewrap || true
+          fi
+          if ! command -v bwrap >/dev/null; then
+            version=$(apt-cache policy bubblewrap | awk '/Candidate:/ {print $2}')
+            meta=$(apt-cache show "bubblewrap=$version" 2>/dev/null || true)
+            file=$(awk '/^Filename:/ {print $2; exit}' <<<"$meta")
+            sum=$(awk '/^SHA256:/ {print $2; exit}' <<<"$meta")
+            deb="$RUNNER_TEMP/bubblewrap.deb"
+            for host in https://archive.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu \
+              https://mirrors.edge.kernel.org/ubuntu https://mirrors.mit.edu/ubuntu; do
+              [ -n "$file" ] && [ -n "$sum" ] || break
+              if curl -fsSL --retry 3 -o "$deb" "$host/$file" && echo "$sum  $deb" | sha256sum -c -; then
+                sudo dpkg -i "$deb" || true
+                break
+              fi
+            done
+          fi
+          command -v bwrap >/dev/null || { echo "::error::could not install bubblewrap"; exit 1; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
+      - name: pull images through a registry mirror
+        # Runners share IPs, so an anonymous registry's quota runs out under
+        # them (Docker Hub, then public.ecr.aws). Images keep their docker.io
+        # names, and both engines fall back to Docker Hub when the mirror lacks
+        # one. `debug` is what makes dockerd log the host of each pull. The relay
+        # is pulled here because test_kit_docker.py points podman at its own
+        # registries.conf, which leaves this mirror out.
+        run: |
+          daemon=/etc/docker/daemon.json
+          { sudo cat "$daemon" 2>/dev/null || true; } |
+            jq -s '(.[0] // {}) | .debug = true |
+              ."registry-mirrors" = (((."registry-mirrors" // []) + ["https://mirror.gcr.io"]) | unique)' |
+            sudo tee "$daemon.new" >/dev/null
+          sudo mv "$daemon.new" "$daemon"
+          sudo cat "$daemon"
+          sudo systemctl restart docker
+          for _ in $(seq 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+          mirrors=$(docker info --format '{{.RegistryConfig.Mirrors}}')
+          echo "docker mirrors: $mirrors"
+          grep -q mirror.gcr.io <<<"$mirrors"
+          docker buildx ls
+          sudo mkdir -p /etc/containers/registries.conf.d
+          sudo tee /etc/containers/registries.conf.d/99-mirror.conf <<'EOF'
+          [[registry]]
+          prefix = "docker.io"
+          location = "docker.io"
+
+          [[registry.mirror]]
+          location = "mirror.gcr.io"
+          EOF
+          mirrors=$(podman info --format '{{json .Registries}}')
+          echo "podman registries: $mirrors"
+          grep -q mirror.gcr.io <<<"$mirrors"
+          relay=$(uv run python -c "from kraft.config import SandboxHost as S; print(S.model_fields['relay_image'].default)")
+          docker pull -q "$relay"
+          podman --log-level=debug pull -q "$relay" 2>&1 | grep 'mirror\.gcr\.io/alpine/socat'
+          podman image exists "$relay"
       - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
           KRAFT_E2E_REQUIRE: bd,docker,podman,bwrap
           E2E_GITHUB_TOKEN: ${{ github.token }}
           E2E_GITHUB_REPO: ${{ github.repository }}
+      - name: which registry docker pulled from
+        if: always()
+        run: |
+          sudo journalctl -u docker --no-pager |
+            grep -oE 'mirror\.gcr\.io|registry-1\.docker\.io' | sort | uniq -c || true
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -460,7 +527,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -507,8 +574,24 @@ jobs:
         python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv run --python ${{ matrix.python-version }} --no-project --with pytest pytest plugins/kraft-lite/tests -q
+
+  herdr-floor:
+    # The Herdr plugin is stdlib-only and says it runs on python3 alone, so it
+    # gets the same treatment as kraft-lite: both ends of the range, no project,
+    # no lockfile, nothing but pytest. Its tests import nothing from Kraft. Its
+    # floor is 3.9, macOS's own python3, which Herdr can restart tabs with; the
+    # repo's conftest.py is newer than that, so --confcutdir leaves it out.
+    name: herdr plugin on python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - run: uv run --python ${{ matrix.python-version }} --no-project --with pytest pytest plugins/herdr/tests -q --confcutdir plugins/herdr
 
   frontend:
     name: frontend
@@ -546,7 +629,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: vscode/package-lock.json
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       # No bd, as in every job but e2e-cli (Kraft-qmhfc): dev/seed.py skips
       # `bd init` without it and intake files no bead. The seed commits, so it
       # needs a git identity.
@@ -579,7 +662,7 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -589,12 +672,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl jq python3
+          # No apt-get: the image already has git, curl and ca-certificates, and
+          # node reads the JSON, so an unreachable apt mirror (2026-11-11) can't
+          # fail this job. uv brings its own Python.
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
           # Through the API, as e2e-cli's install bd step says.
           asset=$(curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/gastownhall/beads/releases/tags/v${BD_VERSION}" |
-            jq -r --arg n "beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" '.assets[] | select(.name == $n) | .url')
+            BD_ASSET="beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" node -e '
+              const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              const a = r.assets.find((x) => x.name === process.env.BD_ASSET);
+              if (a) console.log(a.url);')
           test -n "$asset" || { echo "no beads asset for v${BD_VERSION} linux ${BD_ARCH}"; exit 1; }
           curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/octet-stream" -o "$RUNNER_TEMP/bd.tar.gz" "$asset"
@@ -616,7 +704,8 @@ jobs:
         run: echo '{"mcpServers":{"kraft":{"command":"kraft","args":["admin","mcp"]}}}' > ~/.claude.json
       - name: start the harness server
         run: |
-          uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
+          # -v: a stalled `uv run` otherwise writes nothing to this log.
+          uv run -v python frontend/e2e/serve.py > e2e-server.log 2>&1 &
           for i in $(seq 1 60); do grep -q KRAFT_E2E_REPO e2e-server.log && break; sleep 1; done
           {
             echo "KRAFT_E2E_REPO=$(sed -n 's/.*KRAFT_E2E_REPO=//p' e2e-server.log)"
@@ -624,8 +713,31 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: the harness actually came up
         run: |
-          test -n "$KRAFT_E2E_REPO" || { cat e2e-server.log; exit 1; }
-          test -n "$KRAFT_E2E_BASE" || { cat e2e-server.log; exit 1; }
+          [ -n "$KRAFT_E2E_REPO" ] && [ -n "$KRAFT_E2E_BASE" ] && exit 0
+          # From /proc: the job installs no apt packages, so `ps` may not be there.
+          echo "--- processes still running: pid ppid state age command"
+          up=$(cut -d' ' -f1 /proc/uptime)
+          hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+          for p in /proc/[0-9]*; do
+            stat=$(cat "$p/stat" 2>/dev/null) || continue
+            # The fields after the ")" closing the name: state, ppid, ...; starttime is the 20th.
+            set -- ${stat##*)}
+            age=$(awk -v u="$up" -v s="${20}" -v h="$hz" 'BEGIN { printf "%d", u - s / h }') || age="?"
+            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
+            # A zombie has no command line: name it from comm instead.
+            [ -n "$cmd" ] || cmd="[$(cat "$p/comm" 2>/dev/null || true)]"
+            echo "${p#/proc/} $2 $1 ${age}s $cmd"
+          done
+          # A server still running, after a slow start or past its health check, has
+          # not been asked for its stack yet: its -X faulthandler writes it on SIGABRT.
+          for p in /proc/[0-9]*; do
+            case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)" in
+              *" -m kraft "*) kill -ABRT "${p#/proc/}" 2>/dev/null || true ;;
+            esac
+          done
+          sleep 1
+          cat e2e-server.log
+          exit 1
       # Bail after 3 failures instead of paying the full 120s timeout serially
       # for every spec: a systemic break turns a ~1min green run into over an
       # hour of dead runner time otherwise.
@@ -647,7 +759,7 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: npm ci
@@ -686,7 +798,7 @@ jobs:
           filter: blob:none
       # The project's floor Python, not the runner's default: the tests it parses
       # must be valid on it (Kraft-neyhg). Stdlib only, so nothing is synced.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       # The body is read live, not off the event payload: a re-run replays the
       # original payload, and re-running this job after editing the body is
       # how a declaration is picked up.

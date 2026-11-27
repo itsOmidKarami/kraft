@@ -92,6 +92,80 @@ def stand_at(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     )
 
 
+def held_base_move(
+    conn: sqlite3.Connection, work_item_id, node_id, rerun: frozenset[str]
+) -> str | None:
+    """The base `node_id` stood on before a move it made ahead of a person's stop, while that
+    move is still owed its restart; None otherwise. `rerun` is the nodes after the node's
+    `restart_from`, up to itself: a retry or rejection entering at one of them does not
+    re-verify the move, and one entering earlier does. The node's completion, a skip of it or
+    inside it, and a restart each end the record."""
+    types = (
+        ChainEvent.BASE_MOVE_HELD,
+        ChainEvent.NODE_COMPLETED,
+        ChainEvent.NODE_SKIPPED,
+        ChainEvent.SCOPE_SKIPPED,
+        ChainEvent.RUN_FORKED,
+        ChainEvent.BASE_CHANGE_RESTART,
+        ChainEvent.MERGE_REJECTION_RESTART,
+        GateEvent.REJECTED,
+    )
+    rows = conn.execute(
+        f"SELECT type, payload FROM events WHERE work_item_id = ? AND type IN ({in_list(types)}) "
+        "ORDER BY seq DESC",
+        (work_item_id,),
+    ).fetchall()
+    for row in rows:
+        p = json.loads(row["payload"])
+        kind = row["type"]
+        if kind == ChainEvent.BASE_MOVE_HELD:
+            if p["node_id"] == node_id:
+                return p["before"]
+        elif kind in (ChainEvent.NODE_COMPLETED, ChainEvent.NODE_SKIPPED):
+            if p.get("node_id") == node_id:
+                return None
+        elif kind == ChainEvent.SCOPE_SKIPPED:
+            if p["path"].startswith(f"{node_id}."):
+                return None
+        elif kind == ChainEvent.RUN_FORKED:
+            if (p.get("path") or "").split(".")[0] not in rerun:
+                return None
+        elif kind == GateEvent.REJECTED:
+            if p.get("node") not in rerun:
+                return None
+        else:
+            return None
+    return None
+
+
+def member_moves_held(conn: sqlite3.Connection, work_item_id, node_id) -> int:
+    """How many workspace-member base moves were held for `node_id`: `base_move_held` with no
+    `before`, since a member's move leaves the item's own `base_ref` where it was."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.node_id') = ? AND json_extract(payload, '$.before') = ''",
+        (work_item_id, ChainEvent.BASE_MOVE_HELD, node_id),
+    ).fetchone()[0]
+
+
+def close_parked_sessions(conn: sqlite3.Connection, work_item_id, node_id) -> None:
+    """End the sessions `node_id` left parked on an external wait, as a skip does."""
+    now = _now()
+    for row in conn.execute(
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ? "
+        "ORDER BY rowid",
+        (work_item_id, node_id, SessionStatus.WAITING),
+    ).fetchall():
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, row[0]),
+        )
+        events.append(
+            conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": row[0]}
+        )
+
+
 def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # Idempotent: resume can re-enter an already-completed node (a reconciled
     # non-fix node, or a fix_loop node re-measured after a crash in the

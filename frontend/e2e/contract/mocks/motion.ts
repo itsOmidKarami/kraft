@@ -1,6 +1,9 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
-import type { ItemBundle, Scenario } from "./fixtures";
-import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
+import { hex, type ItemBundle, type Scenario } from "./fixtures";
+import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
+import { FRESH_CONTENT, isLate, planOf, sizeOf, type Content } from "./ngContent";
+import { isAgentSession, taskRun } from "./taskKinds";
+import { pendingRewind, sinceFork, stepIndex, threadSummary, type Transitions } from "./transitions";
 
 /**
  * Live motion for the dashboard demo (`MockOptions.motion`): the board's items walk their chains on their own, as
@@ -12,17 +15,18 @@ import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./tra
  * (`rate_limited`) is retried on its node (`rate_limit_retry.py`: its counter up, `work_item_retried`, or past the
  * policy's retries a stop). An escalation turn on a board item ends on the second tick that sees it running, as its
  * agent finishing does: `worker_session_exited` with its usage and the summary it wrote, filed as the item's document,
- * and the item left as it stopped. Then it moves every board item (`S.ngBoard`) whose status is `active` one step. Every
- * node but a gate takes two ticks:
- * - an agent node runs its first agent task: `node_started`, `worker_session_created`, `worker_session_started`;
- *   on the next tick `worker_session_exited` with its usage, then `node_completed`;
- * - a node with no agent task (builtin, forge, a command) has a session per task, created on the first tick and
- *   exited on the next (no `worker_session_started`, no usage), as the server writes them;
- * and the tick that completes a node enters the next one, or completes the item past the last. A gate is
- * requested (`node_started`, `gate_requested`) and the item stops there for a person. Loops run once, in chain
- * order. A spend cap reached stops the item before its next agent task launches. Where an item goes on from is
- * read from its own events, so whatever the visitor did meanwhile (approve, reject, skip a node or a task, retry,
- * resume, a review's request for changes) is where it carries on.
+ * and the item left as it stopped. Then it moves every board item (`S.ngBoard`) whose status is `active` one beat.
+ *
+ * A node runs as the sample items show it ran (nodeRecipe.ts, the one recipe both read): its tasks in order, each a
+ * session with what its task reports (an agent's usage from its recipe; a command's output), and the events the
+ * walk writes between them. One beat a tick, and the tick that completes a node enters the next one, or completes
+ * the item past the last. A gate is requested, its reviewer runs on the next ticks and says it is ready, and the item
+ * waits there for a person; `chain_revision_approval` passes itself. A forge wait polls: its item waits a few seconds
+ * and is re-entered. The first fresh item the walk files fails its first round of tests, so a fix cycle runs once.
+ * A spend cap reached stops the item before its next agent task launches. Where an item goes on from is read from
+ * its own events, so whatever the visitor did meanwhile (approve, reject, skip a node or a task, retry, resume, a
+ * review's request for changes) is where it carries on: a node the walk was playing is run again from its start,
+ * except past a skip of one of its tasks or steps, which it plays on without.
  *
  * When no board item is active and none waits at a gate, a tick files a fresh item and starts it, so a gate always
  * comes round again; a new one is filed only once everything else has stopped, finished or is waiting.
@@ -31,7 +35,7 @@ import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./tra
 export interface MotionOptions {
   /** The pause before each tick, in ms, drawn from [min, max]. Default 8–15 s. */
   every?: [number, number];
-  /** Draws the jitter and each session's usage. Default `Math.random`. */
+  /** Draws the jitter. Default `Math.random`. */
   random?: () => number;
 }
 
@@ -51,14 +55,26 @@ export const FRESH_TITLES = [
   "Add a --since filter to kraft view events",
   "Warn when a gate names no artifact",
 ];
-const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-docs"].map((r) => `/Users/dev/code/${r}`);
-const MODEL = "claude-sonnet-4-5";
+/** The walk's `n`th filing (from 0): the stories in turn, each in its own repo (ngContent.ts FRESH_CONTENT), and a merge
+ *  request of its own each time, the story's number on by one round of the titles per earlier filing of it. */
+export function refile(n: number): { title: string; repo: string; content: Content } {
+  const title = FRESH_TITLES[n % FRESH_TITLES.length];
+  const entry = FRESH_CONTENT[title];
+  return { title, repo: `/Users/dev/code/${entry.repo}`, content: { ...entry, mr: entry.mr + FRESH_TITLES.length * Math.floor(n / FRESH_TITLES.length) } };
+}
 /** The ticks an escalation turn runs before its agent answers. */
 const TURN_TICKS = 2;
+/** A minute of the recipe's clock on the live one: a forge wait's next poll, two of them, is due in six seconds, so the
+ *  next tick re-enters it. */
+const MINUTE_MS = 3_000;
+/** How many polls a forge wait takes live: one pending, then settled. */
+const POLLS = 2;
+/** Thrown out of a node's beats when a spend cap stops the item before an agent launches: the play ends there. */
+const STOPPED = Symbol("stopped");
 
 /** What the escalation agent found, by the kind of stop it was asked about; `task` is the stopped task's name. */
 const FOUND: Record<string, (node: string, task: string) => string> = {
-  stuck: (_, task) => `The repair rounds keep fixing what ${task} reports, not why it reports it, so the same finding comes back each round. A steer that names the cause should get it through.`,
+  stuck: (node) => `The repair rounds in ${node} keep fixing what its last measurement reported, not why it reports it, so each round finds something new to fix. A steer that names the cause should get it through.`,
   failed: (_, task) => `${task} fails the same way on every attempt, for a reason outside the code, so retrying it alone will not change the answer. Fix what its log names first.`,
   cap: (node) => `${node} was still making progress when it reached its cap. A higher cap, or a retry with a narrower steer, should let it finish.`,
   conflict: () => "Both sides changed the conflicting files for different reasons, so neither can simply win: keep main's version and redo this item's change on top of it.",
@@ -89,7 +105,8 @@ const WHERE = new Set(["node_started", "node_completed", "node_skipped", "scope_
 /** The events that open or close a gate: the newest naming a gate says whether it is cleared (`store.approval_stands`). */
 const GATE_WORD = new Set(["gate_requested", "gate_approved", "gate_rejected", "gate_reopened"]);
 
-type Task = { path: string; agent: boolean };
+/** A node's beats the walk is playing on an item, and how many events the item had after the last one. */
+type Play = { node: string; beats: Beats; at: number };
 
 export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Motion {
   const [lo, hi] = o.every ?? [8_000, 15_000];
@@ -98,28 +115,111 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   let paused = false;
   let stopped = false;
   let filed = 0;
+  /** The items whose first round of tests fails: the first one the walk files. */
+  const red = new Set<string>();
+  const plays = new Map<string, Play>();
+  /** The sessions of an agent's task that started no agent (review feedback's triage with nothing to read). */
+  const noAgent = new Set<string>();
 
   /** The paths a `scope_skipped` passed over in this run fork (`store.skipped_paths`): a task, or a step and its tasks. */
   const skipped = (b: ItemBundle) => sinceFork(b.events).filter((e) => e.type === "scope_skipped").map((e) => String(e.payload.path));
   const under = (path: string, scope: string) => path === scope || path.startsWith(`${scope}.`);
+  /** A step retry's fork starts at its step (`RunFork.start`): the node's steps before it passed already and are not run
+   *  again, until the node completes in this run. */
+  const passed = (b: ItemBundle, path: string) => {
+    const f = [...b.events].reverse().find((e) => e.type === "run_forked");
+    if (f?.payload.scope !== "step") return false;
+    const node = String(f.payload.path).split(".")[0];
+    if (!path.startsWith(`${node}.`) || sinceFork(b.events).some((e) => e.type === "node_completed" && e.payload.node_id === node)) return false;
+    const nodes = b.item.chain_definition?.nodes ?? [];
+    const at = stepIndex(nodes, node, path);
+    return at >= 0 && at < stepIndex(nodes, node, String(f.payload.path));
+  };
 
-  /** A node's tasks in order, each kinded as the frozen chain kinds it (no frozen chain: every task an agent's),
-   *  less those a scope skip passed over. */
-  const tasksOf = (b: ItemBundle, node: any): Task[] => {
-    let frozen: any = null;
-    try { frozen = b.item.materialized_chain ? JSON.parse(b.item.materialized_chain) : null; } catch { /* none: all agents' */ }
-    const own = frozen?.chain?.nodes?.find((n: any) => n.id === node.id);
-    const all: Task[] = own
-      ? (own.steps ?? []).flatMap((st: any) => (st.tasks ?? []).map((t: any) => ({ path: `${node.id}.${st.id}.${t.id}`, agent: t.kind === "agent" })))
-      : (node.tasks ?? []).map((path: string) => ({ path, agent: true }));
-    const gone = skipped(b);
-    return all.filter((t) => !gone.some((g) => under(t.path, g)));
+  /** The recipe's writes on item `id`, each through a door at the mock's clock. */
+  const writer = (id: string): Writer => {
+    const b = () => S.bundles[id];
+    return {
+      id,
+      get sessions() { return b().sessions; },
+      get events() { return b().events; },
+      get frozen() { return b().item.materialized_chain; },
+      get repo() { return b().item.repo; },
+      get head() { return b().item.head_sha ?? null; },
+      get plan() { return planOf(b().item.materialized_chain, b().content); },
+      get late() { return b().content?.files.find(isLate)?.[0] ?? null; },
+      polls: POLLS,
+      get size() { return sizeOf(b().content); },
+      ev: (type, payload = {}) => {
+        const node = payload.node_id ?? payload.node ?? payload.gate;
+        T.append(id, type, payload, typeof node === "string" ? node : null);
+      },
+      enter: (node) => { T.enterNode(id, node); },
+      open: (path, node, op = {}) => {
+        const agent = !op.noAgent && isAgentSession(b().item.materialized_chain, path);
+        // `dispatch.over_budget`, before every agent task's launch. shortcut: a gate's reviewer is not checked (its own
+        // launch checks and logs a skip, `gate_review`); add that skip if a demo item ever reaches a gate over its cap.
+        if (agent && !path.endsWith(".auto_review") && overBudget(b())) { T.stopForBudget(id, node, path); throw STOPPED; }
+        const sid = T.createSession(id, node, path, op).body.session_id;
+        if (op.noAgent) noAgent.add(sid);
+        if (path.endsWith(".auto_review")) T.append(id, "gate_auto_review_started", { gate: node, session_id: sid }, node);
+        if (agent) T.sessionRunning(id, sid);
+        return b().sessions.find((s) => s.id === sid);
+      },
+      close: (s, status = "done") => {
+        // A skip stopped it already: nothing to end.
+        if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return s;
+        const skippedAgent = noAgent.has(s.id);
+        const usage = isAgent(b(), s) && !skippedAgent ? agentUsage(s.hook_point, b().sessions.indexOf(s), sizeOf(b().content)) : null;
+        const summary = usage && status === "done" ? `items/${id}/sessions/${s.id}/out/summary.md` : null;
+        T.sessionExited(id, s.id, usage, summary, { status, noAgent: skippedAgent });
+        return s;
+      },
+      wait: (s, _node, next) => { T.sessionWaiting(id, s.id, next); },
+      at: (dm) => new Date(Date.parse(T.now()) + dm * MINUTE_MS).toISOString(),
+      clock: () => {},
+      sha: (k) => hex(700_000 + k).slice(0, 40),
+      requestGate: (gate) => { T.requestGate(id, gate); },
+      selfApprove: (gate) => { T.selfApprove(id, gate); },
+      mrOpened: (node) => { T.mrOpened(id, node); },
+      complete: (node) => { T.completeNode(id, node); },
+      skipped: (path) => skipped(b()).some((g) => under(path, g)) || passed(b(), path),
+      passed: (path) => passed(b(), path),
+    };
   };
-  /** Whether a session's task is an agent's; one the frozen chain does not name (a steer's on a never-run node) is. */
-  const isAgent = (b: ItemBundle, s: any) => {
-    const node = (b.item.chain_definition?.nodes ?? []).find((n: any) => n.id === s.node_id);
-    return tasksOf(b, node ?? { id: s.node_id }).find((t) => t.path === s.hook_point)?.agent ?? true;
+
+  /** Whether the walk is still playing a node's beats on the item: on that node, and nothing written since its last
+   *  beat but a skip of one of its tasks or steps (and the sessions that stopped). Anything else is the visitor's door,
+   *  and the walk picks up from the item's events instead. */
+  const playing = (id: string) => {
+    const p = plays.get(id);
+    const b = S.bundles[id];
+    if (p && p.node === b.item.current_node_id && b.events.slice(p.at).every((e) => e.type === "scope_skipped" || e.type === "worker_session_paused")) return true;
+    plays.delete(id);
+    return false;
   };
+  /** The next beat of the node the walk is playing on the item; past its last, the next node (an exec node completed,
+   *  or a gate that passed itself). */
+  const advance = (id: string) => {
+    const b = S.bundles[id];
+    const p = plays.get(id)!;
+    let r: IteratorResult<void, void>;
+    try {
+      r = p.beats.next();
+    } catch (e) {
+      plays.delete(id);
+      if (e === STOPPED) return;
+      throw e;
+    }
+    if (!r.done) { p.at = b.events.length; return; }
+    plays.delete(id);
+    // Played out and still active, it is done (a node completed once already this run writes no second completion);
+    // a gate played out waits for a person instead.
+    if (b.item.status === "active") enter(id, nextNode(b, false));
+  };
+
+  /** Whether a session's task is an agent's (`isAgentSession`: one the frozen chain does not name, a steer's on a never-run node, is). */
+  const isAgent = (b: ItemBundle, s: any) => isAgentSession(b.item.materialized_chain, s.hook_point, !!s.model);
 
   /** `store.approval_stands`: the newest gate event naming this gate is its approval, and nothing since sent the
    *  chain back at or before it -- a rejection re-entering at its `node`, or a rewind to its `target` not cancelled
@@ -137,8 +237,8 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   };
 
   /** How the item stands on its node, by its newest positional event: `done` past it (completed, skipped, its gate
-   *  approved), `skipped` when a task or step of it was skipped (the walk runs one task a node, so that ends it),
-   *  else `again`: the node runs (a rejection's target, a retry, a resume, a node never started or left mid-way). */
+   *  approved), `skipped` when a task or step of it was skipped with no beats of it left to play (a sample item's node,
+   *  which the walk did not start: that ends it), else `again`: the node runs (a rejection's target, a retry, a resume, a node never started or left mid-way). */
   const standing = (b: ItemBundle): "done" | "skipped" | "again" => {
     const cur = b.item.current_node_id;
     const last = [...b.events].reverse().find((e) => WHERE.has(e.type));
@@ -172,39 +272,22 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     return cap != null && (b.item.budget_cap?.spent_usd ?? 0) >= cap;
   };
 
-  /** The walk entering `node`, or past the last one completing the item. */
+  /** The walk entering `node`, its first beat played, or past the last one completing the item. A gate this item
+   *  already cleared is passed over, with no second `node_started` (`walk.run_once`). */
   const enter = (id: string, node: any | undefined): void => {
     const b = S.bundles[id];
     if (!node) { T.markCompleted(id); return; }
-    if (node.kind === "gate") {
-      // A gate this item already cleared is passed over, with no second `node_started` (`walk.run_once`).
-      if (cleared(b, node.id)) return enter(id, after(b, node));
-      T.enterNode(id, node.id);
-      T.requestGate(id, node.id);
-      return;
-    }
-    T.enterNode(id, node.id);
-    const tasks = tasksOf(b, node);
-    const agent = tasks.find((t) => t.agent);
-    if (agent) {
-      if (overBudget(b)) { T.stopForBudget(id, node.id); return; }
-      T.sessionRunning(id, T.createSession(id, node.id, agent.path).body.session_id);
-      return;
-    }
-    // A node with nothing left to run completes as it starts.
-    if (!tasks.length) { T.completeNode(id, node.id); return enter(id, after(b, node)); }
-    for (const t of tasks) T.createSession(id, node.id, t.path);
+    if (node.kind === "gate" && cleared(b, node.id)) return enter(id, after(b, node));
+    // `walk` writes `chain_loaded` on a walk from the first node; the demo models an item's first walk only (a retry at the first node, which the server writes it again for, is not modelled).
+    if (node.id === b.item.chain_definition?.nodes?.[0]?.id && !b.events.some((e) => e.type === "chain_loaded")) T.append(id, "chain_loaded", {});
+    const fails = red.has(id) && !b.events.some((e) => e.type === "fix_cycle_started");
+    plays.set(id, { node: node.id, beats: nodeBeats(writer(id), node, { red: fails }), at: b.events.length });
+    advance(id);
   };
 
-  const usage = () => ({
-    model: MODEL,
-    tokens_in: 28_000 + Math.round(random() * 40_000),
-    tokens_out: 3_000 + Math.round(random() * 6_000),
-    cost_usd: Math.round((0.04 + random() * 0.16) * 100) / 100,
-  });
-
-  /** One step of one active item. */
+  /** One beat of one active item. */
   const step = (id: string) => {
+    if (playing(id)) return advance(id);
     const b = S.bundles[id];
     const node = b.item.current_node_id;
     const live = b.sessions.filter((s) => s.node_id === node && s.hook_point !== "escalation" && LIVE_SESSION_STATUSES.includes(s.status));
@@ -217,16 +300,18 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       // Stopped before it launched: the attempt never was, and the steer it would have carried is reported
       // undelivered after the stop, as the walk reports it. A retry after the raise starts with no steer.
       T.withdrawSession(id, queued.id);
-      T.stopForBudget(id, node);
+      T.stopForBudget(id, node, queued.hook_point);
       const steer = [...b.events].reverse().find((e) => e.type === "work_item_resumed")?.payload.steer;
       if (typeof steer === "string" && steer) T.steerUndelivered(id, steer);
       return;
     }
+    // Sessions it was left running with no beats to play (a sample item's, or a node the visitor's door broke off):
+    // they end, and the node with them.
     if (live.length) {
       for (const s of live) {
         // The forge's draft task opens the merge request (`forge.run`), recorded as it ends.
-        if (String(s.hook_point).split(".")[2] === "open_draft") T.mrOpened(id, node);
-        T.sessionExited(id, s.id, isAgent(b, s) ? usage() : null);
+        if (taskRun(b.item.materialized_chain, s.hook_point) === "mr.open_draft") T.mrOpened(id, node);
+        T.sessionExited(id, s.id, isAgent(b, s) ? agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content)) : null);
       }
       T.completeNode(id, node);
       return enter(id, nextNode(b, false));
@@ -250,7 +335,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         const key = `${id}/${s.id}`;
         const n = (turns.get(key) ?? 0) + 1;
         if (n < TURN_TICKS) { seen.set(key, n); continue; }
-        T.sessionExited(id, s.id, usage(), threadSummary(id, s.thread ?? 1));
+        T.sessionExited(id, s.id, agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content)), threadSummary(id, s.thread ?? 1));
         T.indexSummary(id, s.id, reply(b, s));
       }
     }
@@ -269,13 +354,24 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         else if (it.status === "rate_limited") T.rateLimitRetry(id);
       }
       answerTurns(board);
+      // A gate's reviewer runs while its item waits for a person (`gate_review`).
+      for (const id of board) {
+        const it = S.bundles[id].item;
+        if (it.status === "needs_human" && it.pending_gate && playing(id)) advance(id);
+      }
       const active = board.filter((id) => S.bundles[id].item.status === "active");
       for (const id of active) step(id);
       const gated = board.some((id) => S.bundles[id].item.status === "needs_human" && S.bundles[id].item.pending_gate);
       if (!active.length && !gated) {
         const n = filed++;
-        const made = T.create({ title: FRESH_TITLES[n % FRESH_TITLES.length], repo: FRESH_REPOS[n % FRESH_REPOS.length], chain_template: "default", autostart: true });
-        if (made.status === 201) step(made.body.id);
+        const { title, repo, content } = refile(n);
+        const made = T.create({ title, description: content.description, repo, chain_template: "default", autostart: true });
+        if (made.status === 201) {
+          // Its own files and merge request (ngContent.ts), as a board row has.
+          S.bundles[made.body.id].content = content;
+          if (n === 0) red.add(made.body.id);
+          step(made.body.id);
+        }
       }
     } finally {
       arm();

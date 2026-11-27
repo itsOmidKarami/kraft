@@ -21,6 +21,8 @@ class CheckBody(BaseModel):
 
 @api_router.post("/templates/check")
 async def check_config(body: CheckBody, request: Request):
+    """Check a template file's text against the live configuration and return its issues with
+    positions, writing nothing."""
     st = request.app.state
 
     def run():

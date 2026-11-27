@@ -68,7 +68,8 @@ def _edit_library(client, old, new):
 def _prompt_after_resume(client, wid, argv_log) -> str:
     assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 200
     deadline = time.monotonic() + 30
-    while time.monotonic() < deadline and not argv_log.exists():
+    # The file exists before the launch's line is written into it (Kraft-tfhv3).
+    while time.monotonic() < deadline and not (argv_log.exists() and argv_log.read_text().strip()):
         time.sleep(0.2)
     assert argv_log.exists(), f"agent never launched for {wid}"
     argv = json.loads(argv_log.read_text().splitlines()[0])

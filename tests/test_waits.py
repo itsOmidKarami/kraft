@@ -323,7 +323,7 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
                     ]
                 }
             },
-            {"pipeline": "123"},
+            {"config": {"pipeline": "123"}},
         ),
     ],
     ids=[
@@ -547,7 +547,11 @@ def test_a_template_cannot_configure_how_automated_review_is_read(key):
     from pydantic import ValidationError
 
     task = {"id": "review", "kind": "forge", "target": "mr.automated_review"}
-    for authored in ({**task, key: "x"}, {**task, "wait": {key: "x"}}):
+    for authored in (
+        {**task, key: "x"},
+        {**task, "wait": {key: "x"}},
+        {**task, "config": {key: "x"}},
+    ):
         with pytest.raises(ValidationError, match=key):
             v1_resolved([{"id": "feedback", "kind": "exec", "tasks": [authored]}])
 
@@ -698,6 +702,12 @@ async def test_tick_ignores_an_item_that_was_paused_while_waiting(repo, schedule
 
     assert await waits.tick(app) == []
     assert _status(app) == "paused"
+
+
+async def test_tick_leaves_a_due_item_whose_walk_is_still_returning(repo, scheduler):
+    await _seed_waiting(app := scheduler(), repo, retry_at="2000-01-01T00:00:00+00:00")
+    app.state.tasks["w1"] = asyncio.ensure_future(asyncio.sleep(1))  # the walk that parked it
+    assert (await waits.tick(app), _status(app)) == ([], "waiting")
 
 
 async def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(repo, scheduler):

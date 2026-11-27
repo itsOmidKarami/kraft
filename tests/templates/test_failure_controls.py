@@ -479,6 +479,25 @@ def test_a_fix_loop_is_an_execution_node_control_naming_its_fixing_tasks():
         tm.FixLoop.model_validate({"judge": sub("judge")})
 
 
+@pytest.mark.parametrize(
+    ("node", "early"),
+    [
+        (exec_node(tasks=[sub()], fix_loop=plan(sub("fix"))), False),
+        (exec_node(tasks=[sub()], fix_loop={**plan(sub("fix")), "early": True}), True),
+        (exec_node(tasks=[sub()], fix_loop={**plan(sub("fix")), "early": "yes"}), None),
+        (exec_node(tasks=[sub()], early=True), None),
+        (exec_node(tasks=[sub()], on_failure={**plan(sub("r")), "early": True}), None),
+    ],
+    ids=["off-by-default", "on", "a-bool-only", "not-on-the-node", "not-on-a-recovery-plan"],
+)
+def test_early_is_a_flag_of_the_fix_loop_only(node, early):
+    if early is None:
+        with pytest.raises(ValidationError):
+            tm.ExecNode.model_validate(node)
+    else:
+        assert tm.ExecNode.model_validate(node).fix_loop.early is early
+
+
 def _grouped(**node) -> dict:
     """slices (a group) -> gate -> rebase, one of which declares `node`."""
     return {

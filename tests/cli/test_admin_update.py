@@ -413,3 +413,82 @@ def test_when_free_with_no_server_exits_1(monkeypatch, capsys, argv, says):
 
     assert exit_.value.code == 1
     assert says in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("install", "in_flight", "copy_fails", "left"),
+    [
+        pytest.param(0, False, False, "new", id="installed-keeps-only-its-snapshot"),
+        pytest.param(1, False, False, "earlier", id="failed-install-keeps-the-earlier-one"),
+        pytest.param("exit", False, False, "earlier", id="refused-install-keeps-the-earlier-one"),
+        pytest.param(0, True, False, "both", id="an-update-in-flight-keeps-its-snapshot"),
+        pytest.param(None, False, True, "earlier", id="failed-copy-installs-nothing"),
+    ],
+)
+def test_update_snapshots_config_and_databases_before_it_installs(
+    monkeypatch, tmp_path, capsys, install, in_flight, copy_fails, left
+):
+    """The way back from a manual update: the config and every run database are
+    copied, with the version of the server that wrote them, before anything is
+    installed. The copy of the last update that went through stays until the
+    next one does, and one an update still being confirmed would restore stays."""
+    import sqlite3
+
+    from kraft import when_free
+    from kraft.cli import admin
+    from kraft.paths import RunDirs
+
+    config_dir, run_dir = tmp_path / "config", tmp_path / "run"
+    config_dir.mkdir()
+    run_dir.mkdir()
+    (config_dir / "repos.yaml").write_text("repos: []\n")
+    with sqlite3.connect(run_dir / "orchestrator.db") as db:
+        db.execute("create table t (v)")
+        db.execute("insert into t values ('kept')")
+    db.close()
+    if copy_fails:
+        (run_dir / "broken.db").write_bytes(b"not a database" * 100)
+    earlier = run_dir / f"{when_free.SNAPSHOT_PREFIX}earlier"
+    earlier.mkdir()
+    if in_flight:
+        when_free.write_rollback(RunDirs(run_dir), config_snapshot=str(earlier / "config"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(update, "latest", lambda **_k: update.Release("v2.6.1", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "2.6.0")
+    monkeypatch.setattr(admin, "_running_server_version", lambda: "2.5.9")
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: None)
+    at_install = []
+
+    def perform(*_a, **_k):
+        at_install.append(set(run_dir.glob(f"{when_free.SNAPSHOT_PREFIX}*")) - {earlier})
+        if install == "exit":
+            raise SystemExit("install it with pipx instead")
+        return install
+
+    monkeypatch.setattr(update, "perform", perform)
+
+    try:
+        cli.main(["admin", "update"])
+        refused = None
+    except SystemExit as exc:
+        refused = str(exc.code)
+
+    found = set(run_dir.glob(f"{when_free.SNAPSHOT_PREFIX}*"))
+    if copy_fails:
+        assert at_install == [] and "Nothing was installed" in refused
+        assert found == {earlier}
+        return
+    ((taken,),) = at_install
+    assert found == {"new": {taken}, "earlier": {earlier}, "both": {earlier, taken}}[left]
+    if install:
+        assert refused is not None
+        return
+    assert refused is None
+    assert f"backed up the configuration and databases to {taken}" in capsys.readouterr().out
+    assert (taken / "version").read_text() == "2.5.9\n"
+    assert (taken / "config" / "repos.yaml").read_text() == "repos: []\n"
+    copy = sqlite3.connect(taken / "db" / "orchestrator.db")
+    assert copy.execute("select v from t").fetchall() == [("kept",)]
+    copy.close()

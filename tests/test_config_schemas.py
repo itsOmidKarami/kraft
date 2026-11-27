@@ -149,3 +149,53 @@ def test_a_field_named_required_survives_the_authored_transform():
 def test_the_chain_schema_takes_an_extending_chain(chain, valid):
     errors = list(validator("chain.schema.json").iter_errors(chain))
     assert (not errors) is valid, errors
+
+
+def _library_task(**task) -> dict:
+    return {"tasks": {"t": {"kind": "forge", **task}}}
+
+
+@pytest.mark.parametrize(
+    ("task", "valid"),
+    [
+        ({"target": "mr.automated_review", "config": {"watch_ci": True}}, True),
+        ({"target": "mr.ci", "config": {"watch_ci": True}}, False),
+        ({"target": "mr.ci", "config": {"watch_ci": False}}, True),
+        ({"target": "mr.automated_review", "config": {"watch_cl": False}}, False),
+        ({"target": "ci.pipeline", "config": {"pipeline": "1", "reviewers": None}}, True),
+        ({"extends": "base", "config": {"pipeline": "1"}}, True),
+        (
+            {
+                "target": "mr.automated_review",
+                "reviewers": [{"bot": "a"}],
+                "wait": {"grace_period": "60s"},
+            },
+            True,
+        ),
+        ({"target": "ci.pipeline", "config": {"pipeline": 12345}}, True),
+        (
+            {
+                "target": "mr.automated_review",
+                "config": {"reviewers": [{"check": "c", "bot": None}]},
+            },
+            True,
+        ),
+        ({"target": "mr.automated_review", "watch_ci": True}, True),
+    ],
+    ids=[
+        "own-key",
+        "another-targets-key",
+        "another-targets-clear",
+        "typo",
+        "pipeline-with-a-clear",
+        "inherited-target",
+        "the-v2.6-form",
+        "an-unquoted-pipeline-id",
+        "a-stored-reviewer-entry",
+        "flat-watch-ci-as-on-main",
+    ],
+)
+def test_a_forge_tasks_config_is_checked_against_its_target(task, valid):
+    """Never stricter than the loader: a clear and the deprecated flat form validate."""
+    errors = list(validator("library.schema.json").iter_errors(_library_task(**task)))
+    assert (not errors) is valid

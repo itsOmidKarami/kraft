@@ -299,6 +299,10 @@ async def stop_for_waiting(
     if due is None:
         due = (datetime.fromisoformat(_now()) + DEFAULT_WAIT.initial_interval).isoformat()
     reason = db.read(lambda c: _machine_wait(c, work_item_id, node.id, paths))
+    # A step the network cut off comes back on its own backoff, not its wait's
+    # next look, which may already be due.
+    if parked := db.read(lambda c: waits.no_answer_park(c, work_item_id, paths)):
+        due, reason = parked
     await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, due, reason=reason))
     return WAITING
 
@@ -350,14 +354,15 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     """Something outside the code broke and a repair cannot fix it: the
     persisted `ci_infra:<node_id>` retry cap is spent on a pipeline red for
     the forge's own reasons (Kraft-h81i, Kraft-s8ul), the automated
-    reviewer errored (Ruling 170), or a cancelled run has no successor
-    coming (Kraft-kbqmk). Straight to needs_human, no fix cycle, no
-    on_failure repair, and the stop names whichever it was.
+    reviewer errored (Ruling 170), a cancelled run has no successor coming
+    (Kraft-kbqmk), or the forge gave no answer through every try. Straight to
+    needs_human, no fix cycle, no on_failure repair, and the stop names
+    whichever it was.
     """
     info = db.read(lambda c: events.read_after(c, 0, work_item_id))
-    reason = next(
+    found = next(
         (
-            e["payload"]["reason"]
+            e
             for e in reversed(info)
             if e["type"]
             in (
@@ -365,9 +370,16 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
                 ForgeEvent.AUTOMATED_REVIEW_ERRORED,
                 ForgeEvent.CI_RUN_ABANDONED,
             )
+            or (e["type"] == ForgeEvent.FORGE_NO_ANSWER and "reason" in e["payload"])
         ),
-        "CI infrastructure failed and retrying it did not recover",
+        None,
     )
+    reason = (
+        found["payload"]["reason"]
+        if found
+        else "CI infrastructure failed and retrying it did not recover"
+    )
+    network = found is not None and found["type"] == ForgeEvent.FORGE_NO_ANSWER
     await db.write(
         lambda c: store.mark_needs_human(
             c,
@@ -376,7 +388,7 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
             reason,
             suggested=RETRY_LATER,
             kind=StopKind.INFRA,
-            facts={"cause": "ci_infra"},
+            facts={"cause": "forge_unreachable" if network else "ci_infra"},
         )
     )
     return "needs_human"

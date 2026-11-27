@@ -126,6 +126,36 @@ def test_resolution_types_every_task_in_the_design_chain(design):
     assert await_ci.wait.polling.initial_interval.total_seconds() == 30
 
 
+def test_the_default_review_wait_settings_stay_on_its_node(design):
+    """`default-review-wait-settings-stay-on-its-node`: the bot wait watches CI
+    with a 10-minute cap and the fix loop may start early, all set on the
+    library node; the library task keeps its 30 minutes and `watch_ci` off for
+    any other node that extends it."""
+    chain = design.resolve_chain("default")
+    feedback = next(n for n in chain.nodes if n.id == "merge_request_feedback")
+    by_path = {t.path: t.task for s in feedback.steps for t in s.tasks}
+    wait = by_path["merge_request_feedback.automated_review.await_review"]
+    assert (wait.watch_ci, wait.policy.total_time_cap_minutes) == (True, 10)
+    # The rest is the library task's: an `extends` merge copies the parent.
+    assert wait.grace.total_seconds() == 60
+    assert feedback.node.fix_loop.early is True
+    other, id = design.with_chain(
+        DESIGN_TEMPLATES / "chains" / "other.yaml",
+        {
+            "id": "other",
+            "nodes": [
+                {
+                    "id": "bots",
+                    "kind": "exec",
+                    "tasks": [{"id": "wait", "extends": "await_automated_review"}],
+                }
+            ],
+        },
+    )
+    [plain] = [t.task for s in other.resolve_chain(id).nodes[0].steps for t in s.tasks]
+    assert (plain.watch_ci, plain.policy.total_time_cap_minutes) == (False, 30)
+
+
 # ── extends (component-extends-has-one-parent,
 # extends-merges-objects-and-replaces-arrays, extends-cannot-change-kind) ──
 

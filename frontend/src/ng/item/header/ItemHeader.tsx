@@ -159,6 +159,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (hs.main === "answer") return onAnswer ? onAnswer() : navigate(itemUrl);
     if (hs.main === "conflicts") return navigate(`${itemUrl}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
     if (hs.main === "reopen") return void run(act.reopenMr(item.id));
+    if (hs.main === "rerun") return void run(act.rerunCi(item.id));
     if (asksFirst()) return draft!.setReviewing(true, start);
     if (hs.main === "start") return void startFresh();
     // Only an item that never started can need its chain approved: a resume goes straight to the server.
@@ -215,7 +216,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         <PauseConfirm queued={queued} busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
       {reviewing && <OneOffReview itemId={item.id} fromLink={reviewing === "link"} onReading={setReading} onClose={() => { setReviewing(false); setReading(false); }} onApproved={() => { setReviewing(false); startRun(); }} />}
-      {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
+      {cancelling && <CancelCard id={item.id} neverStarted={neverStarted(item)} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={group} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); toMain(); }} />}
       {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); toMain(); }} />}
     </HeaderActions>

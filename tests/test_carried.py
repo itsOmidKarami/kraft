@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import write
+from support.harness import commit_all, git, make_repo, write
 
 from kraft import carried, storage
 
@@ -71,6 +72,72 @@ def test_save_writes_a_generation_current_points_at(tmp_path, run_dirs):
     assert _generations(store) == sorted([first, second])
     assert (first / ".testmondata").read_bytes() == b"db"
     assert _save(run_dirs, repo, worktree) is False
+
+
+def _commits(tmp_path: Path) -> tuple[Path, dict[str, str | None]]:
+    """A repo with `old` < `mid` < `new` on main and `side`, forked from `old`."""
+    repo = make_repo(tmp_path)
+    old = git(repo, "rev-parse", "HEAD")
+    write(repo, "a", "1")
+    mid = commit_all(repo)
+    write(repo, "b", "2")
+    new = commit_all(repo)
+    git(repo, "checkout", "-q", "-b", "side", old)
+    write(repo, "c", "3")
+    side = commit_all(repo)
+    git(repo, "checkout", "-q", "main")
+    bases = {"old": old, "mid": mid, "new": new, "side": side, "unknown": "0" * 40, "none": None}
+    return repo, bases
+
+
+@pytest.mark.parametrize(
+    ("stored", "saver", "saved", "git_error"),
+    [
+        ("old", "new", True, None),
+        ("new", "old", False, None),
+        ("mid", "mid", True, None),
+        ("new", "side", True, None),
+        ("none", "old", True, None),
+        ("new", "unknown", True, None),
+        ("new", "none", True, None),
+        ("new", "old", True, FileNotFoundError("git")),
+        ("new", "old", True, subprocess.TimeoutExpired("git", 30)),
+    ],
+    ids=[
+        "a-newer-tree-replaces",
+        "an-older-tree-does-not",
+        "the-same-base-replaces",
+        "a-diverged-base-replaces",
+        "no-base-stored",
+        "a-base-git-does-not-know",
+        "no-base-given",
+        "git-missing",
+        "git-hangs",
+    ],
+)
+def test_a_save_from_an_older_tree_leaves_the_newer_saved_copy(
+    tmp_path, run_dirs, monkeypatch, stored, saver, saved, git_error
+):
+    repo, bases = _commits(tmp_path)
+    worktree, record = tmp_path / "wt", tmp_path / "record.json"
+    store = carried.store_dir(run_dirs, repo)
+    write(worktree, ".testmondata", "first")
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases[stored])
+    first = carried.current_generation(store)
+    if git_error:
+
+        def broken(*args, **kwargs):
+            raise git_error
+
+        monkeypatch.setattr(subprocess, "run", broken)
+
+    write(worktree, ".testmondata", "second, longer")
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases[saver]) is saved
+
+    assert (carried.current_generation(store) != first) is saved
+    # A skip leaves the baseline, so a round on the stored base still saves;
+    # a save that was made has nothing newer left to save.
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases[stored]) is (not saved)
 
 
 def test_a_file_the_worktree_no_longer_has_is_absent_from_the_new_set(tmp_path, run_dirs):

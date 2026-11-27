@@ -92,6 +92,7 @@ def test_every_task_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
     chain = kl_chains.resolve(tmp_path, {}, "default")
     tasks = [t for n in chain["nodes"] if n["kind"] == "exec" for t in _chain_tasks(n)]
+    tasks += [n["auto_review"] for n in chain["nodes"] if n["kind"] == "gate" and n["auto_review"]]
     found = kl.detect(tmp_path)["candidates"]
     assert set(found["tasks"]) == {t["components"][0] for t in tasks if t["kind"] == "agent"}
     assert set(found["builtins"]) == {t["ref"] for t in tasks if t["kind"] == "builtin"}
@@ -112,7 +113,7 @@ def test_task_keywords_cover_the_library():
     """A component with no `TASK_KEYWORDS` entry silently falls back to splitting
     its own name into keywords -- the behaviour meant for a repo's own tasks,
     not one the bundled library curated on purpose."""
-    _, library = kl_chains.libraries(PLUGIN, {})
+    library = kl_chains.bundled_library()
     agents = {n for n, raw in library.components["tasks"].items() if raw["kind"] == "agent"}
     expected = agents | set(kl_chains.BUILTIN_REFS) | set(kl_chains.FORGE_TARGETS)
     assert set(kl.TASK_KEYWORDS) == expected

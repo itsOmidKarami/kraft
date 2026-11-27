@@ -729,62 +729,29 @@ def test_a_worker_agent_s_gate_approval_is_not_recorded_as_a_person_s(client, re
     assert appr and appr[-1]["payload"]["by"] == "agent"
 
 
-def test_an_assistant_session_through_mcp_is_neither_a_worker_nor_a_person(client, repo):
-    """Every one of the 28 real MCP gate calls on this machine came from a
-    non-worker assistant session, which carries no KRAFT_SESSION_ID. Recording
-    those as `human` is the defect; recording them as `agent` would claim a
-    Kraft worker approved its own artifact, which is a different thing."""
+@pytest.mark.parametrize("verb", ["approve", "reject"])
+@pytest.mark.parametrize(
+    ("headers", "by"),
+    [
+        ({"X-Kraft-Client": "mcp"}, "assistant"),
+        ({"X-Kraft-Client": "agent-shell"}, "assistant"),
+        ({}, "human"),
+        ({"X-Kraft-Session-Id": "w-other/abc123", "X-Kraft-Client": "agent-shell"}, "agent"),
+        ({"X-Kraft-Session-Id": "w-other/abc123", "X-Kraft-Client": "mcp"}, "agent"),
+    ],
+    ids=["mcp", "agent-shell", "bare", "worker-in-agent-shell", "worker-via-mcp"],
+)
+def test_a_gate_decision_records_its_caller(client, repo, verb, headers, by):
+    """A gate records who decided: a worker (`agent`) outranks how it connected; an MCP
+    session or a coding agent's shell is an `assistant`; only a bare call is a `human`."""
     wid = _post_default(client, repo)
     _await_gate(client, wid, "spec_approval")
     r = client.post(
-        f"/api/work-items/{wid}/gates/spec_approval/approve",
-        headers={"X-Kraft-Client": "mcp"},
+        f"/api/work-items/{wid}/gates/spec_approval/{verb}",
+        json={"note": "not specific enough"} if verb == "reject" else None,
+        headers=headers,
     )
     assert r.status_code == 200, r.text
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    appr = [e for e in evts if e["type"] == "gate_approved"]
-    assert appr and appr[-1]["payload"]["by"] == "assistant"
-
-
-def test_a_gate_rejection_records_its_caller_the_same_way(client, repo):
-    """The bead asked for reject to be checked while in there. It has the same
-    gap: apply_rejection takes `by` and the route never passed it."""
-    wid = _post_default(client, repo)
-    _await_gate(client, wid, "spec_approval")
-    r = client.post(
-        f"/api/work-items/{wid}/gates/spec_approval/reject",
-        json={"note": "not specific enough"},
-        headers={"X-Kraft-Client": "mcp"},
-    )
-    assert r.status_code == 200, r.text
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    rej = [e for e in evts if e["type"] == "gate_rejected"]
-    assert rej and rej[-1]["payload"]["by"] == "assistant"
-
-
-def test_a_worker_s_own_session_id_outranks_how_it_connected(client, repo):
-    """A Kraft worker reaching the API through MCP carries both headers. What it
-    is outranks how it connected."""
-    wid = _post_default(client, repo)
-    _await_gate(client, wid, "spec_approval")
-    r = client.post(
-        f"/api/work-items/{wid}/gates/spec_approval/approve",
-        headers={"X-Kraft-Session-Id": "w-other/abc123", "X-Kraft-Client": "mcp"},
-    )
-    assert r.status_code == 200, r.text
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    assert [e for e in evts if e["type"] == "gate_approved"][-1]["payload"]["by"] == "agent"
-
-
-def test_the_mcp_transport_announces_itself_and_the_bare_cli_does_not(monkeypatch):
-    """The bearer token cannot be the discriminator -- transport attaches it to
-    every CLI call too, so a human typing `kraft item approve` would read as an
-    agent. This header is what separates them."""
-    from kraft.client import transport
-
-    monkeypatch.delenv("KRAFT_CLIENT", raising=False)
-    monkeypatch.delenv("KRAFT_SESSION_ID", raising=False)
-    assert "X-Kraft-Client" not in transport.http().headers
-
-    monkeypatch.setenv("KRAFT_CLIENT", "mcp")
-    assert transport.http().headers["X-Kraft-Client"] == "mcp"
+    event = {"approve": "gate_approved", "reject": "gate_rejected"}[verb]
+    evts = [e for e in client.get(f"/api/work-items/{wid}/events").json() if e["type"] == event]
+    assert evts[-1]["payload"]["by"] == by

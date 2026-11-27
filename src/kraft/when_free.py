@@ -415,10 +415,9 @@ CONFIRM_S = 120
 #: helper gone, no other process is left to roll back.
 PROBATION_S = 300
 
-#: How long a snapshot is kept once the new server has left probation.
-KEEP_SNAPSHOT_S = 3600
-
 ROLLBACK_FILE = "update-rollback.json"
+#: The newest snapshot of an update that went through stays until the next
+#: one goes through, so its version can be put back later by hand.
 SNAPSHOT_PREFIX = "update-snapshot-"
 
 
@@ -458,30 +457,45 @@ def clear_rollback(run_dirs) -> None:
     (run_dirs.base / ROLLBACK_FILE).unlink(missing_ok=True)
 
 
-def snapshot(run_dirs, config_dir: Path) -> dict:
+def snapshot(run_dirs, config_dir: Path, version: str) -> dict:
     """Copy the configuration directory, and back up every run database with
     SQLite's online backup (the server is still writing them), into a folder
-    of its own under the run dir. Returns phase 2's fields."""
+    of its own under the run dir, with `version`, the Kraft that wrote them,
+    in a file of that name. Returns phase 2's fields."""
     import shutil
     import sqlite3
 
-    root = run_dirs.base / f"{SNAPSHOT_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}"
-    config_copy = root / "config"
-    shutil.copytree(config_dir, config_copy, symlinks=True)
-    snapshots = {}
-    (root / "db").mkdir(parents=True, exist_ok=True)
-    for source in sorted(run_dirs.base.glob("*.db")):
-        target = root / "db" / source.name
-        src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    root, n = run_dirs.base / f"{SNAPSHOT_PREFIX}{stamp}", 1
+    while True:
         try:
-            dst = sqlite3.connect(target)
+            root.mkdir(parents=True)
+            break
+        except FileExistsError:  # two in one second: never touch the other
+            n += 1
+            root = run_dirs.base / f"{SNAPSHOT_PREFIX}{stamp}-{n}"
+    config_copy = root / "config"
+    snapshots = {}
+    try:
+        shutil.copytree(config_dir, config_copy, symlinks=True)
+        (root / "version").write_text(version + "\n")
+        (root / "db").mkdir(parents=True, exist_ok=True)
+        for source in sorted(run_dirs.base.glob("*.db")):
+            target = root / "db" / source.name
+            src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
             try:
-                src.backup(dst)
+                dst = sqlite3.connect(target)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
             finally:
-                dst.close()
-        finally:
-            src.close()
-        snapshots[source.name] = str(target)
+                src.close()
+            snapshots[source.name] = str(target)
+    except BaseException:
+        # A half-made copy must not pass for the way back.
+        shutil.rmtree(root, ignore_errors=True)
+        raise
     return {
         "config_dir": str(config_dir),
         "config_snapshot": str(config_copy),
@@ -548,20 +562,13 @@ def restore_snapshot(run_dirs, record: dict) -> None:
             shutil.copy2(saved, live)
 
 
-def delete_snapshots(run_dirs, *, keep: str | None = None, older_than_s: float = 0.0) -> None:
-    """Remove snapshot folders, except `keep` and any younger than
-    `older_than_s`."""
+def delete_snapshots(run_dirs, *, keep: str) -> None:
+    """Remove every snapshot folder but `keep`."""
     import shutil
 
     for folder in run_dirs.base.glob(f"{SNAPSHOT_PREFIX}*"):
-        if str(folder) == keep:
-            continue
-        try:
-            if time.time() - folder.stat().st_mtime < older_than_s:
-                continue
-        except OSError:
-            continue
-        shutil.rmtree(folder, ignore_errors=True)
+        if str(folder) != keep:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 # ── the loop ─────────────────────────────────────────────────────────────────
@@ -745,9 +752,10 @@ async def _apply_claimed(app, st, cfg, got: Pending, admin) -> str | None:
         return _failed(
             st, record.get("key"), f"the new install would not start: {why}", record, reinstall=True
         )
-    taken = await asyncio.to_thread(snapshot, run_dirs, config_dir_of(st))
-    # One snapshot at most is kept: older ones are of attempts that went nowhere.
-    delete_snapshots(run_dirs, keep=str(_snapshot_folder(taken)))
+    # The previous update's snapshot stays until this one is confirmed
+    # (`end_probation`): an attempt that goes nowhere must not cost it.
+    # `running`, not `update.installed()`: a release is installed by now.
+    taken = await asyncio.to_thread(snapshot, run_dirs, config_dir_of(st), running)
     write_rollback(run_dirs, **taken)
     if not is_free(st.db):
         drop_snapshot(taken)

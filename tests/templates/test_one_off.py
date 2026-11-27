@@ -128,3 +128,17 @@ def test_prepare_fills_the_id():
     plain, digest = one_off.prepare({"extends": "default"})
     named, named_digest = one_off.prepare({"id": "one-off", "extends": "default"})
     assert plain == named and digest == named_digest and len(digest) == 64
+
+
+def _review(**task) -> dict:
+    review = {"id": "r", "kind": "forge", "target": "mr.automated_review", **task}
+    return {"nodes": [{"id": "wait", "kind": "exec", "tasks": [review]}]}
+
+
+def test_prepare_lifts_the_flat_form():
+    """The editor and the filing both hash what `prepare` gives, so a flat
+    chain and its `config:` form are one chain to an approval."""
+    reviewers = [{"bot": "a"}]
+    flat = one_off.prepare(_review(reviewers=reviewers))
+    nested = one_off.prepare(_review(config={"reviewers": reviewers}))
+    assert flat == nested

@@ -54,6 +54,7 @@ class Verb(StrEnum):
     ABANDON = "abandon"
     ARCHIVE = "archive"
     UNBLOCK = "unblock"
+    TAKEOVER = "takeover"
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,16 @@ TRAITS = total(
             stopped=True,
             mr_watched=True,
             admits_status=frozenset(
-                {V.RESUME, V.STEER, V.RETRY, V.RAISE_BUDGET, V.SKIP, V.ESCALATE, V.ABANDON}
+                {
+                    V.RESUME,
+                    V.STEER,
+                    V.RETRY,
+                    V.RAISE_BUDGET,
+                    V.SKIP,
+                    V.ESCALATE,
+                    V.ABANDON,
+                    V.TAKEOVER,
+                }
             ),
         ),
         S.COMPLETED: StatusTraits(
@@ -107,7 +117,9 @@ TRAITS = total(
         S.PAUSED: StatusTraits(
             DisplayStatus.PAUSED,
             commands_may_start=True,
-            admits_status=frozenset({V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON, V.UNBLOCK}),
+            admits_status=frozenset(
+                {V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON, V.UNBLOCK, V.TAKEOVER}
+            ),
         ),
         S.ABANDONED: StatusTraits(
             DisplayStatus.CANCELLED, ended=True, admits_status=frozenset({V.ARCHIVE, V.ABANDON})
@@ -176,6 +188,7 @@ class ItemAction(StrEnum):
     RETRY = "retry"
     RAISE_BUDGET = "raise_budget"
     REOPEN_MR = "reopen_mr"
+    RERUN_CI = "rerun_ci"
     UNBLOCK = "unblock"
     SKIP = "skip"
     PAUSE = "pause"
@@ -185,6 +198,7 @@ class ItemAction(StrEnum):
     RESTORE = "restore"
     ARCHIVE = "archive"
     ABANDON = "abandon"
+    TAKEOVER = "takeover"
 
 
 @dataclass(frozen=True)
@@ -211,6 +225,9 @@ class DoorFacts:
     raisable: bool = False
     #: Stopped on a closed merge request it has a ref for.
     mr_closed: bool = False
+    #: Its fix loop stopped for a person on a node that waits on merge-request
+    #: CI (`ci_reruns.stopped_for_a_person`), which `POST /ci-rerun` re-runs.
+    ci_rerunnable: bool = False
     #: A walk task is registered for it (`deps.task_is_live`).
     walk_live: bool = False
     #: An escalation session is pending or running.
@@ -272,6 +289,8 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         ItemAction.RAISE_BUDGET: retry_ok and f.raisable and not f.walk_live,
         # reopen_mr: a closed merge request, then `_retry`.
         ItemAction.REOPEN_MR: retry_ok and f.mr_closed,
+        # ci_rerun: a person's re-run, then `_retry`.
+        ItemAction.RERUN_CI: retry_ok and f.ci_rerunnable,
         # unblock_work_item answers 200 dropping nothing when nothing is unmet.
         ItemAction.UNBLOCK: a(V.UNBLOCK) and f.unmet_dependency,
         # skip_work_item: a skippable node, no escalation turn, and no walk
@@ -296,5 +315,9 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         # archive_work_item answers an archived item 200 and changes nothing.
         ItemAction.ARCHIVE: a(V.ARCHIVE) and not f.archived,
         ItemAction.ABANDON: a(V.ABANDON),
+        # `kraft item takeover` is a terminal's door, not a button: what decides it
+        # (an agent session on the node, a local worktree, no sandbox) is read per
+        # item, which the list does not do, so no surface is told to offer it.
+        ItemAction.TAKEOVER: False,
     }
     return tuple(action for action in ItemAction if open_[action])

@@ -2,7 +2,7 @@ import { ago, repoName, shortId } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { chainLabel, chainOf, groupOf } from "../../board/model";
 import { CUE_ICON } from "../../board/cue";
-import { nodeWords, reasonTail, slicesLine, stopCueOf, ticksOf } from "../../board/rowText";
+import { reasonTail, sliceName, sliceState, slicesLine, slicesNeedingYou, stopCueOf, ticksOf } from "../../board/rowText";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
@@ -30,6 +30,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onOpenChild, onB
   const cue = hot ? stopCueOf(item) : null;
   const Cue = cue ? CUE_ICON[cue] : null;
   const buttons = cardButtons(item);
+  const stuck = slicesNeedingYou(item);
   return (
     <article className="ph-card" data-row={item.id}>
       <button type="button" className="ph-card-main" onClick={onOpen}>
@@ -49,6 +50,19 @@ export function Card({ item, now, offline, busy, error, onOpen, onOpenChild, onB
         </span>
         {slicesLine(item) && <span className="ph-card-slices">{slicesLine(item)}</span>}
       </button>
+      {stuck.length > 0 && (
+        <ul className="ph-card-children" aria-label={`Slices of ${item.title} that need you`}>
+          {stuck.map((c) => (
+            <li key={c.id}>
+              <button type="button" className="ph-card-child" aria-label={`slice ${c.slice_key}: ${sliceName(c.title)}, ${sliceState(c)}`} onClick={() => onOpenChild(c.id)}>
+                <span className="ph-card-child-key">{c.slice_key}</span>
+                <span className="ph-card-child-title">{sliceName(c.title)}</span>
+                <span className="ph-card-child-status">{sliceState(c)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {buttons.length > 0 && (
         <div className="ph-card-actions">
           {buttons.map((b) => (
@@ -57,18 +71,6 @@ export function Card({ item, now, offline, busy, error, onOpen, onOpenChild, onB
             </Button>
           ))}
         </div>
-      )}
-      {item.children && item.children.length > 0 && (
-        <ul className="ph-card-children" aria-label={`Slices of ${item.title}`}>
-          {item.children.map((c) => (
-            <li key={c.id}>
-              <button type="button" className="ph-card-child" onClick={() => onOpenChild(c.id)}>
-                <span className="ph-card-child-title">{c.slice_key}. {c.title}</span>
-                <span className="ph-card-child-status">{c.display_status.replace(/_/g, " ")}{c.current_node_id ? ` · ${nodeWords(c.current_node_id)}` : ""}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
       {error && <p className="ph-card-error" role="alert">{error}</p>}
     </article>

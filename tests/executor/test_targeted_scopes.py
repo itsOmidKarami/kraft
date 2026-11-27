@@ -1,6 +1,7 @@
 """A test scope's `targeted_command`: the table that carries it, the diff scope
 selection hands back, and the run that uses both."""
 
+import asyncio
 import shlex
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from support.harness import commit_all, entry_of, git, write
 
 from kraft import events, executor, store
 from kraft.executor import dispatch
+from kraft.remote import local_link
 
 from .test_scopes import (
     _BUILTIN,
@@ -27,7 +29,12 @@ _WEB_AREA = {
         "setup": "true",
         "verification": {
             "test_scopes": [
-                {"paths": ["web/**"], "command": "web-test", "targeted_command": "web-targeted"}
+                {
+                    "paths": ["web/**"],
+                    "command": "web-test",
+                    "targeted_command": "web-targeted",
+                    "concurrency_group": "heavy",
+                }
             ]
         },
     }
@@ -35,7 +42,7 @@ _WEB_AREA = {
 
 
 @pytest.mark.parametrize(
-    ("fields", "targeted", "area"),
+    ("fields", "targeted", "area", "group"),
     [
         pytest.param(
             {
@@ -49,16 +56,17 @@ _WEB_AREA = {
             },
             ["just", "test-targeted"],
             None,
+            None,
             id="repo-scope",
         ),
-        pytest.param({"areas": _WEB_AREA}, ["web-targeted"], "web", id="area-scope"),
-        pytest.param({"test_command": "just ci-test"}, None, None, id="bare-test-command"),
+        pytest.param({"areas": _WEB_AREA}, ["web-targeted"], "web", "heavy", id="area-scope"),
+        pytest.param({"test_command": "just ci-test"}, None, None, None, id="bare-test-command"),
     ],
 )
-def test_the_scope_table_carries_each_scopes_targeted_command(fields, targeted, area):
+def test_the_scope_table_carries_each_scopes_targeted_command(fields, targeted, area, group):
     [scope] = dispatch._scope_table(entry_of(fields))
 
-    assert (scope["targeted_cmd"], scope["area"]) == (targeted, area)
+    assert (scope["targeted_cmd"], scope["area"], scope["group"]) == (targeted, area, group)
 
 
 async def _diff(item_on, repo, change):
@@ -140,14 +148,22 @@ _FULL = {**_BUILTIN, "suite": "full"}
     ],
 )
 async def test_a_scope_runs_its_targeted_command_in_place_of_the_full_one(
-    item_on, tmp_path, task, changed, has_targeted, ran, reason
+    item_on, tmp_path, monkeypatch, task, changed, has_targeted, ran, reason
 ):
-    scope = _scope(tmp_path, targeted=has_targeted)
+    scope = {**_scope(tmp_path, targeted=has_targeted), "concurrency_group": "heavy"}
     full = _joined(scope["command"])
+    groups, run_task = [], dispatch._subprocess.run_task
+
+    async def spy(*args, concurrency_group=None, **kwargs):
+        groups.append(concurrency_group)
+        return await run_task(*args, concurrency_group=concurrency_group, **kwargs)
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", spy)
 
     status, it = await _dispatch(item_on, test_scopes=[scope], task=task, changed=changed)
 
     assert status == "done"
+    assert groups == ["heavy"]  # the scope's group goes with whichever command runs
     assert (tmp_path / "LOG").read_text().split() == [ran]
     expected = _joined(scope["targeted_command"]) if ran == "targeted" else full
     assert [s["command"] for s in it.sessions()] == [expected]
@@ -161,6 +177,61 @@ async def test_a_scope_runs_its_targeted_command_in_place_of_the_full_one(
         listed = Path((tmp_path / "PATH").read_text().strip())
         assert listed.is_relative_to(it.run_dirs.base / "items" / it.id)
         assert not listed.is_relative_to(it.repo)
+
+
+async def test_a_scope_placed_on_a_group_of_machines_hands_placement_its_group(
+    item_on, tmp_path, monkeypatch
+):
+    scope = {**_scope(tmp_path, targeted=False), "concurrency_group": "heavy"}
+    placed = []
+
+    async def run_placed(*args, attempt, concurrency_group=None, **kwargs):
+        placed.append(concurrency_group)
+        return await attempt(None, None, 0.0)  # placed on the local worker
+
+    async def files(*args):
+        return None  # the group's machines may take the item
+
+    monkeypatch.setattr(dispatch, "_is_group", lambda runner: True)
+    monkeypatch.setattr(dispatch, "_check_filing", files)
+    monkeypatch.setattr(dispatch._remote_launch, "run_placed", run_placed)
+
+    status, _ = await _dispatch(item_on, test_scopes=[scope], task=_BUILTIN, changed=_CHANGES)
+
+    assert status == "done" and placed == ["heavy"]
+
+
+@pytest.mark.parametrize(
+    ("paused", "status", "sessions"),
+    [
+        pytest.param(True, "paused", 0, id="paused"),
+        pytest.param(False, "done", 1, id="not-paused"),
+    ],
+)
+async def test_a_scope_waiting_for_its_group_does_not_launch_once_the_item_is_paused(
+    item_on, database, tmp_path, paused, status, sessions
+):
+    link = local_link.current()
+    link.take("other/1", "heavy")  # another session holds the scope's group
+    scope = {**_scope(tmp_path, targeted=False), "concurrency_group": "heavy"}
+    walk = asyncio.create_task(
+        _dispatch(item_on, test_scopes=[scope], task=_BUILTIN, changed=_CHANGES)
+    )
+    while not database.read(  # the scope is queued: the board has been told it waits
+        lambda c: c.execute("SELECT 1 FROM events WHERE type = 'remote_step_waiting'").fetchone()
+    ):
+        await asyncio.sleep(0.02)
+    if paused:  # a broken base pauses the item from another item's node: nothing cancels the walk
+        assert await database.write(
+            lambda c: store.pause_for_broken_base(c, "w1", [], broken_by="abc", follow_up_bead=None)
+        )
+    link.release("other/1")  # the group frees
+    got, _it = await asyncio.wait_for(walk, 10)
+    assert got == status
+    assert (
+        len(database.read(lambda c: c.execute("SELECT id FROM worker_sessions").fetchall()))
+        == sessions
+    )
 
 
 async def _verify_round(it, scope):

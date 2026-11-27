@@ -39,6 +39,9 @@ SAYS = {
     ("start", 0): {
         "start-lists-available-chains": 'kl.py" chains --available',
         "start-chain-file-path": "a chain file path (`.yaml`, or with a `/`)",
+        "start-reports-unused-bindings-and-goes-on": (
+            "Name each to the user; don't edit `bindings.yaml` or start again, and go on."
+        ),
     },
     ("next", 0): {
         "next-pre-v1-refusal-migrates": (
@@ -83,6 +86,11 @@ SAYS = {
         ),
     },
     ("next", 2): {
+        "next-read-only-scope": (
+            "changes nothing: write, edit and commit nothing",
+            "run no test or command that writes",
+            "leave no file behind",
+        ),
         "next-exports-after-close": "export state after every `close`",
         "next-subprocess-without-a-shell": "run `command` as an argument list, without a shell",
         "next-records-what-a-task-produced": "`KL produced --kind <produces> --path <file>`",
@@ -142,8 +150,12 @@ SAYS = {
         ),
     },
     ("gate", 1): {
+        "gate-passed-unchanged-is-reported": (
+            "printed `passed_unchanged`, the gate never blocked",
+            "Tell the user it passed, with that `rationale`, then invoke `kraft-lite:next`.",
+        ),
         "gate-chain-revision-restarts-through-start": (
-            "find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
+            "Find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
             "its `source` when that is a file path; otherwise the `path` that `python3 "
             '"$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`'
         ),
@@ -168,6 +180,12 @@ SAYS = {
         "gate-reviewer-reject-capped": "`KL summary` already shows 3 `rejections` on the node",
     },
     ("gate", 2): {
+        "gate-coverage-refusal-has-a-fix": (
+            "A refusal that says the proposal does not cover the plan has a fix: put every "
+            "plan task in a slice in the proposal, check it with `KL plan-slices --check "
+            ".kraft-lite/proposals/<chain-id>.json`, and show the user the changed slicing. "
+            "That is a new decision: approve it with `--slices` only once they agree to it."
+        ),
         "gate-refused-slices-asks": (
             "If it refuses, tell the user what it said and ask whether to approve unsliced."
         ),
@@ -238,7 +256,13 @@ SAYS = {
             "`KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own artifact with "
             "the proposal beside it, and records the user's answer"
         ),
-        "controller-small-plan-heuristic": "few enough tasks for one session's context",
+        "controller-slices-what-stands-alone": (
+            "Slice only what stands alone: a part that uses no other part's work"
+        ),
+        "controller-groundwork-slice-first": (
+            "A task in no slice is groundwork: it prints a first `groundwork` slice that the "
+            "others come after."
+        ),
         "controller-unsliceable-chain-walks-unsliced": (
             "Unsliceable: tell the user its reason and draw nothing. At any other node: tell the "
             "user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go on with "
@@ -391,7 +415,8 @@ SAYS = {
             'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'
         ),
         "child-chain-id-to-every-verb-but-start": (
-            "Pass your child chain's `--chain-id <id>` to every verb but `start`"
+            "Pass your child chain's `--chain-id <id>` to every verb except `settings`, "
+            "`import`, `chains`, `detect`, `migrate` and `start`"
         ),
         "child-fresh-container-takes-the-remote-head": (
             "git checkout -B <your slice branch> origin/<your slice branch>"

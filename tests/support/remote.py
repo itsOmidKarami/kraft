@@ -155,7 +155,7 @@ class Rig:
             **extra,
         )
 
-    async def run(self, argv, sid="s1", env=None, runner="gpu", **extra) -> Run:
+    async def run(self, argv, sid="s1", env=None, runner="gpu", group=None, **extra) -> Run:
         f, docs = self.files(sid), item_paths.docs_dir(self.run_dirs, self.wid)
         f.writable.mkdir(parents=True, exist_ok=True)
         docs.mkdir(parents=True, exist_ok=True)
@@ -167,7 +167,7 @@ class Rig:
             rw=[str(docs), str(f.writable)],
             **extra,
         )
-        claim = await self.hub.claim(runner, [], spec.key, poll_s=0.02)
+        claim = await self.hub.claim(runner, [], spec.key, poll_s=0.02, group=group)
         entries = remote_files.entries(results=[], ro=[], rw_dirs=[docs, f.writable], rw_files=[])
         return await self.runs.launch(spec, claim, entries=entries, folder=f.folder)
 

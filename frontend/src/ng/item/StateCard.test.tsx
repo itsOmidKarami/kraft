@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -174,6 +174,70 @@ describe("StateCard", () => {
     expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path } }]);
     await userEvent.click(within(card).getByRole("button", { name: "Escalate…" }));
     expect(h.onEscalate).toHaveBeenCalled();
+  });
+
+  // Kraft-1n450: the judge's stop on red CI read as one paragraph, with its findings only as hashes in it.
+  const said = "Re-run the e2e job.\n\nDocker Hub's pull rate limit failed it.";
+  const verdict = (reasoning: string) => ({ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", created_at: "2026-09-13T09:00:00Z", payload: {
+    node_id: "verification", cycle: 1, verdict: "stop_needs_human", reasoning,
+    findings: [
+      { severity: "important", message: "job e2e failed: script_failure", file: null, line: null, source_plugin: "verification.checks.lint", jobs: [{ label: "verification.checks.lint" }] },
+      // A failed command's finding: its job's label is the command, its message runs to lines.
+      { severity: "critical", message: "verification.checks.lint failed\n- just lint: E501", file: null, line: null, source_plugin: "verification.checks.lint", jobs: [{ label: "just lint" }] },
+    ],
+  } });
+  it("a judge's stuck stop keeps its paragraphs, lists its findings with their logs, and offers Re-run CI first", async () => {
+    const calls = stubFetch({ ...acceptWrites("POST /work-items/w1/ci-rerun"), "GET /work-items/w1/events": [200, [verdict(said)]] });
+    const { h } = show({ display_status: "needs_you", status: "needs_human", actions: ["retry", "rerun_ci", "escalate"], stop: stop("stuck", { ...judge, reason: `judge: ${said}` }) });
+    const card = screen.getByRole("region", { name: "Stuck" });
+    expect(within(card).getByText(/^judge: Re-run the e2e job\./).textContent).toBe(`judge: ${said}`);
+    const rows = await within(card).findByRole("list", { name: "Findings" });
+    expect(rows).toHaveTextContent("important job e2e failed: script_failure");
+    expect(within(rows).getByText(/^verification\.checks\.lint failed/).textContent).toBe("verification.checks.lint failed\n- just lint: E501");
+    // Each log link by its finding's first line, both to the task's log.
+    const logs = within(rows).getAllByRole("link");
+    expect(logs.map((l) => l.getAttribute("aria-label"))).toEqual(["log: job e2e failed: script_failure", "log: verification.checks.lint failed"]);
+    for (const l of logs) expect(l.getAttribute("href")).toMatch(/tab=log/);
+    expect(acts(card)).toEqual(["Re-run CI", "Retry from verification", "Escalate…", "Open verification →"]);
+    expect(within(card).getByRole("button", { name: "Re-run CI" })).toHaveClass("btn-primary");
+    expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-secondary");
+    await userEvent.click(within(card).getByRole("button", { name: "Re-run CI" }));
+    await waitFor(() => expect(h.reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
+  });
+
+  it.each([
+    // A stall after an earlier judge verdict: that verdict's findings are not this stop's.
+    // No `actions` (an older server): Retry and Escalate… by their own rules, Re-run CI never.
+    ["a stall's", "stuck: 1 finding(s) unchanged across cycle 1", false, undefined],
+    ["the judge's own", `judge: ${said}`, true, ["retry", "escalate"]],
+  ] as const)("%s stuck stop lists findings only if it is the verdict, and with no rerun_ci door offers no Re-run CI", async (_case, reason, listed, actions?: readonly ItemAction[]) => {
+    const calls = stubFetch({ "GET /work-items/w1/events": [200, [verdict(said)]] });
+    show({ display_status: "needs_you", status: "needs_human", ...(actions && { actions: [...actions] }), stop: stop("stuck", { ...judge, reason }) });
+    const card = screen.getByRole("region", { name: "Stuck" });
+    await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1/events")).toBe(true));
+    await act(() => new Promise((done) => setTimeout(done, 0))); // the events have landed
+    expect(!!within(card).queryByRole("list", { name: "Findings" })).toBe(listed);
+    expect(acts(card)).toEqual(["Retry from verification", "Escalate…", "Open verification →"]);
+    expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-primary");
+  });
+
+  // A `ci.pipeline` wait's red pipeline: Re-run CI leads where the server lists it, and posts the re-run.
+  it.each([
+    ["listing rerun_ci", ["retry", "rerun_ci", "complete", "cancel"], ["Re-run CI", "Retry from open_draft", "Open merge request →"]],
+    ["not listing it", ["retry", "complete", "cancel"], ["Retry from open_draft", "Open merge request →"]],
+    ["an older server sending no actions", undefined, ["Retry from open_draft", "Escalate…", "Open merge request →"]],
+  ] as const)("a failed stop, the server %s, offers %j", async (_name, actions, labels) => {
+    const calls = stubFetch(acceptWrites("POST /work-items/w1/ci-rerun"));
+    const { h } = show({ display_status: "failed", stop: stop("failed", { reason: "pipeline 7 is red" }), ...(actions && { actions: [...actions] as ItemAction[] }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(acts(card)).toEqual(labels);
+    expect(within(card).getByRole("button", { name: labels[0] })).toHaveClass("btn-primary");
+    if (labels[0] !== "Re-run CI") return;
+    expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveClass("btn-secondary");
+    await userEvent.click(within(card).getByRole("button", { name: "Re-run CI" }));
+    await waitFor(() => expect(h.reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
   });
 
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
@@ -406,6 +470,23 @@ describe("StateCard", () => {
     expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
   });
 
+  it.each([
+    ["wait", "Waiting on CI", "next check"],
+    ["rate_limit", "Waiting on the provider", "next retry"],
+  ])("%s: the %s card's %s counts down with no new data", (kind, title, fact) => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-19T10:00:00Z"));
+      show({ display_status: "waiting", stop: stop(kind, { reason: null, resume_at: "2026-11-19T10:04:30Z" }) });
+      const check = () => within(screen.getByRole("region", { name: title })).getByText(fact).nextElementSibling;
+      expect(check()).toHaveTextContent("in 4m");
+      act(() => vi.advanceTimersByTime(120_000));
+      expect(check()).toHaveTextContent("in 2m");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("slices: a parent says its children are the work, with their count, and offers no Retry", () => {
     // The server shows a parent whose slice needs the person under Needs you, and its own status stays waiting.
     show({ display_status: "needs_you", status: "waiting", stop: stop("slices"), slices: { done: 2, needs_you: 1, paused: 0, running: 0, queued: 0, dropped: 0, total: 3 } });
@@ -453,6 +534,31 @@ describe("StateCard", () => {
     expect(h.onCancel).toHaveBeenCalled();
   });
 
+  it("MR closed on GitHub reads #N on the card and the Reopen button", async () => {
+    const calls = stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [
+      { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
+      { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
+    ]] });
+    const { h } = show({ display_status: "needs_you", stop: stop("mr_closed", { node: "mr_checks", task: null, facts: { ref: 142, url: "https://github.com/o/r/pull/142" } }) });
+    const card = screen.getByRole("region", { name: "MR #142 was closed on the forge" });
+    await within(card).findByText(/closed by mara/);
+    await userEvent.click(within(card).getByRole("button", { name: "Reopen #142" }));
+    await waitFor(() => expect(posts(calls)).toEqual([
+      { method: "POST", path: "/work-items/w1/reopen-mr", body: {} },
+    ]));
+    expect(h.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("MR closed without a URL in the stop reads #N from the item's MR ref", async () => {
+    stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [
+      { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
+      { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
+    ]] });
+    show({ display_status: "needs_you", stop: stop("mr_closed", { node: "mr_checks", task: null, facts: { ref: 142 } }), mr_ref: { number: 142, url: "https://github.com/o/r/pull/142" } });
+    const card = screen.getByRole("region", { name: "MR #142 was closed on the forge" });
+    within(card).getByRole("button", { name: "Reopen #142" });
+  });
+
   it("done leads with the outcome: the MR, the diff, spend against the cap, the time taken; Archive is its one action", async () => {
     const calls = stubFetch({ ...WRITES, "POST /work-items/w1/archive": [200, {}] });
     const files = [{ path: "a.py", insertions: 12, deletions: 3 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];
@@ -469,6 +575,15 @@ describe("StateCard", () => {
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
   });
 
+  it.each([
+    ["a GitHub pull request #N", "https://github.com/acme/app/pull/1401", "#1401"],
+    ["a GitLab merge request !N", "https://gitlab.example/acme/app/-/merge_requests/1401", "!1401"],
+  ])("done signs %s, as the board row does", (_, url, name) => {
+    stubFetch();
+    show({ display_status: "done", stop: null, mr_ref: { number: 1401, url } });
+    expect(within(screen.getByRole("region", { name: "Done" })).getByRole("link", { name })).toHaveAttribute("href", url);
+  });
+
   it("done with no MR says none was opened; a closed one says so", async () => {
     stubFetch();
     const { unmount } = show({ display_status: "done", stop: null, mr_ref: null });
@@ -481,12 +596,25 @@ describe("StateCard", () => {
 
   it("cancelled: the reason from the cancel event, Duplicate and Archive", async () => {
     stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "superseded", node_id: "verification" }, node_id: "verification", created_at: "t" }]] });
-    const { h } = show({ display_status: "cancelled", stop: null });
+    const { h } = show({ display_status: "cancelled", stop: null, started_at: "2026-09-13T09:00:00Z" });
     const card = screen.getByRole("region", { name: "Cancelled" });
     expect(await within(card).findByText("superseded")).toBeInTheDocument();
     expect(within(card).getByText("work kept")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "Duplicate as new item" }));
     expect(h.onDuplicate).toHaveBeenCalled();
+  });
+
+  // #1343: a cancelled item that never started made nothing, so its card
+  // says so and carries no work-kept fact naming a branch or a worktree.
+  it("cancelled before it started: nothing was made yet, and no work-kept fact", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "filed by mistake", node_id: null }, node_id: null, created_at: "t" }]] });
+    show({ display_status: "cancelled", stop: null, started_at: null, current_node_id: null });
+    const card = screen.getByRole("region", { name: "Cancelled" });
+    expect(await within(card).findByText("filed by mistake")).toBeInTheDocument();
+    expect(within(card).getByText(/nothing was made yet/)).toBeInTheDocument();
+    expect(within(card).queryByText("work kept")).toBeNull();
+    expect(card).not.toHaveTextContent("branch");
+    expect(card).not.toHaveTextContent("worktree");
   });
 
   it("abandoned: its own card, with the reason the abandon recorded", async () => {

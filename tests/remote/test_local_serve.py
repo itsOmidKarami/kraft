@@ -8,6 +8,7 @@ import os
 import psutil
 import pytest
 from support.local_worker import INSTALL, RunningWorker, connect, kill_group, request
+from support.remote import until
 
 from kraft.remote import local_serve
 
@@ -134,8 +135,20 @@ async def test_idle_worker_exits(tmp_path):
     assert not local_serve.pid_path(tmp_path / "run", INSTALL).exists()
 
 
-async def test_worker_with_a_running_session_does_not_exit_idle(tmp_path):
-    w = RunningWorker(tmp_path / "run", idle_exit_s=0.2)
+async def test_worker_with_a_running_session_does_not_exit_idle(tmp_path, monkeypatch):
+    checks = 0
+    reap = local_serve.LocalJobs.reap
+
+    def counting_reap(self):
+        nonlocal checks
+        checks += 1
+        return reap(self)
+
+    monkeypatch.setattr(local_serve.LocalJobs, "reap", counting_reap)
+    # 1s, not shorter: the worker's idle clock starts before this test can connect, and a
+    # loaded machine must not let it run out first
+    idle = 1.0
+    w = RunningWorker(tmp_path / "run", idle_exit_s=idle)
     await w.ready()
     t = await connect(tmp_path / "run")
     log = tmp_path / "log"
@@ -143,7 +156,17 @@ async def test_worker_with_a_running_session_does_not_exit_idle(tmp_path):
     got = await request(t, _spawn("w/s", ["sleep", "30"], tmp_path, log), answer="spawned")
     await t.close()
     try:
-        await asyncio.sleep(0.8)
+        # the idle check (one per loop pass) has run for longer than the idle limit since
+        # the connection went, so only the session can be what keeps the worker up
+        seen, since = checks, asyncio.get_running_loop().time()
+        await until(
+            lambda: (
+                checks >= seen + 8
+                and asyncio.get_running_loop().time() - since > idle * 1.5
+                or w.task.done()
+            ),
+            timeout=30,
+        )
         assert not w.task.done()
     finally:
         kill_group(got["pid"])

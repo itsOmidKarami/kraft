@@ -1,37 +1,51 @@
 {
   "$defs": {
-    "AutomatedReview": {
+    "BotReviewer": {
       "additionalProperties": false,
-      "description": "One reviewer whose verdict `mr.automated_review` waits for, named\nexactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nNone named at any layer, no automated reviewer is expected, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
+      "description": "A forge login. The review settles when that login has reviewed the head.",
       "properties": {
         "bot": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Bot"
+          "minLength": 1,
+          "title": "Bot",
+          "type": "string"
         },
         "check": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Check"
+          "type": "null"
+        },
+        "replies": {
+          "default": false,
+          "title": "Replies",
+          "type": "boolean"
+        },
+        "resolve_fixed": {
+          "default": false,
+          "title": "Resolve Fixed",
+          "type": "boolean"
         }
       },
-      "title": "AutomatedReview",
+      "required": [
+        "bot"
+      ],
+      "title": "BotReviewer",
+      "type": "object"
+    },
+    "CheckReviewer": {
+      "additionalProperties": false,
+      "description": "A check or commit status on the head. It settles when it completes.",
+      "properties": {
+        "bot": {
+          "type": "null"
+        },
+        "check": {
+          "minLength": 1,
+          "title": "Check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check"
+      ],
+      "title": "CheckReviewer",
       "type": "object"
     },
     "CredentialInject": {
@@ -108,11 +122,25 @@
             {
               "oneOf": [
                 {
-                  "$ref": "#/$defs/AutomatedReview"
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/BotReviewer"
+                    },
+                    {
+                      "$ref": "#/$defs/CheckReviewer"
+                    }
+                  ]
                 },
                 {
                   "items": {
-                    "$ref": "#/$defs/AutomatedReview"
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/BotReviewer"
+                      },
+                      {
+                        "$ref": "#/$defs/CheckReviewer"
+                      }
+                    ]
                   },
                   "type": "array"
                 }
@@ -287,6 +315,15 @@
             }
           ],
           "default": null
+        },
+        "post_merge_publish_jobs": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Post Merge Publish Jobs",
+          "type": "array"
         },
         "project": {
           "anyOf": [
@@ -744,6 +781,45 @@
           "default": null,
           "title": "Max Attempts"
         },
+        "reply_cap_per_thread": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Cap Per Thread"
+        },
+        "reply_rounds_per_head": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Rounds Per Head"
+        },
+        "reply_timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Timeout Minutes"
+        },
         "sandbox": {
           "anyOf": [
             {
@@ -819,6 +895,19 @@
           "minLength": 1,
           "title": "Command",
           "type": "string"
+        },
+        "concurrency_group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concurrency Group"
         },
         "paths": {
           "items": {

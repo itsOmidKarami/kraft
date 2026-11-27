@@ -5,14 +5,16 @@ import contextlib
 import fnmatch
 import json
 import logging
+import re
 import shlex
 import sqlite3
 import stat
 import traceback
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from kraft import builtins as _builtins
 from kraft import caps as _caps
@@ -28,12 +30,15 @@ from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import open_threads
+from kraft.adapters.forge.replies import owed as _owed
 from kraft.addons import load as _addons_load
 from kraft.automated_review import Reviewers, as_reviewers
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
 from kraft.executor import fallback as _fallback
 from kraft.executor import read_only as _read_only
+from kraft.executor import reply_round as _reply_round
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -41,6 +46,7 @@ from kraft.executor.context import (
     CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
+    ENDED_EARLY,
     INFRA_STOP,
     LANDED_UNREVIEWED,
     MERGE_REJECTED,
@@ -58,6 +64,7 @@ from kraft.executor.context import (
 from kraft.remote import launch as _remote_launch
 from kraft.remote import local_link as _local_link
 from kraft.remote import placement
+from kraft.remote import protocol as _remote_protocol
 from kraft.remote import runs as _remote_runs
 from kraft.store import _now as _now
 from kraft.templates import revision
@@ -239,8 +246,9 @@ def _last_own_round_head(
 
 def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
     """The repository's test scopes as verify runs them, before any selection:
-    `{paths, cmd, targeted_cmd, area, setup}` each, the commands and `setup`
-    split into argv; `targeted_cmd` is None for a scope that declares none."""
+    `{paths, cmd, targeted_cmd, area, setup, group}` each, the commands and `setup`
+    split into argv; `targeted_cmd` is None for a scope that declares none, and
+    `group` its `concurrency_group`, or None."""
     if repo_entry is None:
         return []
     repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
@@ -265,6 +273,7 @@ def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
             else None,
             "area": s.get("area"),
             "setup": shlex.split(s["setup"]) if s.get("setup") else None,
+            "group": s.get("concurrency_group"),
         }
         for s in [*repo_scopes, *area_scopes]
     ]
@@ -386,6 +395,37 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
         status=CONFIG_ERROR,
         log=log,
     )
+
+
+#: `just`'s own error for a recipe its justfile lacks, as it starts a line of its stderr.
+_NO_RECIPE = re.compile(r"^error: justfile does not contain recipe `([^`]+)`", re.I | re.M)
+#: The line Kraft appends naming it, which the stop then reads as its cause.
+NO_RECIPE_LINE = "kraft: no just recipe"
+
+
+def _no_recipe(task_path: str, base: str) -> Callable[[str, Path, int], str]:
+    """`post_resolve` for a `just` test scope: a recipe the item's justfile
+    lacks is configuration, not a test failure (Kraft-3y2o1). A repair session
+    cannot add a recipe the scope's base never had, so the scope ends
+    `config_error` and the item stops naming the recipe and its base."""
+
+    def resolve(status: str, log_path: Path, _returncode: int) -> str:
+        if status != "failed":
+            return status
+        with open(log_path, "rb") as fh:
+            fh.seek(max(0, fh.seek(0, 2) - 65536))
+            found = _NO_RECIPE.search(fh.read().decode(errors="replace"))
+        if found is None:
+            return status
+        with open(log_path, "a") as fh:
+            fh.write(
+                f"\n{NO_RECIPE_LINE} `{found[1]}` in this item's justfile (its base is {base}): "
+                "rebase it onto a base that has the recipe, "
+                "or change the test scope in repos.yaml\n"
+            )
+        return CONFIG_ERROR
+
+    return resolve
 
 
 def _is_group(runner: str | None) -> bool:
@@ -789,6 +829,7 @@ async def _save_carried(
     results: list[str],
     sandbox: dict | None,
     runner: str | None,
+    base: str | None,
 ) -> None:
     """Save the item's carried files as the repo's newest copy, after a round
     that may have updated them. Only when every guard holds: a targeted round in
@@ -796,7 +837,9 @@ async def _save_carried(
     could plant a record the host then trusts), in the item's own worktree (an
     in-place item's folder is the person's checkout, a workspace member's a
     mount below the root). `kraft.carried.save` itself saves only when a carried
-    file differs from the baseline. A failed save never fails verification."""
+    file differs from the baseline and `base`, the commit the branch forks from
+    (`_effective_base`), is not older than the saved copy's. A failed save never
+    fails verification."""
     if not (repo_entry and repo_entry.carry):
         return
     if suite is not TestSuite.TARGETED or not results or any(r != "done" for r in results):
@@ -813,6 +856,7 @@ async def _save_carried(
             Path(worktree),
             repo_entry.carry,
             item_paths.carried_record(run_dirs, row["id"]),
+            base=base,
         )
     except OSError as exc:
         logger.warning("carried files of %s were not saved: %s", row["id"], exc)
@@ -928,16 +972,29 @@ async def _run_changed_test_scopes(
                     "passed to it as an argument and the rest never runs; write it as "
                     "sh -c '...' in repos.yaml\n",
                 )
+    no_recipe = None
+    commands = (a for s in to_run for a in (s["setup"], s["cmd"], s["targeted_cmd"]))
+    if any(a and Path(a[0]).name == "just" for a in commands):
+        branch = await _builtins.base_branch(
+            db,
+            work_item_row["id"],
+            Path(worktree) if member else Path(work_item_row["repo"]),
+            member=member,
+        )
+        no_recipe = _no_recipe(task.path, branch)
     changed_files = item_paths.changed_files(run_dirs, work_item_row["id"], node.id, task.path)
     if picks:
         changed_files.parent.mkdir(parents=True, exist_ok=True)
         changed_files.write_text("".join(f"{p}\n" for p in paths or ()), encoding="utf-8")
 
-    async def _run(cmd: list[str], targeted: bool = False) -> str:
+    async def _run(cmd: list[str], targeted: bool = False, group: str | None = None) -> str:
         scope_common = {
             **common,
             "session_id": db.read(lambda c, w=common["work_item_id"]: store.new_session_id(c, w)),
         }
+
+        def abandon() -> bool:
+            return _item_paused(db, work_item_row["id"])
 
         async def go(on: str | None, claim, time_cap: _caps.Deadline | None) -> str:
             return await _subprocess.run_task(
@@ -964,27 +1021,37 @@ async def _run_changed_test_scopes(
                 time_cap=time_cap,
                 runner=on,
                 placed_claim=claim,
+                post_resolve=no_recipe if Path(cmd[0]).name == "just" else None,
+                concurrency_group=group,
+                abandon=abandon,
                 **scope_common,
             )
 
-        if not _is_group(runner):
-            return await go(runner, None, time_cap)
+        try:
+            if not _is_group(runner):
+                return await go(runner, None, time_cap)
 
-        async def attempt(on, claim, waited_s):
-            return await go(on, claim, _remote_launch.extend(time_cap, waited_s))
+            async def attempt(on, claim, waited_s):
+                return await go(on, claim, _remote_launch.extend(time_cap, waited_s))
 
-        # Each scope places itself: one may run remote while the next runs locally.
-        return await _remote_launch.run_placed(
-            db,
-            work_item_row,
-            node.id,
-            task.path,
-            runner,
-            [repo_entry] if repo_entry is not None else [],
-            session_id=scope_common["session_id"],
-            resume=False,
-            attempt=attempt,
-        )
+            # Each scope places itself: one may run remote while the next runs locally.
+            return await _remote_launch.run_placed(
+                db,
+                work_item_row,
+                node.id,
+                task.path,
+                runner,
+                [repo_entry] if repo_entry is not None else [],
+                session_id=scope_common["session_id"],
+                resume=False,
+                attempt=attempt,
+                concurrency_group=group,
+                abandon=abandon,
+            )
+        except _remote_protocol.StepAbandoned:
+            # A queued scope's item was paused (a broken base cannot cancel the walk): SCOPE
+            # tier `stop`, so the round ends `paused` and `resume` runs the node again.
+            return "paused"
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
     # come beside the ones that have started. One per repository, in the order they run, an
@@ -1020,7 +1087,9 @@ async def _run_changed_test_scopes(
             if ready != "done":
                 return ready
         identity = shlex.join(scope["cmd"])
-        return await _run(picks.get(identity, scope["cmd"]), targeted=identity in picks)
+        return await _run(
+            picks.get(identity, scope["cmd"]), targeted=identity in picks, group=scope.get("group")
+        )
 
     if execution is ExecutionMode.PARALLEL:
         results = list(await asyncio.gather(*(_scope(s) for s in to_run)))
@@ -1040,6 +1109,7 @@ async def _run_changed_test_scopes(
         results=results,
         sandbox=sandbox,
         runner=runner,
+        base=base,
     )
     stopped = next((s for s in results if s in _SCOPE_STOP_STATUSES), None)
     if stopped is not None:
@@ -1414,6 +1484,86 @@ def _reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None)
     )
 
 
+def _chain_bots(row, launch: LaunchContext | None) -> Reviewers:
+    """The bots any review wait of the item's chain names, once each."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:  # a legacy row has no chain to name a bot
+        return ()
+    found: dict = {}
+    for node in snapshot.chain.nodes:
+        for t in node.tasks():
+            if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_AUTOMATED_REVIEW:
+                for r in _reviewers(t.task, node.id, row, launch):
+                    if r.bot is not None:
+                        found.setdefault(r.bot.lower(), r)
+    return tuple(found.values())
+
+
+def _forge_reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None) -> Reviewers:
+    """The merge names open bot threads when it stops on them, and those bots are
+    configured on the chain's review wait, not on the merge."""
+    if task.target is ForgeAction.MR_MERGE:
+        return _chain_bots(row, launch)
+    return _reviewers(task, node_id, row, launch)
+
+
+async def _open_threads_note(db, row, launch: LaunchContext | None, worktree, run_dirs) -> str:
+    """Write what the brief states about open bot threads and name the file; "" with
+    no configured bot, before any forge call. Never raises: the brief goes on."""
+    try:
+        path = item_paths.item_dir(run_dirs, row["id"]) / item_paths.OPEN_THREADS_REPORT
+        path.unlink(missing_ok=True)  # a re-run with the bots removed names no old file
+        bots = _chain_bots(row, launch)
+        if not bots:
+            return ""
+        try:
+            forges, error = launch.forges() if launch and launch.forges else (None, None)
+            repo_entry = launch.repo_entry if launch else None
+            async with asyncio.timeout(open_threads.READ_LIMIT_S):
+                forge = await _forge.item_forge(db, row, repo_entry, forges, error)
+                base = await _builtins.base_branch(db, row["id"], Path(row["repo"]))
+        except Exception:  # noqa: BLE001 -- no forge to ask is an unknown answer
+            logger.warning("no forge to read open bot threads for %s", row["id"], exc_info=True)
+            found = open_threads.OpenThreads(None, "unknown")
+        else:
+            found = await open_threads.read(
+                forge, repo=worktree, branch=store.branch_for(row), base=base, bots=bots
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "open_bot_threads": None if found.threads is None else len(found.threads),
+            "threads": list(found.threads or ()),
+            "requires_resolved_conversations": found.rule,
+            # shortcut: the root's merge request only; read each member if asked for.
+            "members_not_read": [mount for mount, _ in _builtins.item_members(row)],
+        }
+        path.write_text(json.dumps(report, indent=2) + "\n")
+    except Exception:  # noqa: BLE001 -- never stops or delays the item
+        logger.exception("could not write the open bot threads for %s", row["id"])
+        return ""
+    return prompts.OPEN_THREADS_NOTE.format(path=path)
+
+
+def _item_paused(db, work_item_id: str) -> bool:
+    """Whether the item reads `paused` right now. A broken base's pause
+    (`store.pause_for_broken_base`) cannot cancel the item's walk, so whatever is queued or
+    about to launch asks this."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    return row is not None and row["status"] == WorkItemStatus.PAUSED
+
+
+async def _reply_round_of(db, row, node, worktree):
+    """The reply round `node` is in, or None. The head is asked for only once an open round is
+    found: a repository that never starts one pays a DB read and no `git rev-parse`."""
+    return await _reply_round.current(
+        db, row["id"], node.id, lambda: _reply_round.item_head(row, worktree)
+    )
+
+
 async def dispatch_node(
     db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
 ) -> str:
@@ -1434,12 +1584,7 @@ async def dispatch_node(
     # one node, with nothing running for it to signal, this is what stops it.
     # Escalations and gate replies, which a paused item does run, have doors
     # of their own.
-    status = db.read(
-        lambda c: c.execute(
-            "SELECT status FROM work_items WHERE id = ?", (work_item_row["id"],)
-        ).fetchone()
-    )
-    if status is not None and status["status"] == WorkItemStatus.PAUSED:
+    if _item_paused(db, work_item_row["id"]):
         return "paused"
     since = db.read(
         lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
@@ -1622,14 +1767,25 @@ async def _dispatch_task_in(
     time_cap = _caps.Deadline(_caps.monotonic() + hit.remaining_s, hit) if hit else None
     # Nothing for a task reading what the review bots said means nothing to
     # spend on: no checkout taken, no sandbox, no session started
-    # (`bot-feedback-is-delivered-to-a-task-that-declares-it`).
+    # (`bot-feedback-with-nothing-to-judge-starts-no-agent`).
     if (
         isinstance(t, AgentTask)
         and AgentInput.BOT_FEEDBACK in t.inputs
-        and prompts.bot_feedback_source(db, run_dirs, work_item_row["id"], node, round) is None
+        and prompts.bot_feedback_source(
+            db,
+            run_dirs,
+            work_item_row["id"],
+            node,
+            round,
+            await _reply_round_of(db, work_item_row, node, worktree),
+        )
+        is None
     ):
         return await skipped_session(
-            db, run_dirs, common, "no bot feedback collected; no agent started\n"
+            db,
+            run_dirs,
+            common,
+            "nothing in the bot feedback could need a change; no agent started\n",
         )
     if not isinstance(t, ForgeTask):
         # Resolved here, once, for every launch this task makes (Ruling 189):
@@ -1820,6 +1976,20 @@ async def _dispatch_task_in(
         if t.target is ForgeAction.CI_PIPELINE:
             reads = resolve_reads(node.id, t.reads)
             declared = await asyncio.to_thread(declared_variables, work_item_row, reads)
+        # The review wait of a node in a reply round waits for the answers in the round's
+        # threads, each bounded by the review task's own `reply_timeout_minutes`. Only an open
+        # round asks (`current` reads the head only then), so a node with none pays a DB read.
+        # The CI look of such a round takes it too: pending past the round's deadline completes
+        # the node on the head's earlier green measurement instead of stopping the item.
+        reply = None
+        if t.target in (ForgeAction.MR_AUTOMATED_REVIEW, ForgeAction.MR_CI):
+            round_ = await _reply_round_of(db, work_item_row, node, worktree)
+            if round_ is not None:
+                reply = _owed.ReplyWait(
+                    round_.threads,
+                    timedelta(minutes=task_policy.reply_timeout_minutes),
+                    round_.deadline,
+                )
         return await _forge.run_task(
             db,
             run_dirs,
@@ -1833,8 +2003,11 @@ async def _dispatch_task_in(
             repositories=launch.repositories if launch else None,
             forges=forges,
             forges_error=forges_error,
-            reviewers=_reviewers(t, node.id, work_item_row, launch),
+            reviewers=_forge_reviewers(t, node.id, work_item_row, launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
+            post_merge_publish_jobs=(
+                launch.repo_entry.post_merge_publish_jobs if launch and launch.repo_entry else ()
+            ),
             # The item's folder: for a worktree item, not the repo, whose
             # checkout is on whatever the human has. Every forge call names
             # the branch, so an in-place item's folder serves as well.
@@ -1862,6 +2035,13 @@ async def _dispatch_task_in(
                 for other in node.tasks()
             ),
             grace=t.grace,
+            watch_ci=t.watch_ci,
+            reply=reply,
+            ci_task=(
+                ci.path
+                if t.watch_ci and (ci := node.ci_wait_after(task.path)) is not None
+                else None
+            ),
             pipeline=t.pipeline,
             reads=reads,
             declared=declared,
@@ -1941,6 +2121,8 @@ async def _dispatch_task_in(
     if t.produces == "review_brief":
         instruction += prompts.deferred_findings_note(
             deferred_findings(db, work_item_row["id"], loop_severities)
+        ) + prompts.mr_description_note(
+            db, work_item_row["id"], run_dirs=run_dirs, worktree=worktree
         )
     if t.produces == revision.CHAIN_REVISION:
         instruction += revision.context_note(store.materialized_chain_of(work_item_row), node.id)
@@ -1962,6 +2144,7 @@ async def _dispatch_task_in(
             instruction += prompts.triage_verdict_note(
                 db, work_item_row["id"], work_item_row, run_dirs=run_dirs
             )
+            instruction += await _open_threads_note(db, work_item_row, launch, worktree, run_dirs)
     # On every pass, a fix loop's override included: a repair is exactly the
     # job the repo's pull-request rules are written for.
     if AgentInput.PR_RULES in t.inputs:
@@ -2447,7 +2630,13 @@ async def _launch_agent(
     feedback = None
     if AgentInput.BOT_FEEDBACK in t.inputs:
         feedback = prompts.bot_feedback(
-            db, run_dirs, work_item_row["id"], node, common["round"], common["session_id"]
+            db,
+            run_dirs,
+            work_item_row["id"],
+            node,
+            common["round"],
+            common["session_id"],
+            reply=await _reply_round_of(db, work_item_row, node, worktree),
         )
     # Step outputs: this candidate's own session gets its own output folder, and
     # is told about it after whatever instruction it runs (`AGENT_RESUMED_NOTE`
@@ -2510,7 +2699,15 @@ async def _launch_agent(
                 if note
                 else ""
             )
-            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction)
+            + (
+                (
+                    prompts.TAKEOVER_RESUMED_NOTE
+                    if resumed.taken_over
+                    else prompts.AGENT_RESUMED_NOTE
+                )
+                if resumed is not None
+                else instruction
+            )
             + notes,
             extra_env=extra_env,
             extra_ro=extra_ro,
@@ -2519,6 +2716,7 @@ async def _launch_agent(
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
             review_package=package,
+            read_only=node.checks_read_only(task),
             bot_feedback=feedback,
             time_cap=time_cap,
             harness_id=harness_id,
@@ -2576,24 +2774,34 @@ def _output_decl(t: AgentTask | SubprocessTask, task, launch) -> outputs.Decl:
     )
 
 
-def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
-    """`(session id, provider session id)` of the paused session `task`
-    resumes, or None to restart it. Only a harness that can resume, only the
-    task's latest session and only if an operator paused it, never from before
-    a retry or a restart (7a's rule: a new pass never reuses a pre-retry
-    session), and only when its log names the provider's own session id."""
+class ResumedSession(NamedTuple):
+    session_id: str
+    provider_id: str
+    #: A person worked in the provider session (`kraft item takeover`).
+    taken_over: bool = False
+
+
+def _resumable_session(db, work_item_id: str, node, task, harness) -> ResumedSession | None:
+    """The paused session `task` resumes -- its row id and the provider's own
+    session id -- or None to restart it. Only a harness that can resume, only
+    the task's latest session and only if an operator paused it, never from
+    before a retry or a restart (7a's rule: a new pass never reuses a pre-retry
+    session). The provider id is the one a takeover left on the row, which is
+    the person's fork, else the one its log names."""
     if harness is None or not harness.supports("resume"):
         return None
     paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
     if paused is None:
         return None
+    if paused["cli_session_id"]:
+        return ResumedSession(paused["id"], paused["cli_session_id"], True)
     # The harness's own schema (Kraft-wge0e): a codex thread id is not on a
     # claude `system`/`init` line.
     reader = _agent.log_reader(harness)
     if reader is None:
         return None
     provider = _usage.READERS[reader].session_id(Path(paused["log_path"]))
-    return (paused["id"], provider) if provider else None
+    return ResumedSession(paused["id"], provider) if provider else None
 
 
 async def measure_node(
@@ -2831,7 +3039,33 @@ async def measure_node(
     node_before = await _snapshot(
         own and getattr(node.node, "read_only", False), [t for g in groups for t in g.tasks]
     )
+    if own and _starts_early(node):
+        # One measurement spans its parks and resumes: only the first entry at a
+        # round opens it, a later one finds it open.
+        open_at = open_measurement(db, work_item_id, node.id)
+        if open_at is None or open_at["round"] != round:
+            await db.write(lambda c: store.begin_measurement(c, work_item_id, node.id, round))
     outcomes: list[tuple[ResolvedTask, object]] = []
+    early = own and _starts_early(node)
+    ended_early = False
+
+    # In a reply round a decline holds whether or not its measurement ended early.
+    in_reply = (
+        own
+        and await _reply_round.current(
+            db, work_item_id, node.id, lambda: _reply_round.item_head(row, worktree)
+        )
+        is not None
+    )
+
+    def _ends_early(step: ResolvedStep) -> bool:
+        """Whether `step`, which just advanced, reports a finding the fix loop would
+        take that it has not already declined on this commit."""
+        found, _ = collect_findings(db, work_item_id, node, round, steps=(step,), run_dirs=run_dirs)
+        head = _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
+        declined = declined_fingerprints(db, work_item_id, node.id, head, every=in_reply)
+        return any(f.severity in loop_severities and f.fingerprint not in declined for f in found)
+
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
         # passed.
@@ -2852,6 +3086,11 @@ async def measure_node(
         # `_ADVANCING` (executor/context.py) is the existing definition of
         # "this task moved the node forward": ("done", "done_with_concerns").
         if any(isinstance(r, BaseException) or r not in _ADVANCING for r in results):
+            break
+        # Not at the last step: nothing would be skipped, so it is an ordinary
+        # measurement.
+        if early and index < len(groups) - 1 and _ends_early(step):
+            ended_early = True
             break
     if all(r != READ_ONLY_VIOLATED for _, r in outcomes) and await _wrote(node_before, node.id):
         outcomes = [(t, READ_ONLY_VIOLATED) for t, _ in outcomes]
@@ -2935,7 +3174,7 @@ async def measure_node(
     failed = [t for t, r in outcomes if isinstance(r, BaseException) or r not in _ADVANCING]
     if failed:
         return "failed", failed, excs
-    return "ok", [], []
+    return (ENDED_EARLY if ended_early else "ok"), [], []
 
 
 #: A task in one of these states failed outright. `measure_node` fails these
@@ -3021,7 +3260,7 @@ async def run_recovery(
             },
         )
     )
-    found, _reported = collect_findings(db, work_item_id, node, measured_round)
+    found, _reported = collect_findings(db, work_item_id, node, measured_round, run_dirs=run_dirs)
     seeded = prompts.seeded_findings_note(found) if found else None
     note = f"{note}\n{prompts.SUGGEST_ACTION}"
     context = f"{note}\n\n{seeded}" if seeded else note
@@ -3083,8 +3322,46 @@ def measured_tasks(
     return {t.path: t for step in (node.steps if steps is None else steps) for t in step.tasks}
 
 
+def _starts_early(node: ResolvedNode) -> bool:
+    """Whether the node's fix loop may start before the node has finished measuring."""
+    loop = getattr(node.node, "fix_loop", None)
+    return bool(loop and loop.early)
+
+
+def open_measurement(db, work_item_id: str, node_id: str) -> dict | None:
+    """The item's open measurement of `node_id`, with the step cursor as `"step"`.
+
+    Open means stored for this node and begun at or after the node's current run
+    (`ci_reruns.node_run_start`): a retry, a fork, a base-change or merge-rejection
+    restart, a gate decision and the node's completion each start a new run, so
+    a measurement stopped before its record never outlives them. A park, a crash
+    and a resume write none of those, so it goes on through them. `walk` and
+    `measure_node` both read it here, never from the store."""
+
+    def read(c):
+        stored = store.stored_measurement(c, work_item_id)
+        if stored is None or stored["node_id"] != node_id:
+            return None
+        run_start = ci_reruns.node_run_start(c, work_item_id, node_id)
+        return stored if stored["since"] >= run_start else None
+
+    return db.read(read)
+
+
+def _reached(db, work_item_id: str, node: ResolvedNode) -> int | None:
+    """The step the node's measurement has reached (its cursor), for a node whose
+    fix loop starts early; None for every other node, which reads as before."""
+    if not _starts_early(node):
+        return None
+    return db.read(
+        lambda c: c.execute(
+            "SELECT current_step FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()["current_step"]
+    )
+
+
 def _current_rows(
-    rows: list[sqlite3.Row], steps: tuple[ResolvedStep, ...]
+    rows: list[sqlite3.Row], steps: tuple[ResolvedStep, ...], reached: int | None = None
 ) -> dict[str, list[sqlite3.Row]]:
     """The rows that are this measurement's result, by task path.
 
@@ -3102,12 +3379,20 @@ def _current_rows(
     last row, or for a builtin scope loop every row at its latest head. The
     barrier is judged by those same rows, so it fires only where the collector
     itself reads the earlier task as not passed.
+
+    `reached`, given for a node whose fix loop starts early, replaces that rule:
+    an early end leaves the later steps' rows from an earlier measurement in
+    place, and the barrier cannot see them. A step past `reached` (the cursor)
+    contributes nothing, and every step up to it reads its latest rows whatever
+    their status, a reused or preserved session included.
     """
     # shortcut: a task an operator skipped after it failed still sets the barrier
     # (a skip writes no row), upgrade if a later step's reused row must survive it.
     current: dict[str, list[sqlite3.Row]] = {}
     barrier = -1
-    for step in steps:
+    for index, step in enumerate(steps):
+        if reached is not None and index > reached:
+            break
         # Moved only once the step is done: its tasks ran together, so none of
         # them is evidence about another.
         stopped_at = barrier
@@ -3115,7 +3400,7 @@ def _current_rows(
             mine = [
                 (i, row)
                 for i, row in enumerate(rows)
-                if i > barrier and row["hook_point"] == task.path
+                if (reached is not None or i > barrier) and row["hook_point"] == task.path
             ]
             if not mine:
                 continue
@@ -3132,6 +3417,15 @@ def _current_rows(
     return current
 
 
+def _skipped_triage(task: ResolvedTask, rows) -> bool:
+    """A triage that started no agent: `skipped_session`'s `done` row with no head."""
+    return (
+        isinstance(task.task, AgentTask)
+        and AgentInput.BOT_FEEDBACK in task.task.inputs
+        and all(r["head_sha"] is None and r["status"] == "done" for r in rows)
+    )
+
+
 def collect_findings(
     db,
     work_item_id: str,
@@ -3141,8 +3435,15 @@ def collect_findings(
     steps: tuple[ResolvedStep, ...] | None = None,
     dropped: dict[str, int] | None = None,
     has_session: dict[str, bool] | None = None,
+    run_dirs=None,
+    reply_round: bool = False,
 ):
     """(findings, task paths that reported at least one) for one cycle.
+
+    A parsed finding keeps only the review-bot thread ids that were in the
+    collection its session was handed, of a bot with replies on, and on its own
+    file (`findings.on_their_files`); without `run_dirs` no collection is known
+    and every thread id is dropped.
 
     `dropped`, when given, is filled with `{task path: entries the parser threw
     away as malformed}`, so a caller can record that a reviewer wrote its
@@ -3152,7 +3453,10 @@ def collect_findings(
     session at this round}` for every measuring task, so a caller can record
     which tasks this measurement read. A step that fails stops the steps after
     it, and without this a round the later task never ran in reads the same as
-    one where it ran and found nothing.
+    one where it ran and found nothing. In a reply round (`reply_round`) a triage
+    that started no agent because nothing new was said (`skipped_session`'s `done` row
+    with no head) has no session either: it did not measure, and must not read as
+    "triage found nothing".
 
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
@@ -3207,9 +3511,19 @@ def collect_findings(
     """
     tasks = measured_tasks(node, steps)
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
-    by_hook = _current_rows(rows, node.steps if steps is None else steps)
+    by_hook = _current_rows(
+        rows,
+        node.steps if steps is None else steps,
+        _reached(db, work_item_id, node) if steps is None else None,
+    )
     if has_session is not None:
-        has_session.update({path: path in by_hook for path in tasks})
+        has_session.update(
+            {
+                path: path in by_hook
+                and not (reply_round and _skipped_triage(tasks[path], by_hook[path]))
+                for path in tasks
+            }
+        )
     found: list[_findings.Finding] = []
     reported: set[str] = set()
     for hook, rows_to_read in by_hook.items():
@@ -3218,6 +3532,15 @@ def collect_findings(
             parsed, n_dropped = _findings.parse_counted(row["result_path"])
             if n_dropped and dropped is not None:
                 dropped[hook] = dropped.get(hook, 0) + n_dropped
+            if parsed and any(f.threads for f in parsed):
+                collected = (
+                    prompts.collected_threads(run_dirs, work_item_id, row["id"]) if run_dirs else {}
+                )
+                # Only a thread of a bot with replies on: with replies off a finding
+                # keeps no thread id, so no payload, prompt or copy changes.
+                parsed = _findings.on_their_files(
+                    parsed, {tid: t.get("file") for tid, t in collected.items() if t["replies"]}
+                )
             if parsed:
                 reported.add(hook)
                 job = _findings.JobRef(
@@ -3293,7 +3616,7 @@ def needs_context_question(
     # pass's question. `_current_rows` drops a task's oldest rows first, so its
     # latest row survives exactly when the task is still in the result.
     measuring = measured_tasks(node)
-    current = _current_rows(rows, node.steps)
+    current = _current_rows(rows, node.steps, _reached(db, work_item_id, node))
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
         hook = row["hook_point"]
@@ -3350,6 +3673,75 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
     return rows[-1] if rows else None
 
 
+def _task_of(raw: dict, tasks: Collection[str]) -> str:
+    """The measuring task that read a stored finding: the session it came from
+    (the first of its `jobs` labels naming one of `tasks`), never its
+    `source_plugin`, which a task may set to another's path. Only a blind
+    failure, whose labels are its commands, falls back to `source_plugin`:
+    Kraft's own value there, the session's hook point."""
+    for job in raw.get("jobs") or []:
+        if job.get("label") in tasks:
+            return job["label"]
+    return raw.get("source_plugin", "")
+
+
+def unmeasured_findings(
+    previous: dict | None,
+    measured_tasks: Collection[str],
+    unmeasured_tasks: Collection[str],
+    found: Sequence[_findings.Finding],
+) -> list[dict]:
+    """The last findings of the tasks a measurement that ended early did not run.
+
+    `previous` is the previous record's payload: its `findings`, then its own
+    `unmeasured`, are looked through for what an unmeasured task last reported
+    and `found` (this measurement) does not re-report. Copied verbatim, so
+    severities and `jobs` are kept, and deduplicated by tag."""
+    if previous is None:
+        return []
+    tasks = {*measured_tasks, *unmeasured_tasks}
+    read_now = {f.fingerprint for f in found}
+    out: dict[str, dict] = {}
+    for raw in (*previous.get("findings", []), *previous.get("unmeasured", [])):
+        tag = _findings.from_payload(raw).fingerprint
+        if _task_of(raw, tasks) in unmeasured_tasks and tag not in read_now:
+            out.setdefault(tag, raw)
+    return list(out.values())
+
+
+def declined_fingerprints(
+    db, work_item_id: str, node_id: str, head_sha: str | None, *, every: bool = False
+) -> frozenset[str]:
+    """The tags of findings the node's fix loop declined to act on at `head_sha`.
+
+    A `judge_verdict` of the node's current run whose verdict is `stop_downgrade`
+    on a measurement that ended early (`ended_early`) holds for the commit it
+    names: those findings are not collected, fixed or judged again on it, the
+    re-measure after `on_failure` included. In a reply round (`every`) every
+    `stop_downgrade` verdict on the head counts, ended early or not, on every node
+    shape: the round does not pay the judge or a fix again for what it declined.
+    Empty without a head."""
+    if head_sha is None:
+        return frozenset()
+
+    def read(c):
+        start = ci_reruns.node_run_start(c, work_item_id, node_id)
+        return list(events.read_after(c, start, work_item_id))
+
+    tags: set[str] = set()
+    for e in db.read(read):
+        p = e["payload"]
+        if (
+            e["type"] == ChainEvent.JUDGE_VERDICT
+            and p.get("node_id") == node_id
+            and p.get("verdict") == "stop_downgrade"
+            and (every or p.get("ended_early"))
+            and p.get("head_sha") == head_sha
+        ):
+            tags.update(_findings.from_payload(f).fingerprint for f in p.get("findings", []))
+    return frozenset(tags)
+
+
 def last_measurement(
     db, work_item_id: str, node_id: str
 ) -> tuple[list[_findings.Finding] | None, bool, str | None]:
@@ -3398,13 +3790,29 @@ def last_measurement(
     same fingerprints and the loop would escalate straight back to needs_human
     without ever giving the steered retry a chance to run.
     """
+    event, fix_seen = last_measured(db, work_item_id, node_id)
+    if event is None:
+        return None, False, None
+    return (
+        [_findings.from_payload(f) for f in event["payload"].get("findings", [])],
+        fix_seen,
+        event["payload"].get("head_sha"),
+    )
+
+
+def last_measured(
+    db, work_item_id: str, node_id: str, *, before: int | None = None
+) -> tuple[dict | None, bool]:
+    """The node's newest `findings_measured` event with `seq < before` (any, by
+    default), whole, and whether an unrefunded `fix_cycle_started` followed it
+    below `before`. `last_measurement` is this, read as findings."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     fix_seen = False
     # A cycle that started and was refunded (`fix_cycle_refunded`, Kraft-jdkoq)
     # never repaired anything, so it is not a fix having run.
     refunded: set[int] = set()
     for e in reversed(evts):
-        if e["payload"].get("node_id") != node_id:
+        if (before is not None and e["seq"] >= before) or e["payload"].get("node_id") != node_id:
             continue
         if e["type"] == ChainEvent.FIX_CYCLE_REFUNDED:
             refunded.add(e["payload"].get("cycle"))
@@ -3413,12 +3821,8 @@ def last_measurement(
         ):
             fix_seen = True
         elif e["type"] == ChainEvent.FINDINGS_MEASURED:
-            return (
-                [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
-                fix_seen,
-                e["payload"].get("head_sha"),
-            )
-    return None, False, None
+            return e, fix_seen
+    return None, False
 
 
 #: The escalation hook's own `hook_point`. Not a node task and not dispatched
@@ -3476,25 +3880,32 @@ def judge_history(
     # the judge a truncated trend pointing the wrong way, on
     # mr_checks/on.ci.poll every time. Seeding narrowed the collision; it did
     # not remove it, so this stays a list.
-    # _REPAIR_ROUND (-1) is a repair pass, not a paid fix cycle -- it has
-    # nothing to do with the budget the judge is weighing.
+    # An `on_failure` repair's re-measure (_REPAIR_ROUND, -1) is an ordinary
+    # round with no fix of its own: on a fresh entry it is the loop's baseline,
+    # the only record before cycle 1 (Kraft-d8gne). No fix session carries -1,
+    # so it pairs with none and no streak or regression is read across it.
     #: `evts`, when given, is a timeline the caller already fetched -- the same
     #: shape `escalate._reason` accepts. Read fresh when nothing is handed in,
     #: which is every existing caller including the judge's own.
-    measured: list[tuple[int, list[_findings.Finding]]] = []
+    measured: list[tuple[int, list[_findings.Finding], list[_findings.Finding], bool]] = []
     for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
         if e["type"] == ChainEvent.FINDINGS_MEASURED and e["payload"].get("node_id") == node_id:
-            cycle = e["payload"]["cycle"]
-            if cycle < 0:
-                continue
             measured.append(
                 (
-                    cycle,
+                    e["payload"]["cycle"],
                     [
                         _findings.from_payload(f)
                         for f in e["payload"].get("findings", [])
                         if f.get("severity") in loop_severities
                     ],
+                    # What an early end did not re-read that round (`unmeasured_findings`).
+                    [
+                        _findings.from_payload(f)
+                        for f in e["payload"].get("unmeasured", [])
+                        if f.get("severity") in loop_severities
+                    ],
+                    # A reply round's record (`reply_round`): no fix ran before it.
+                    bool(e["payload"].get("reply_round")),
                 )
             )
     #: `fix_paths` is the node's own fix-loop task paths (`fix_task_paths`).
@@ -3517,8 +3928,15 @@ def judge_history(
     # re-entries, so unlike the measurements these are collision-free.
     fix_by_round = {r["round"]: r["result_path"] for r in fix_rows}
     return [
-        {"round": i, "findings": found, "fix_result_path": fix_by_round.get(cycle)}
-        for i, (cycle, found) in enumerate(measured)
+        {
+            "round": i,
+            "findings": found,
+            "unmeasured": unread,
+            # No fix ran before a reply round's record: it pairs with none, so no
+            # stall or regression is read across it.
+            "fix_result_path": None if reply else fix_by_round.get(cycle),
+        }
+        for i, (cycle, found, unread, reply) in enumerate(measured)
     ]
 
 
@@ -3538,11 +3956,18 @@ def stuck_fingerprint(history: list[dict], min_repeats: int) -> str | None:
     and must not count as "no progress".
     """
     streaks: dict[str, int] = {}
+    prints: set[str] = set()
     for round_ in history:
         prints = {f.fingerprint for f in round_["findings"]}
         fix_ran = round_["fix_result_path"] is not None
+        # A finding nobody re-read this round (an early end skipped its task) holds
+        # its streak: it neither extends nor resets it.
+        held = {f.fingerprint for f in round_.get("unmeasured", [])} - prints
+        kept = {fp: streaks[fp] for fp in held if fp in streaks}
         streaks = {fp: streaks.get(fp, 0) + 1 if fix_ran and fp in streaks else 1 for fp in prints}
-    return next((fp for fp, n in streaks.items() if n >= min_repeats), None)
+        streaks.update(kept)
+    # Only what the latest round actually read: an unread finding is never stuck.
+    return next((fp for fp, n in streaks.items() if n >= min_repeats and fp in prints), None)
 
 
 def deferred_findings(db, work_item_id: str, loop_severities: frozenset[str]) -> list[dict]:
@@ -3591,9 +4016,13 @@ def regressed_fingerprints(history: list[dict]) -> list[str]:
     """
     if len(history) < 3:
         return []
-    per_round = [{f.fingerprint for f in r["findings"]} for r in history]
+    # A round holds a tag it read or carried unread: a gap where nobody re-read it
+    # is not a fix.
+    per_round = [
+        {f.fingerprint for f in (*r["findings"], *r.get("unmeasured", []))} for r in history
+    ]
     out = []
-    for fp in sorted(per_round[-1]):
+    for fp in sorted({f.fingerprint for f in history[-1]["findings"]}):
         seen = [i for i, prints in enumerate(per_round) if fp in prints]
         if len(seen) < 2 or seen[-1] - seen[0] == len(seen) - 1:
             continue  # never absent in between: persistent, not regressed

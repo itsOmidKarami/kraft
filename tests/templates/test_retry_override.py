@@ -13,6 +13,7 @@ from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, HarnessReach, MaterializedChain, ResolvedChain
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
+from templates.test_time_caps import _materialize
 
 
 def _agent(id: str, **kw) -> dict:
@@ -264,3 +265,18 @@ def test_a_retry_can_drop_a_grant_but_never_add_one():
     )
     dropped = validate_retry_override(granted, "n", policy={"grants": ["git-push", "git-commit"]})
     assert dropped.chain.policy_at("n.main.t").grants == ("git-push",)
+
+
+@pytest.mark.parametrize(
+    "task_config",
+    [{"pipeline": "2"}, {"config": {"pipeline": "2"}}],
+    ids=["flat", "under-config"],
+)
+def test_a_retry_writes_a_pipeline_under_config(task_config):
+    """A flat key is merged into the task's own `config`, not set beside it."""
+    wait = {"id": "ci", "kind": "forge", "target": "ci.pipeline", "config": {"pipeline": "1"}}
+    chain = _materialize({"id": "c", "nodes": [v1_node(tasks=[wait])]})
+
+    fork = validate_retry_override(chain, "build.main.ci", task_config=task_config).chain
+
+    assert v1_task_at(fork, "build.main.ci").task.pipeline == "2"

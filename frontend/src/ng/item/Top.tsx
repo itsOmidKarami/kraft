@@ -2,7 +2,6 @@ import { hint } from "../ui/Tooltip";
 import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState } from "react";
 import * as api from "../../api";
-import { plainMarkdown } from "../../format";
 import type { DiffFile, ReviewThread } from "../../types";
 import { request } from "../http";
 import { Button } from "../ui/Button";
@@ -119,7 +118,7 @@ export function Brief({ id, brief, ended = false, onSaved }: { id: string; brief
     );
   return (
     <div className="item-brief">
-      {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{more ? brief : plainMarkdown(brief)}</p> : null}
+      {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{brief}</p> : null}
       <div className="item-brief-links">
         {(long || more) && <LinkButton aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</LinkButton>}
         {(long || more) && !ended && <span aria-hidden> · </span>}

@@ -436,6 +436,7 @@
       "models": "_",
       "path": "_",
       "policy": "_",
+      "post_merge_publish_jobs": [],
       "project": "_",
       "sandbox": "_",
       "setup_command": "_",
@@ -783,6 +784,11 @@
      "then": []
     },
     "gate_artifact": "_",
+    "gate_rounds": {
+     "spec_approval": [
+      "_"
+     ]
+    },
     "group": "_",
     "group_state": "_",
     "head_sha": "_",
@@ -792,6 +798,7 @@
     "judge_stop_note": [],
     "last_review_sha": "_",
     "materialized_chain": "_",
+    "measurement": "_",
     "mr_ref": "_",
     "needs_context_question": "_",
     "node_overrides": {},
@@ -848,6 +855,13 @@
      "nodes_total": "_",
      "step": "_"
     },
+    "takeover_branch": "_",
+    "takeover_pid": "_",
+    "takeover_pid_start": "_",
+    "takeover_resumed_from": "_",
+    "takeover_session_id": "_",
+    "takeover_started_at": "_",
+    "takeover_tip": "_",
     "test_result": "_",
     "title": "_",
     "updated_at": "_",
@@ -860,6 +874,7 @@
     "worker_sessions": [
      {
       "attempt": "_",
+      "cli_session_id": "_",
       "command": "_",
       "cost_estimated": "_",
       "cost_usd": "_",

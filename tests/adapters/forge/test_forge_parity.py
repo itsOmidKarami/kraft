@@ -12,10 +12,13 @@ import pytest
 from kraft.adapters import forge
 
 from . import outputs
+from .api_outputs import gql
 from .nodes import Api
 from .parity import BR, Row, assert_alike, feedback, methods_without_a_row, review
 from .test_forge_cli_contract import GLAB_API, HEAD, _contract_token  # noqa: F401
 from .test_github_parity import ROWS as GITHUB_ROWS
+from .test_run_description import _BOT, _OURS, gl_page
+from .test_thread_io import _GLAB_NOTE_ANSWER, _GLAB_REPLY, _glab_thread
 
 MR54 = forge.MR(54, "u")
 QUEUED = forge.MRRef(54, "u", state="open", merge_queued=True)
@@ -31,6 +34,8 @@ NOTE = {
     "updated_at": "2026-02-01T00:00:00Z",
 }
 THREAD = {"id": "d1", "notes": [{**NOTE, "resolvable": True, "resolved": False}]}
+THREAD_54 = _glab_thread(54)
+_NOTE_555 = forge.ForgeNote("555", "555", "k", None, "b", "t", "t")
 STATUS = json.dumps([{"id": 1, "name": "c", "status": "failed", "description": "boom"}])
 _OLD_CANCEL = "api projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds"
 MERGE_REF = "refs/merge-requests/54/merge"
@@ -93,6 +98,14 @@ ROWS: dict[str, Row] = {
         "mr_body",
         lambda f, r: f.mr_body(repo=r, branch=BR),
         outputs.glab_mr(outputs.GLAB_MR_DETAILS),
+    ),
+    "mr_description_history": Row(
+        "mr_description_history",
+        lambda f, r: f.mr_description_history(repo=r, branch=BR),
+        {
+            **outputs.glab_mr(json.dumps({"iid": 54, "id": 901})),
+            "api graphql*MergeRequest/901*": gql(gl_page(_OURS, _BOT)),
+        },
     ),
     "ci_status": Row("ci_status", _ci, {**VIEW, outputs.PIPELINES: outputs.GLAB_CI_SUCCESS}),
     "ci_status-merged-results": Row(
@@ -221,6 +234,15 @@ ROWS: dict[str, Row] = {
             "api projects/:id/merge_requests": outputs.GLAB_MERGED_LIST,
         },
     ),
+    "conversation-rule": Row(
+        "requires_resolved_threads",
+        lambda f, r: f.requires_resolved_threads(repo=r, base="main"),
+        {
+            "api projects/:id": json.dumps(
+                {"only_allow_merge_if_all_discussions_are_resolved": True}
+            )
+        },
+    ),
     "labels-two-pages": Row(
         "labels",
         lambda f, r: f.labels(repo=r),
@@ -254,6 +276,39 @@ ROWS: dict[str, Row] = {
             "api projects/:id/merge_requests/54/notes": json.dumps([NOTE]),
             "api projects/:id/merge_requests/54/discussions": json.dumps([THREAD]),
         },
+    ),
+    "viewer": Row(
+        "viewer", lambda f, r: f.viewer(repo=r), {"api user": json.dumps({"username": "k"})}
+    ),
+    "read_thread": Row(
+        "read_thread",
+        lambda f, r: f.read_thread(repo=r, branch=BR, thread_id="d1"),
+        {**VIEW, "api projects/:id/merge_requests/54/discussions/d1": json.dumps(THREAD)},
+    ),
+    "reply_to_thread": Row(
+        "reply_to_thread",
+        lambda f, r: f.reply_to_thread(repo=r, thread=THREAD_54, body="Answer: ok"),
+        {"api*discussions/d1/notes*": _GLAB_REPLY},
+    ),
+    "resolve_thread": Row(
+        "resolve_thread",
+        lambda f, r: f.resolve_thread(repo=r, thread=THREAD_54),
+        {"api*discussions/d1*": json.dumps({"id": "d1"})},
+    ),
+    "mr_comments": Row(
+        "mr_comments",
+        lambda f, r: f.mr_comments(repo=r, branch=BR),
+        {**VIEW, "api projects/:id/merge_requests/54/notes": json.dumps([NOTE])},
+    ),
+    "upsert_comment": Row(
+        "upsert_comment",
+        lambda f, r: f.upsert_comment(repo=r, branch=BR, note_id=None, body="summary"),
+        {**VIEW, "api*merge_requests/54/notes*": _GLAB_NOTE_ANSWER},
+    ),
+    "delete_note": Row(
+        "delete_note",
+        lambda f, r: f.delete_note(repo=r, branch=BR, note=_NOTE_555, in_thread=False),
+        {**VIEW, "api*merge_requests/54/notes/555*": ""},
     ),
     "check-feedback": Row(
         "reviewer_feedback",

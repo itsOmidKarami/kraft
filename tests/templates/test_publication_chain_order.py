@@ -88,8 +88,8 @@ def test_nothing_readies_or_merges_before_the_final_gate(target, where):
 
 def test_the_seeded_default_chain_publishes_in_the_required_order():
     """`default-post-draft-flow-is-ordered` and `final-gate-governs-merge-
-    request-readiness`: draft, CI then automated review, the summary, the
-    final gate; only then ready, external approval, merge."""
+    request-readiness`: draft, the review wait, triage, then CI, the summary,
+    the final gate; only then ready, external approval, merge."""
     from kraft.templates.library import TemplateLibrary
 
     chain = TemplateLibrary.from_yaml_dir(Path(__file__).parents[2] / "config").resolve_chain(
@@ -103,8 +103,8 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
             order += [t.task.target for t in n.tasks() if t.task.kind == "forge"]
     assert [str(o) for o in order if o != "mr.sync"] == [
         "mr.open_draft",
-        "mr.ci",
         "mr.automated_review",
+        "mr.ci",
         "final gate",
         "mr.mark_ready",
         "mr.external_approval",
@@ -114,14 +114,14 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
     ids = [n.id for n in chain.nodes]
     assert ids.index("work_item_summary") < ids.index("final_review") < ids.index("mark_ready")
     # And in the feedback node a read-only triage step decides, after the review
-    # wait, what the bots said that needs a change.
+    # wait and before the CI wait, what the bots said that needs a change.
     feedback = next(n for n in chain.nodes if n.id == "merge_request_feedback")
     assert [(step.id, step.read_only) for step in feedback.steps] == [
-        ("ci", False),
         ("automated_review", False),
         ("review_feedback", True),
+        ("ci", False),
     ]
-    [triage] = feedback.steps[2].tasks
+    [triage] = feedback.steps[1].tasks
     assert (triage.task.skill, triage.task.profile) == ("kraft:review-feedback", "fast")
     assert triage.task.inputs == [
         AgentInput.BOT_FEEDBACK,

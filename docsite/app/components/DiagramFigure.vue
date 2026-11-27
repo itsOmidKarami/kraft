@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The frame every diagram on the site is drawn in: a figure with its caption,
-// in the StageStrip chain's box (StageStrip.vue). The diagrams are markup, not
+// in a box of the site's own. The diagrams are markup, not
 // images, so they set in Plex, follow the colour mode, and read to a screen
 // reader as the lists they are. DiagramFlow, DiagramGraph and DiagramSequence
 // fill it; the shared look of a stage, an arrow, a gate and a loop is in the

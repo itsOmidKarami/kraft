@@ -23,9 +23,12 @@ from kraft.templates.models import (
     GateNode,
     MergeRejectionPolicy,
     OutputsDecl,
+    PipelineWaitConfig,
     RecoveryPlan,
+    ReviewWaitConfig,
     Step,
     SubprocessTask,
+    WaitPolicy,
 )
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "config"
@@ -98,6 +101,71 @@ def test_a_main_step_with_a_policy_stays_steps():
     assert "    steps:\n      - id: main\n        tasks:\n" in authored.dump(model)
 
 
+LONE = "{id: s, tasks: [{id: t, extends: x}]}"
+LONE_TASK_SURFACES = {
+    "node": f"nodes: [{{id: a, kind: exec, steps: [{LONE}]}}]",
+    "node_on_failure": f"nodes: [{{id: a, kind: exec, on_failure: {{steps: [{LONE}]}}}}]",
+    "fix_loop": f"nodes: [{{id: a, kind: exec, fix_loop: {{steps: [{LONE}]}}}}]",
+    "step_on_failure": (
+        "nodes: [{id: a, kind: exec, steps: [{id: b, tasks: [{id: c, kind: agent}],"
+        f" on_failure: {{steps: [{LONE}]}}}}]}}]"
+    ),
+    "on_conflict": (
+        f"nodes: [{{id: a, kind: exec, on_base_changed: {{on_conflict: {{steps: [{LONE}]}}}}}}]"
+    ),
+    "merge_repair": (
+        f"nodes: [{{id: a, kind: exec, on_merge_rejected: {{repair: {{steps: [{LONE}]}}}}}}]"
+    ),
+    "added_node": f"add: [{{node: {{id: a, kind: exec, steps: [{LONE}]}}}}]",
+    "library_node": f"nodes: {{a: {{kind: exec, steps: [{LONE}]}}}}",
+    "library_step": "steps: {s: {tasks: [{id: t, extends: x}]}}",
+}
+
+
+@pytest.mark.parametrize("text", LONE_TASK_SURFACES.values(), ids=LONE_TASK_SURFACES)
+def test_a_steps_lone_bare_task_is_written_on_one_line(text):
+    dumped = authored.dump(authored.load(text))
+    assert "tasks: [{id: t, extends: x}]\n" in dumped
+    assert authored.load(dumped) == authored.load(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "nodes: [{id: a, kind: exec, steps: [{id: s, tasks: [{id: t, extends: x, model: m}]}]}]",
+        "nodes: [{id: a, kind: exec, steps: [{id: s, tasks: [{id: t, kind: agent}]}]}]",
+        (
+            "nodes: [{id: a, kind: exec, steps: [{id: s, tasks:"
+            " [{id: t, extends: x}, {id: u, extends: y}]}]}]"
+        ),
+        "nodes: [{id: a, kind: exec, tasks: [{id: t, extends: x}]}]",
+    ],
+    ids=["another_key", "no_extends", "two_tasks", "tasks_shorthand"],
+)
+def test_any_other_task_list_stays_in_block_form(text):
+    dumped = authored.dump(authored.load(text))
+    assert "tasks: [" not in dumped
+    assert authored.load(dumped) == authored.load(text)
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"id": "t" * 70, "extends": "x" * 70},
+        {"id": "t", "extends": "kraft-default:implementer"},
+        {"id": "t", "extends": "two\nlines"},
+    ],
+    ids=["past_the_width", "namespaced", "line_break"],
+)
+def test_a_lone_task_the_dumper_must_wrap_or_quote_reads_back_the_same(task):
+    fix_loop = {"steps": [{"id": "s", "tasks": [task]}]}
+    model = {"nodes": [{"id": "a", "kind": "exec", "fix_loop": fix_loop}]}
+    dumped = authored.dump(model)
+    assert "tasks: [" in dumped
+    assert yaml.safe_load(dumped) == model
+    assert authored.dump(authored.load(dumped)) == dumped
+
+
 def test_an_added_key_follows_its_canonical_predecessor_and_authored_keys_keep_their_order():
     authored_order = "    kind: exec\n    skippable: false\n    read_only: true\n"
     model = authored.load(SHORTHAND.replace("    kind: exec\n", authored_order))
@@ -130,6 +198,9 @@ CANONICAL = [
     (BaseChangePolicy, authored.NESTED_KEYS["on_base_changed"]),
     (MergeRejectionPolicy, authored.NESTED_KEYS["on_merge_rejected"]),
     (OutputsDecl, authored.NESTED_KEYS["outputs"]),
+    (ReviewWaitConfig, authored.NESTED_KEYS["config"]),
+    (PipelineWaitConfig, authored.NESTED_KEYS["config"]),
+    (WaitPolicy, authored.NESTED_KEYS["wait"]),
     *((task, authored.TASK_KEYS) for task in (AgentTask, BuiltinTask, SubprocessTask, ForgeTask)),
 ]
 

@@ -36,7 +36,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "item-escalated", route: "/work-items/:id", taps: [card("escalated")], data: true },
   { id: "node", route: "/work-items/:id/nodes/:node", taps: [card("running"), node], data: true },
   { id: "task", route: "/work-items/:id/nodes/:node", taps: [card("running"), node, { css: ".ph-task-row" }], data: true },
-  { id: "scope", route: "/work-items/:id/nodes/:node", taps: [card("running"), { role: "button", name: "^verification" }, { role: "button", name: "^unit_tests" }, { role: "button", name: "^just test-unit" }], data: true, seed: "scopes", query: "scope" },
+  { id: "scope", route: "/work-items/:id/nodes/:node", taps: [card("running"), { role: "button", name: "^verification" }, { role: "button", name: "^test_changed_scopes" }, { role: "button", name: "^just test-unit" }], data: true, seed: "scopes", query: "scope" },
   { id: "gate-node", route: "/work-items/:id/nodes/:node", taps: [card("gate"), node], data: true },
   { id: "review", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review$" }], data: true },
   { id: "new", route: "/work-items/new", taps: [{ role: "link", name: "^New work item$" }], heading: "New work item" },

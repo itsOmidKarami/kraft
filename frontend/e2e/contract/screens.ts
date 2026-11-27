@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
-import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withCapLimit, withFixRoundOutcome, withOneOffPending, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
 import { NAMED_MEANWHILE } from "./mocks/ngForges";
 
@@ -23,7 +23,7 @@ const hoverPin = async (p: Page) => { await p.getByRole("button", { name: "Pin s
 /** The app's sidebar toggle: one button, its state in aria-pressed. */
 const appToggle = async (p: Page) => { await p.getByRole("button", { name: "Pin sidebar" }).click(); await p.waitForTimeout(400); };
 const appLogTab = (sel: string, data: Variant = "default") => (p: Page) =>
-  app(p, item("running", `/nodes/verification?sel=${sel}&tab=log`), { data, ready: (pg) => pg.getByLabel("Log lines").or(pg.getByText(/No log for this attempt|Not started\.|No log yet/)).first().waitFor({ timeout: 8000 }) });
+  app(p, item("running", `/nodes/${sel.split(".")[0]}?sel=${sel}&tab=log`), { data, ready: (pg) => pg.getByLabel("Log lines").or(pg.getByText(/No log for this attempt|Not started\.|No log yet/)).first().waitFor({ timeout: 8000 }) });
 const appGateDoc = (data: Variant = "default") => async (p: Page) => {
   await app(p, item("needs-gate", "?sel=final_review"), { data, routes: editorsRoute });
   await p.getByRole("button", { name: /^Read / }).first().click();
@@ -143,7 +143,7 @@ export const STATES: State[] = [
   { area: "work-item", state: "default", app: (p) => app(p, item("running")) },
   { area: "work-item", state: "node", app: (p) => app(p, item("running", "/nodes/verification")) },
   { area: "work-item", state: "node-earlier-pass", app: (p) => app(p, item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 of 2$/ }).waitFor({ timeout: 8000 }) }) },
-  { area: "work-item", state: "node-scope", app: (p) => app(p, item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("group", { name: /repositories and scopes/ }).waitFor({ timeout: 8000 }) }) },
+  { area: "work-item", state: "node-scope", app: (p) => app(p, item("running", `/nodes/verification?sel=verification.tests.test_changed_scopes&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("group", { name: /repositories and scopes/ }).waitFor({ timeout: 8000 }) }) },
   { area: "work-item", state: "loading", app: (p) => app(p, item("running"), { routes: (pg) => pg.route(/\/api\/work-items\/[0-9a-f]+(\?|$)/, () => {}), ready: async () => {} }) },
   { area: "work-item", state: "error", app: (p) => app(p, "/work-items/0000000000000000deadbeef", { ready: async () => {} }) },
   { area: "work-item", state: "failed", app: (p) => app(p, item("failed")) },
@@ -159,12 +159,13 @@ export const STATES: State[] = [
   // Document viewer
   { area: "doc-viewer", state: "default", app: appGateDoc() },
   { area: "doc-viewer", state: "fullscreen", app: async (p) => { await appGateDoc()(p); await click(/full screen/)(p); } },
-  { area: "doc-viewer", state: "editor-menu", app: async (p) => { await appSearchDoc(p); await p.getByRole("dialog").getByRole("button", { name: "Other editors" }).click(); await p.waitForTimeout(400); } },
+  // The gate's document: what search finds is Kraft's own copy, which offers no editor.
+  { area: "doc-viewer", state: "editor-menu", app: async (p) => { await appGateDoc()(p); await p.getByRole("dialog").getByRole("button", { name: "Other editors" }).click(); await p.waitForTimeout(400); } },
   { area: "doc-viewer", state: "from-search", app: appSearchDoc },
 
   // Logs viewer
   { area: "logs-viewer", state: "default", app: appLogTab("verification.review.code_review") },
-  { area: "logs-viewer", state: "empty", app: appLogTab("verification.review.automated_review") },
+  { area: "logs-viewer", state: "empty", app: appLogTab("work_brief.main.author") },
   { area: "logs-viewer", state: "fullscreen", app: async (p) => { await appLogTab("verification.review.code_review")(p); await click(/full screen/)(p); } },
 
   // Settings
@@ -243,7 +244,7 @@ export const STATES: State[] = [
 
   // Edit mode and Apply on a running item (ED-)
   { area: "edit-mode", state: "draft-chip", app: (p) => app(p, item("running"), { mock: { itemDraft: "changes" } }) },
-  { area: "edit-mode", state: "config-override", app: async (p) => { await app(p, item("running", "?sel=work_brief.write.work_brief&tab=config"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Override model" }).click(); await p.getByRole("textbox", { name: "model" }).fill("opus"); await p.keyboard.press("Enter"); await p.waitForTimeout(600); } },
+  { area: "edit-mode", state: "config-override", app: async (p) => { await app(p, item("running", "?sel=work_brief.main.author&tab=config"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Override model" }).click(); await p.getByRole("textbox", { name: "model" }).fill("opus"); await p.keyboard.press("Enter"); await p.waitForTimeout(600); } },
   { area: "edit-mode", state: "apply", app: async (p) => { await app(p, item("running"), { mock: { itemDraft: "changes" } }); await click("Review & apply")(p); await p.getByRole("dialog").waitFor(); } },
   { area: "edit-mode", state: "problems", app: (p) => app(p, item("running"), { mock: { itemDraft: "problems" } }) },
   { area: "edit-mode", state: "seam-menu", app: async (p) => { await app(p, item("running"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Add a library node here" }).first().focus(); await p.keyboard.press("Enter"); await p.waitForTimeout(500); } },
@@ -280,7 +281,7 @@ export const STATES: State[] = [
   { area: "phone", state: "item-failed-forge-token", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gl", source: "env CORP_GL" }) }) },
   { area: "phone", state: "node", viewport: "phone", app: appPhone(item("running", "/nodes/verification")) },
   { area: "phone", state: "node-earlier-pass", viewport: "phone", app: appPhone(item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 ·/, pressed: true }).waitFor({ timeout: 8000 }) }) },
-  { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
+  { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.tests.test_changed_scopes&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
   { area: "phone", state: "gate-node", viewport: "phone", app: appPhone(item("needs-gate", "/nodes/final_review")) },
   { area: "phone", state: "gate-review", viewport: "phone", app: appPhone(item("needs-gate", "/review"), { ready: (pg) => pg.locator("main").first().waitFor() }) },
   { area: "phone", state: "start-review", viewport: "phone", app: async (p) => { await appPhone(item("paused"), { tweak: withOneOffPending })(p); await p.getByRole("button", { name: "Start", exact: true }).click(); await p.waitForTimeout(700); } },
@@ -303,8 +304,8 @@ export const STATES: State[] = [
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone
   // Follow-ups merged since sweep 2
-  { area: "follow-ups", state: "reviewer-pane", ...at("a gate's auto_review opens its own task pane", item("needs-gate", "/nodes/final_review?sel=final_review.auto_review"), { tweak: withReviewer }) },
-  { area: "follow-ups", state: "reviewer-gate", ...at("the gate pane that owns the reviewer", item("needs-gate", "?sel=final_review"), { tweak: withReviewer }) },
+  { area: "follow-ups", state: "reviewer-pane", ...at("a gate's auto_review opens its own task pane", item("needs-gate", "/nodes/final_review?sel=final_review.auto_review")) },
+  { area: "follow-ups", state: "reviewer-gate", ...at("the gate pane that owns the reviewer", item("needs-gate", "?sel=final_review")) },
   { area: "follow-ups", state: "recent-committed", ...at("Recent: the fix committed a change", item("running"), { tweak: withFixRoundOutcome(true) }) },
   { area: "follow-ups", state: "gate-tests-fail", ...at("gate pane: tests ✗ 1 of 3 scopes", item("needs-gate", "?sel=final_review"), { tweak: withTestResult(3, 1) }) },
   { area: "follow-ups", state: "failed-forge-auth", ...at("failed card, forge_auth", item("failed"), { tweak: withStop("infra", { cause: "forge_auth" }) }) },
@@ -314,8 +315,8 @@ export const STATES: State[] = [
   { area: "follow-ups", state: "capped-limit", ...at("capped item whose stop names its limit: header, banner, spent line", item("capped"), { tweak: withCapLimit }) },
   { area: "follow-ups", state: "capped-limit-peek", ...at("…and its board peek", "/", { tweak: withCapLimit, ready: async (pg) => { await pg.getByRole("button", { name: /^Fix flaky retry test/ }).first().click(); await pg.waitForTimeout(700); } }) },
 
-  { area: "follow-ups", state: "gate-doc-by", ...at("a gate's document: written by, Open in editor", item("needs-gate", "?sel=final_review"), { tweak: withProducer, routes: editorsRoute, ready: async (pg) => { await pg.getByRole("button", { name: /^Read / }).first().click(); await pg.getByRole("dialog").waitFor(); } }) },
-  { area: "follow-ups", state: "review-by", ...at("the gate review: written by", item("needs-gate", "/review?doc=1"), { tweak: withProducer, ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) }) },
+  { area: "follow-ups", state: "gate-doc-by", ...at("a gate's document: written by, Open in editor", item("needs-gate", "?sel=final_review"), { routes: editorsRoute, ready: async (pg) => { await pg.getByRole("button", { name: /^Read / }).first().click(); await pg.getByRole("dialog").waitFor(); } }) },
+  { area: "follow-ups", state: "review-by", ...at("the gate review: written by", item("needs-gate", "/review?doc=1"), { ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) }) },
 
   // Review ranges
   { area: "review-ranges", state: "range-new", ...at("composer on lines 2–7: header Lines 2–7", item("needs-gate", "/review"), { ready: rangeOpen(["new", 2], ["new", 7]) }) },

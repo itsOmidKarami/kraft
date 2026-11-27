@@ -1,4 +1,4 @@
-<!-- What this changes, and why -- the diff already shows what moved. A new docs page, section or CLI verb also carries `_Added in next_` under its heading (CONTRIBUTING.md, "User-facing docs"). -->
+<!-- What this changes, and why -- the diff already shows what moved. A new docs page, section or CLI verb also carries `_Added in next_` under its heading (docs/writing-docs.md, "Page rules"). -->
 
 
 
@@ -8,7 +8,8 @@
 
 ## Release impact
 
-Apply exactly one label: `release::major`, `release::minor`, `release::patch`, or `release::none`.
+A maintainer applies exactly one label: `release::major`, `release::minor`, `release::patch` or `release::none`.
+If you can apply labels, pick one; otherwise say here which fits.
 Maintainers may also add `notes::highlight` to the release's headline change.
 `release::none` is a first-class answer for docs, comments, CI config, and test-only
 changes. See [CONTRIBUTING.md](https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md#pull-requests-and-release-labels).

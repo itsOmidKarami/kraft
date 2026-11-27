@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,7 +18,7 @@ from kraft import builtins as _builtins
 from kraft import config, events, inplace, item_paths, outputs, reviewed_head, store, waits
 from kraft import forges as forges_mod
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git, git_auth, settle
+from kraft.adapters.forge import ci, git, git_auth, open_threads, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.api_account import ApiAccount
 from kraft.adapters.forge.gh import GhCli
@@ -38,12 +38,13 @@ from kraft.adapters.forge.models import (
     QueueRead,
     failure_cause,
 )
+from kraft.adapters.forge.replies import facts, owed, record
 from kraft.automated_review import Reviewers
 from kraft.config import ConfigError, load_repos
 from kraft.paths import config_dir
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds, pipeline_variable
-from kraft.vocab import RUNNING, ForgeEvent
+from kraft.vocab import RUNNING, ChainEvent, ForgeEvent
 from kraft.vocab.events.limit import LimitEvent
 from kraft.vocab.sql import in_list
 
@@ -471,6 +472,158 @@ async def _record_push(
             )
 
     await db.write(_write)
+
+
+def _record_description(c, work_item_id: str, node_id: str | None, repo: Path, sha: str) -> None:
+    events.append(
+        c,
+        work_item_id,
+        ForgeEvent.MR_DESCRIPTION_WRITTEN,
+        {"node_id": node_id, "repo": str(repo), "sha256": sha},
+    )
+
+
+async def _record_opening(
+    db, forge: Forge, work_item_id: str, node_id: str | None, repo: Path, body: str
+) -> None:
+    """Record the description `forge.open_mr` writes, before it does: on GitLab the
+    body, then the body with `open_marker` it writes as an edit of it."""
+    # getattr: a test's bare forge may define nothing beyond the calls it answers.
+    marker = getattr(forge, "open_marker", "")
+    texts = [body, body + marker] if marker else [body]
+
+    def _write(c) -> None:
+        for text in texts:
+            _record_description(c, work_item_id, node_id, repo, mr_ops.body_hash(text))
+
+    await db.write(_write)
+
+
+def _our_descriptions(c, work_item_id: str, repo: Path) -> set[str]:
+    """The hash of every description Kraft recorded writing to `repo`."""
+    rows = c.execute(
+        "SELECT json_extract(payload, '$.sha256') AS sha FROM events "
+        "WHERE work_item_id = ? AND type = ? AND json_extract(payload, '$.repo') = ?",
+        (work_item_id, ForgeEvent.MR_DESCRIPTION_WRITTEN, str(repo)),
+    ).fetchall()
+    return {row["sha"] for row in rows}
+
+
+def _keep_description(c, work_item_id: str, node_id: str | None, repo: Path) -> None:
+    events.append(
+        c,
+        work_item_id,
+        ForgeEvent.MR_DESCRIPTION_KEPT,
+        {"node_id": node_id, "repo": str(repo)},
+    )
+
+
+def _wrote_before_records(
+    c, work_item_id: str, repo: Path, repo_row_id: int | None, number: int
+) -> bool:
+    """Whether a Kraft from before these records wrote this merge request's
+    description: it wrote one on every `mr_opened`, reused merge requests included.
+    This item's own record of this number, per repository where it has several. A
+    `kept` event means this Kraft already judged it not to be its own, and an
+    `mr_opened` from a reuse that could not read the description vouches for nothing."""
+    kept = c.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.repo') = ? LIMIT 1",
+        (work_item_id, ForgeEvent.MR_DESCRIPTION_KEPT, str(repo)),
+    ).fetchone()
+    if kept is not None or number <= 0:
+        return False
+    if repo_row_id is not None:
+        row = c.execute(
+            "SELECT json_extract(mr_ref, '$.number') AS number, "
+            "json_extract(mr_ref, '$.description_unread') AS unread "
+            "FROM work_item_repos WHERE id = ?",
+            (repo_row_id,),
+        ).fetchone()
+        return row is not None and row["number"] == number and not row["unread"]
+    return (
+        c.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+            "AND json_extract(payload, '$.number') = ? "
+            "AND json_extract(payload, '$.description_unread') IS NULL LIMIT 1",
+            (work_item_id, ForgeEvent.MR_OPENED, number),
+        ).fetchone()
+        is not None
+    )
+
+
+async def _describe_mr(
+    forge: Forge,
+    db,
+    *,
+    work_item_id: str,
+    node_id: str | None,
+    orig_repo: Path,
+    repo: Path,
+    branch: str,
+    body: str,
+    number: int,
+    repo_row_id: int | None,
+) -> tuple[str | None, str, bool]:
+    """Rewrite an open merge request's description, unless that would destroy
+    what a person wrote there: the live text must be one Kraft recorded writing,
+    reach one through saves made only by bot accounts (`mr_ops.only_bots_since`),
+    or, with no record at all, be on a merge request an earlier Kraft described
+    (`_wrote_before_records`). Anything else, an emptied body included, stays as
+    it is, whole, so nothing can come out half-merged.
+
+    Returns the description this replaced (None when it wrote nothing), a log
+    line, and whether the live description could not be read. A failed read
+    decides nothing, so an outage never marks a description as kept. Hashes go
+    in before the write and every one counts, so a write that landed with its
+    answer lost, or never landed, is not mistaken for an edit."""
+
+    def _earlier(c) -> bool:
+        return _wrote_before_records(c, work_item_id, orig_repo, repo_row_id, number)
+
+    try:
+        live = await forge.mr_body(repo=repo, branch=branch)
+    except ForgeError:
+        return None, "could not read the description to check for edits: left it as it is\n", True
+    new = mr_ops.body_hash(body)
+    current = mr_ops.body_hash(live)
+    ours = db.read(lambda c: _our_descriptions(c, work_item_id, orig_repo))
+    if current not in ours | {new}:
+        if not ours and db.read(_earlier):
+            await db.write(
+                lambda c: _record_description(c, work_item_id, node_id, orig_repo, current)
+            )
+            ours = {current}
+        else:
+            try:
+                revisions = await forge.mr_description_history(repo=repo, branch=branch)
+            except ForgeError:
+                revisions = ()
+            if not mr_ops.only_bots_since(live, revisions, ours):
+                await db.write(lambda c: _keep_description(c, work_item_id, node_id, orig_repo))
+                return (
+                    None,
+                    "the description is not the one Kraft last wrote: left it as it is\n",
+                    False,
+                )
+
+    def _before_write(c) -> None:
+        newest = c.execute(
+            "SELECT type FROM events WHERE work_item_id = ? AND type IN (?, ?) "
+            "AND json_extract(payload, '$.repo') = ? ORDER BY seq DESC LIMIT 1",
+            (
+                work_item_id,
+                ForgeEvent.MR_DESCRIPTION_WRITTEN,
+                ForgeEvent.MR_DESCRIPTION_KEPT,
+                str(orig_repo),
+            ),
+        ).fetchone()
+        if new not in ours or (newest and newest["type"] == ForgeEvent.MR_DESCRIPTION_KEPT):
+            _record_description(c, work_item_id, node_id, orig_repo, new)
+
+    await db.write(_before_write)
+    await forge.update_mr(repo=repo, branch=branch, body=body)
+    return live, "", False
 
 
 async def _rebase_conflict_away(
@@ -912,6 +1065,42 @@ def _no_run_past_grace(db, work_item_id: str, task: str) -> bool:
     return waits.now() - started >= NO_POST_MERGE_CI_GRACE
 
 
+async def _held_by_threads(
+    db,
+    forge: Forge,
+    work_item_id: str,
+    target: tuple,
+    branch: str,
+    item_base: str,
+    reviewers: Reviewers,
+) -> str:
+    """The open bot threads, when a merge the forge accepted timed out held on them:
+    GitLab's auto-merge waits on unresolved threads instead of refusing. Read once,
+    at the stop, and never raises."""
+    if not any(r.bot is not None for r in reviewers):
+        return ""
+    _, repo, role = target
+    try:
+        async with asyncio.timeout(open_threads.READ_LIMIT_S):
+            base = (
+                await _builtins.base_branch(db, work_item_id, repo, member=True)
+                if role == "submodule"
+                else item_base
+            )
+            ci_read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        return await open_threads.merge_hint(
+            forge,
+            repo=repo,
+            branch=branch,
+            base=base,
+            reviewers=reviewers,
+            detail=ci_read.merge_detail,
+        )
+    except Exception:  # noqa: BLE001 -- a hint never disturbs the stop
+        logger.warning("could not read what holds the merge of %s", branch, exc_info=True)
+        return ""
+
+
 async def _no_post_merge_ci(
     db, work_item_id: str, node_id: str, hook_point: str, orig_repo: Path, base: str, sha: str
 ):
@@ -953,6 +1142,9 @@ class WaitNote:
     #: What the wait is about, kept in its start: a wait open about something
     #: else ends `superseded` (`waits.observe`).
     started_extra: dict = field(default_factory=dict)
+    #: The instant a pending observation times out, when it is not the wait's
+    #: start plus its timeout: a CI-watching review wait counts from the push.
+    deadline: datetime | None = None
 
 
 _PIPELINE_ID = re.compile(r"[0-9]+")
@@ -967,6 +1159,12 @@ def _cause_first(cause: str, log: str) -> str:
     """`log` under `cause` as its first line: the stop's task cause is the
     first non-empty line (`walk._task_cause`)."""
     return f"{cause}\n{log}"
+
+
+#: The line a CI-watching review wait leads its log with when it reads a red
+#: pipeline. A reused wait session's log is appended to, so the cause cannot
+#: rely on being the file's first line: `walk._task_cause` picks this prefix out.
+CI_RED_LINE = "CI is red: "
 
 
 async def _pipeline_stop(db, work_item_id: str, node_id: str, cause: str) -> str:
@@ -1089,6 +1287,8 @@ async def _collect_review(
     run_dirs,
     session_id: str,
     round: int,
+    watch_ci: bool = False,
+    reply: owed.ReplyWait | None = None,
 ) -> tuple[str, str, WaitNote | None]:
     """One check of the review wait on its collect path: read every reviewer,
     decide whether each has finished with the head (`settle.decide`), and once
@@ -1107,16 +1307,31 @@ async def _collect_review(
                 {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
             )
         )
-        _write_collection(destination, head, round, [])
+        _write_collection(destination, head, round, [], None)
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
+    kraft = None
+    if any(r.replies for r in reviewers):
+        # Read once per wait and kept in its memory: the head wait needs Kraft's notes
+        # from its first check. Unreadable, only the record says which notes are Kraft's.
+        wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+        viewer = ((wait.last if wait is not None else None) or {}).get("viewer")
+        if viewer is None:
+            try:
+                viewer = await forge.viewer(repo=repo)
+            except ForgeError:
+                viewer = None
+        held = db.read(lambda c: record.read(c, work_item_id))
+        kraft = facts.Kraft(
+            viewer, work_item_id, record.posted_hashes(held), record.thread_ids(held)
+        )
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
         work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
         reviewers=reviewers,
-        bounds=bounds, grace=grace,
+        bounds=bounds, grace=grace, watch_ci=watch_ci, kraft=kraft, reply=reply,
     )  # fmt: skip
     if collection is not None:
-        _write_collection(destination, head, round, collection)
+        _write_collection(destination, head, round, collection, note.now)
     return log, status, note
 
 
@@ -1136,38 +1351,91 @@ async def _settle_review(
     grace: timedelta,
     scope: str | None = None,
     mount: str | None = None,
+    watch_ci: bool = False,
+    kraft: facts.Kraft | None = None,
+    reply: owed.ReplyWait | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
     each reviewer said. A multi-repo item's repositories each keep their own
-    memory in the wait, under `scope`."""
+    memory in the wait, under `scope`. `kraft`, given only on the collect path
+    with a replies-on bot, leaves Kraft's conversation out and is kept in the
+    wait (its viewer). `reply`, given by a reply round, makes this check the wait for the
+    answers in its threads (`settle.reply_wait`) instead of for the head's reviewers."""
     # One reading of the clock, so the deadline this tests and the one
     # `waits.observe` tests are the same instant.
     now = waits.now()
     wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
-    deadline = (
-        datetime.fromisoformat(wait.started["started_at"]) + bounds.timeout
-        if wait is not None
-        else now + bounds.timeout
-    )
-    timed_out = now >= deadline
     if not head:
         raise ForgeError(f"cannot read the head of {branch} in {repo}")
     since = db.read(lambda c: waits.pushed_at(c, work_item_id, repo=str(orig_repo), sha=head))
     if since is None:
         since = await git.committed_at(repo, head)
+    if watch_ci:
+        # "If it didn't post a review after the push in 10 mins, it's done"
+        # (`review-wait-watching-ci-counts-its-limit-from-the-push`): the time
+        # already gone on this head counts, whenever this wait started.
+        deadline = since + bounds.timeout
+    elif wait is not None:
+        deadline = datetime.fromisoformat(wait.started["started_at"]) + bounds.timeout
+    else:
+        deadline = now + bounds.timeout
+    timed_out = now >= deadline
+    # Passed only when given: several tests replace `reviewer_feedback` with a
+    # function that takes no `kraft`.
     feedback = await forge.reviewer_feedback(
-        repo=repo, branch=branch, reviewers=reviewers, since=since
+        repo=repo,
+        branch=branch,
+        reviewers=reviewers,
+        since=since,
+        **({"kraft": kraft} if kraft is not None else {}),
     )
     memory = ((wait.last if wait is not None else None) or {}).get("memory", {})
     if scope is not None:
         memory = memory.get(scope, {})
+    if reply is not None and kraft is not None:
+        # A round implies a replies-on bot; an override may have turned replies off since.
+        done, latest = settle.reply_wait(feedback, reply, now=now, kraft=kraft)
+        kept = {"memory": memory, **({"viewer": kraft.viewer} if kraft.viewer else {})}
+        # The deadline is a settle, never a `timed_out` (`settled_by_timeout` stays False), and the
+        # push-based deadline above (`watch_ci`) is not this wait's. It records no heard or silent
+        # bots and compares no thread ids: this is not the head's wait.
+        note = WaitNote(None, kept, False, now, deadline=latest)
+        if not done:
+            return (
+                f"reply wait: waiting for {len(reply.threads)} thread(s) to be answered\n",
+                "waiting",
+                note,
+                None,
+            )
+        return (
+            "reply wait: every thread answered, resolved or past its deadline\n",
+            "done",
+            note,
+            settle.collect(feedback, "reply", kraft),
+        )
     decided = settle.decide(
-        feedback, since=since, now=now, grace=grace, memory=memory, timed_out=timed_out
+        feedback,
+        since=since,
+        now=now,
+        grace=grace,
+        memory=memory,
+        timed_out=timed_out,
+        kraft=kraft,
     )
+    kept = {
+        "memory": decided.memory,
+        **({"viewer": kraft.viewer} if kraft and kraft.viewer else {}),
+    }
     if decided.state == "pending":
         log = f"automated review: waiting for the reviewers to finish with {head[:7]}\n"
-        note = WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
+        note = WaitNote(
+            decided.next_at,
+            kept,
+            False,
+            now,
+            deadline=deadline if watch_ci else None,
+        )
         return log, "waiting", note, None
     log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
     heard, silent = settle.heard_and_silent(reviewers, decided.memory)
@@ -1177,7 +1445,7 @@ async def _settle_review(
         payload = {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)}
         payload |= {"mount": mount, "head": head, "heard": heard, "silent": silent}
         await db.write(lambda c: _record_settled(c, work_item_id, payload))
-    note = WaitNote(None, {"memory": decided.memory}, timed_out, now)
+    note = WaitNote(None, kept, timed_out, now, deadline=deadline if watch_ci else None)
     return log, "done", note, decided.collection
 
 
@@ -1248,12 +1516,20 @@ def _as_findings(messages: Iterable[str]) -> list[dict]:
     ]
 
 
-def _write_collection(destination: Path, head: str, round: int, collection: list[dict]) -> None:
-    """The collection the reading task is handed (`AgentInput.BOT_FEEDBACK`)."""
+def _write_collection(
+    destination: Path, head: str, round: int, collection: list[dict], read_at: datetime | None
+) -> None:
+    """The collection the reading task is handed (`AgentInput.BOT_FEEDBACK`).
+    `read_at` is the instant the wait decided the bots had finished; None when
+    nothing was read."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps({"head": head, "round": round, "reviewers": collection}, indent=2) + "\n"
-    )
+    body = {
+        "head": head,
+        "round": round,
+        "read_at": read_at.isoformat() if read_at else None,
+        "reviewers": collection,
+    }
+    destination.write_text(json.dumps(body, indent=2) + "\n")
 
 
 async def _run_one(
@@ -1279,6 +1555,9 @@ async def _run_one(
     reviewers: Reviewers = (),
     #: The repository's `ci_checks:`; False skips both CI waits.
     ci_checks: bool = True,
+    #: The repository's `post_merge_publish_jobs:` globs; `merge_watch` pauses
+    #: no item when every failed job matches one.
+    post_merge_publish_jobs: Sequence[str] = (),
     merge_requested: bool = False,
     #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
     #: records the merge request it opened or reused there (Kraft-mjsf).
@@ -1302,6 +1581,13 @@ async def _run_one(
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
     round: int = 0,
+    #: The review wait watches CI (`ForgeTask.watch_ci`): its limit counts from
+    #: the push of the head it is about, not from the wait's start.
+    watch_ci: bool = False,
+    #: A reply round's wait for the answers in its threads (`owed.ReplyWait`), on the collect path
+    #: only: the check then waits for them, each bounded by its own deadline, in place of the
+    #: head's reviewers.
+    reply: owed.ReplyWait | None = None,
     #: `pipeline_wait`'s pipeline id (`ForgeTask.pipeline`), the writer paths of
     #: its `reads`, and the variables each declares now.
     pipeline: str | None = None,
@@ -1355,6 +1641,7 @@ async def _run_one(
             # an open_mr that crashed after the create lands here too. A
             # second `mr create` for one branch is an error on both CLIs
             # (Kraft-xron).
+            unread = False
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "open":
                 # The same two calls `sync_mr` makes, for the same reason:
@@ -1371,15 +1658,27 @@ async def _run_one(
                     repo=repo,
                     branch=branch,
                 )
-                await forge.update_mr(repo=repo, branch=branch, body=body)
+                _, described, unread = await _describe_mr(
+                    forge,
+                    db,
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    orig_repo=orig_repo,
+                    repo=repo,
+                    branch=branch,
+                    body=body,
+                    number=existing.number,
+                    repo_row_id=repo_row_id,
+                )
                 number, url = existing.number, existing.url
-                log, status = f"reusing !{number}: {url}\n", "done"
+                log, status = f"reusing !{number}: {url}\n{described}", "done"
             else:
                 # ponytail: the description predates any commit `mr_checks`'
                 # fix loop adds -- `sync_mr` rebuilds the body from this same
                 # artifact, not from the newer head. Re-run on.mr.describe
                 # from the fix loop if CI-fix commits start changing the
                 # story.
+                await _record_opening(db, forge, work_item_id, node_id, orig_repo, body)
                 mr = await forge.open_mr(
                     repo=repo,
                     branch=branch,
@@ -1409,13 +1708,15 @@ async def _run_one(
             # A multi-repo item's event carries no repo, so each repo's own
             # merge request is recorded on its row too (Kraft-mjsf).
             def _record(c, n=number, u=url):
-                events.append(
-                    c, work_item_id, ForgeEvent.MR_OPENED, {"number": n, "url": u}, node_id=node_id
-                )
+                ref = {"number": n, "url": u, **({"description_unread": True} if unread else {})}
+                events.append(c, work_item_id, ForgeEvent.MR_OPENED, ref, node_id=node_id)
                 if repo_row_id is not None:
-                    store.update_repo_state(
-                        c, repo_row_id, merge_state="open", mr_ref={"number": n, "url": u}
-                    )
+                    # A row that already vouches for this number keeps vouching: it
+                    # is a workspace member's only proof that an earlier Kraft wrote
+                    # the description, and a failed read proves nothing (Kraft-0pizx).
+                    if unread and _wrote_before_records(c, work_item_id, orig_repo, repo_row_id, n):
+                        ref = {"number": n, "url": u}
+                    store.update_repo_state(c, repo_row_id, merge_state="open", mr_ref=ref)
 
             await db.write(_record)
         case "ci_poll":
@@ -1532,8 +1833,42 @@ async def _run_one(
                     # `merge` does below (Kraft-tx0dz).
                     log += "waiting for the rebased head's pipeline\n"
                     status = "waiting"
+                    reply = None  # a round's deadline is for the head it measured green
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
+            if (
+                reply is not None
+                and reply.deadline is not None
+                and status in ("waiting", "ci_pending")
+            ):
+                # A reply round on a head already measured green: CI still pending (a check a
+                # reply's workflow added) is bounded by the round's time, never by the CI wait's
+                # own timeout. Red is not touched here: it fails as ever. A new head has no `reply`.
+                at = waits.now()
+                over = at >= reply.deadline
+                # Kept in the wait's start: a look of another head finds it and starts its own
+                # wait (below), never one that times out at this round's deadline.
+                note = WaitNote(
+                    None,
+                    {},
+                    over,
+                    at,
+                    started_extra={"reply_round": reply.deadline.isoformat()},
+                    deadline=reply.deadline,
+                )
+                if over:
+                    log += (
+                        "reply round: CI is still pending and the round's time is up; "
+                        "completing on this head's earlier green measurement\n"
+                    )
+                    status = "done"
+            elif reply is None and status in ("waiting", "ci_pending"):
+                # No round now (the head moved, or it was repaired), but the open wait may have been
+                # started by one, with its short deadline: it is superseded by a wait of the CI
+                # task's own timeout, so a round never stops the item on a later head's pending CI.
+                open_wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+                if open_wait is not None and open_wait.started.get("reply_round"):
+                    note = WaitNote(None, {}, False, waits.now(), {"reply_round": None})
         case "pipeline_wait":
             log, status, findings, note = await _pipeline_wait(
                 forge,
@@ -1564,6 +1899,8 @@ async def _run_one(
                 run_dirs=run_dirs,
                 session_id=session_id,
                 round=round,
+                watch_ci=watch_ci,
+                reply=reply,
             )
         case "automated_review" if any(r.bot is not None for r in reviewers):
             # Not collecting (nothing in the node reads it, or a multi-repo
@@ -1574,7 +1911,7 @@ async def _run_one(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
                 work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
                 reviewers=reviewers,
-                bounds=bounds, grace=grace, scope=scope, mount=mount,
+                bounds=bounds, grace=grace, scope=scope, mount=mount, watch_ci=watch_ci,
             )  # fmt: skip
             if collection is not None:
                 found, unread, unfinished = _verdict(collection, mount)
@@ -1686,21 +2023,29 @@ async def _run_one(
             )
             # The description `open_mr` wrote predates every commit verify
             # and mr_checks added, so it is rewritten from the branch head
-            # before a human is asked to read it (Kraft-c09h).
-            try:
-                live_body: str | None = await forge.mr_body(repo=repo, branch=branch)
-            except ForgeError:
-                live_body = None  # shortcut: best-effort read, the sync itself goes on
-            await forge.update_mr(repo=repo, branch=branch, body=body)
-            log, status = "pushed and synced the merge request description\n", "done"
+            # before a human is asked to read it (Kraft-c09h), unless a person
+            # edited it.
+            replaced, described, _ = await _describe_mr(
+                forge,
+                db,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
+                repo=repo,
+                branch=branch,
+                body=body,
+                number=existing.number if existing is not None else 0,
+                repo_row_id=repo_row_id,
+            )
+            log = f"pushed and synced the merge request description\n{described}"
+            status = "done"
             # Editing a description triggers no workflow, so a check that read
             # the old one (a required section, say) stays red until its jobs
-            # run again. Only when the body changed AND the current head's
-            # checks are red: a sync after new commits sees a pending pipeline.
-            # shortcut: re-runs whenever the live description differs, including
-            # edits by a bot or a person, not only a repair; key it on the body
-            # Kraft last wrote if that costs CI.
-            if live_body is not None and live_body.strip() != body.strip():
+            # run again. Only when Kraft changed the body AND the current
+            # head's checks are red: a sync after new commits sees a pending
+            # pipeline.
+            unmarked = (replaced or "").strip().removesuffix(mr_ops.OPEN_MARKER.strip())
+            if replaced is not None and unmarked.strip() != body.strip():
                 try:
                     head_ci = await forge.ci_status(
                         repo=repo, mr=MR(number=0, url=""), branch=branch
@@ -1784,14 +2129,14 @@ async def _run_one(
                     f"no open merge request for {branch!r}"
                     + (f": !{existing.number} is {existing.state}" if existing else "")
                 )
-            elif requested and (moved := _moved_head(db, work_item_id, repo, existing)):
+            elif requested and (foreign := _moved_head(db, work_item_id, repo, existing)):
                 # Asked, and since then the forge's head is not the approved one: a
                 # commit reached the merge request, which the forge would merge
                 # when its checks pass. Cancelled while it still can be (a failed
                 # cancel fails the node: the forge may still merge), then held.
                 await forge.cancel_merge(repo=repo, branch=branch, mr=existing)
-                log = f"cancelled the merge of !{existing.number}, now at {moved[1][:12]}\n"
-                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, moved[1])
+                log = f"cancelled the merge of !{existing.number}, now at {foreign[1][:12]}\n"
+                log += await _refuse_forge_head(db, work_item_id, node_id, repo, branch, foreign[1])
                 status = "unreviewed"
             elif requested:
                 # This wait already asked for the merge; it is only reading
@@ -1949,6 +2294,28 @@ async def _run_one(
                             db, work_item_id, node_id, repo, branch, exc.current
                         )
                         status = "unreviewed"
+                    except ForgeError as exc:
+                        if (
+                            not isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable))
+                            and exc.reason not in ("rate_limited", "auth", "unreachable")
+                            and not exc.no_answer
+                        ):
+                            try:
+                                hint = await open_threads.merge_hint(
+                                    forge,
+                                    repo=repo,
+                                    branch=branch,
+                                    base=base,
+                                    reviewers=reviewers,
+                                    detail=ci_status.merge_detail,
+                                    message=str(exc),
+                                )
+                            except Exception:  # noqa: BLE001 -- never replaces the failure
+                                logger.warning("no open-threads hint", exc_info=True)
+                                hint = ""
+                            # In the error itself: it is what the stop and the wait record.
+                            exc.args = (f"{exc}\n{hint}".rstrip(),) if hint else exc.args
+                        raise
                     else:
                         # And a refusal the CLI reported as success does not get
                         # through either: a merge with `auto_merge` answers 200 for "merge
@@ -2129,7 +2496,9 @@ async def _run_one(
                     # this item's own code to fix loop over (Kraft-43kw). File
                     # what a human needs, warn whoever else is sitting on the
                     # break, and still report "done" -- this node's job is
-                    # reporting what happened to the branch, not fixing it.
+                    # reporting what happened to the branch, not fixing it. A
+                    # red with only publish jobs failed files the bead and
+                    # pauses nothing.
                     job = ci_status.failed_jobs[0] if ci_status.failed_jobs else None
                     trace = (
                         "\n\n".join(
@@ -2137,9 +2506,14 @@ async def _run_one(
                         )
                         or log
                     )
-                    title = (
-                        f"post-merge pipeline broke on {base}: {job.name if job else 'unknown job'}"
-                    )[: beads.MAX_TITLE]
+                    publish_only = bool(ci_status.failed_jobs) and all(
+                        ci.is_publish_job(j.name, post_merge_publish_jobs)
+                        for j in ci_status.failed_jobs
+                    )
+                    what = "publish failed" if publish_only else "pipeline broke"
+                    title = (f"post-merge {what} on {base}: {job.name if job else 'unknown job'}")[
+                        : beads.MAX_TITLE
+                    ]
                     info = db.read(
                         lambda c: c.execute(
                             "SELECT bead_cwd FROM work_items WHERE id = ?", (work_item_id,)
@@ -2160,24 +2534,29 @@ async def _run_one(
                         logger.warning(
                             "merge_watch: follow-up bead not filed for %r: %r", title, exc
                         )
-                    broken = db.read(
-                        lambda c: [
-                            r["id"]
-                            for r in c.execute(
-                                # `waiting` as well as `active` (gate review):
-                                # an item parked on its own pipeline sits on
-                                # this same broken commit and is the one most
-                                # likely to re-discover the break in its own
-                                # fix loop -- exactly what this warning
-                                # exists to prevent. No other status can
-                                # usefully be warned: `paused`/`needs_human`
-                                # are already stopped, and a completed item
-                                # has nothing left to rebase.
-                                f"SELECT id FROM work_items WHERE status IN ({in_list(RUNNING)}) "
-                                "AND base_ref = ? AND id != ?",
-                                (head_sha, work_item_id),
-                            ).fetchall()
-                        ]
+                    broken = (
+                        []
+                        if publish_only
+                        else db.read(
+                            lambda c: [
+                                r["id"]
+                                for r in c.execute(
+                                    # `waiting` as well as `active` (gate review):
+                                    # an item parked on its own pipeline sits on
+                                    # this same broken commit and is the one most
+                                    # likely to re-discover the break in its own
+                                    # fix loop -- exactly what this warning
+                                    # exists to prevent. No other status can
+                                    # usefully be warned: `paused`/`needs_human`
+                                    # are already stopped, and a completed item
+                                    # has nothing left to rebase.
+                                    "SELECT id FROM work_items "
+                                    f"WHERE status IN ({in_list(RUNNING)}) "
+                                    "AND base_ref = ? AND id != ?",
+                                    (head_sha, work_item_id),
+                                ).fetchall()
+                            ]
+                        )
                     )
                     for other_id in broken:
                         stopped = await db.write(
@@ -2190,7 +2569,15 @@ async def _run_one(
 
                         for s in stopped:
                             reattach.interrupt_group(s["pid"], started=s["pid_start_time"])
-                    log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
+                    if publish_only:
+                        names = ", ".join(j.name for j in ci_status.failed_jobs)
+                        log += (
+                            f"filed {follow_up or '(no bead filed)'}, paused 0 item(s): "
+                            f"only publish job(s) failed ({names})\n"
+                        )
+                    else:
+                        filed = follow_up or "(no bead filed)"
+                        log += f"filed {filed}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
             # A target with no handler is a configuration limit, not a bug in
@@ -2289,6 +2676,89 @@ def _trace_line(log: str) -> int | None:
     return int(m.group(2)) if m else None
 
 
+async def _watch_ci(
+    db,
+    targets: list[tuple[Forge, Path, Path]],
+    *,
+    branch: str,
+    work_item_id: str,
+    node_id: str,
+    ci_task: str,
+    ci_checks: bool,
+    multi: bool,
+) -> tuple[str, str | None, list[dict] | None]:
+    """What a review wait that sets `watch_ci` does before it reads its bots:
+    push each repository's branch and read its pipeline, and end on a settled
+    red. Each target is `(forge, repo, orig_repo)`; returns `(log, status,
+    findings)`, where a `status` of None lets the bots' part run.
+
+    It reads with the CI wait's own reader and verdict (`ci.render_ci`) and none
+    of the CI wait's side effects: no rebase, no infrastructure retry, no
+    skip-CI record, no pipeline pin. The node's `mr.ci` task owns CI, so a red
+    read is reported as that task's finding (`ci_task`), with its source and
+    fingerprint (`review-wait-red-pipeline-is-the-ci-wait-s-finding`)."""
+    log = ""
+
+    def tag(repo: Path) -> str:
+        return f"[{repo.name}] " if multi else ""
+
+    # A merge request already merged (the CI wait's own guard, `ci_poll`): its
+    # branch is usually deleted with it, so a push would die against the stale
+    # lease, and there is nothing left to check. Per repository: the others go on.
+    live: list[tuple[Forge, Path, Path]] = []
+    for forge, repo, orig_repo in targets:
+        existing = await forge.find_mr(repo=repo, branch=branch)
+        if existing is not None and existing.state == "merged":
+            log += f"{tag(repo)}already merged (!{existing.number}); nothing to check\n"
+            continue
+        live.append((forge, repo, orig_repo))
+    if not live:
+        return log, "done", None
+    # Every repository's branch first, so the bots' part, which stops at the
+    # first target not done, finds each pushed. A push error is not caught here:
+    # it fails the wait as the CI wait's does.
+    for forge, repo, orig_repo in live:
+        await forge.push(repo=repo, branch=branch)
+        await _record_push(
+            db,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            orig_repo=orig_repo,
+            repo=repo,
+            branch=branch,
+        )
+    if not ci_checks:
+        return log, None, None
+    # Then every pipeline, in target order (deepest first, as the CI wait reads
+    # them), stopping at the first red or conflict.
+    for forge, repo, _ in live:
+        head = await git._head_sha(repo, branch)
+        try:
+            read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+            rendered, verdict = await ci.render_ci(
+                read, forge=forge, repo=repo, branch=branch, head_sha=head
+            )
+        except ForgeError as exc:
+            if exc.reason == "rate_limited":
+                raise
+            log += f"{tag(repo)}pipeline not read ({exc}); the CI wait reads it\n"
+            continue
+        if verdict == "failed":
+            names = ", ".join(j.name for j in read.failed_jobs)
+            cause = f"{CI_RED_LINE}{names} failed on {head[:7]}" + (
+                f" in {repo.name}" if multi else ""
+            )
+            # CI findings stay single-repo, as the CI wait's do (`run_task`).
+            return (
+                _cause_first(cause, log + tag(repo) + rendered),
+                "failed",
+                None if multi else _job_findings(read, rendered, ci_task),
+            )
+        if verdict == "conflict":
+            return log + tag(repo) + rendered + "the CI wait rebases it\n", "done", None
+    return log, None, None
+
+
 async def run_task(
     db,
     run_dirs,
@@ -2321,11 +2791,14 @@ async def run_task(
     #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
     #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
     wait: WaitBounds | None = None,
+    #: For `mr.merge`, the chain's review bots, whose open threads a stop names.
     #: The reviewers `mr.automated_review` waits for (Ruling 171), already
     #: resolved across the item, repository and task layers; empty names none.
     reviewers: Reviewers = (),
     #: The repository's `ci_checks:`. Read by `mr.ci` and `mr.post_merge_ci`.
     ci_checks: bool = True,
+    #: The repository's `post_merge_publish_jobs:`. Read by `mr.post_merge_ci`.
+    post_merge_publish_jobs: Sequence[str] = (),
     head_sha: str | None = None,
     #: Whether this node declares `on_base_changed` -- see `_run_one`'s
     #: docstring. Defaults to False,
@@ -2342,6 +2815,16 @@ async def run_task(
     reads_feedback: bool = False,
     #: The review wait's grace period (`ForgeTask.grace`).
     grace: timedelta = DEFAULT_GRACE,
+    #: `ForgeTask.watch_ci`: the review wait also pushes and reads CI, and ends
+    #: on a red pipeline, as `ci_task`'s finding.
+    watch_ci: bool = False,
+    #: A reply round's wait for the answers in its threads (`owed.ReplyWait`), handed over by
+    #: `dispatch` while the node is in a round: the review wait's collect path then waits for
+    #: them, each bounded by its own deadline, instead of for the head's reviewers.
+    reply: owed.ReplyWait | None = None,
+    #: The node's own `mr.ci` task path, the owner of a CI finding the review
+    #: wait reports (`ResolvedNode.ci_wait_after`).
+    ci_task: str | None = None,
     #: `ci.pipeline`'s pipeline id (`ForgeTask.pipeline`), the writer paths of
     #: its `reads`, and the variables each declares now.
     pipeline: str | None = None,
@@ -2568,6 +3051,9 @@ async def run_task(
     checkout_stopped = False
     #: What the forge said when a call failed, for `failure_cause` to read later.
     forge_error: dict | None = None
+    #: The forge answered this try; the network cut it off and the item parks.
+    answered = parked = False
+    started = waits.now()
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3). A
@@ -2585,6 +3071,27 @@ async def run_task(
             # -- whether or not root itself has anything to publish.
             covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
             await git._assert_submodules_covered(repo, covered)
+        if handler == "automated_review" and watch_ci and ci_task:
+            log, watched, watched_findings = await _watch_ci(
+                db,
+                [
+                    (
+                        member_forges.get(mounts_by_row.get(row_id), live_forge),
+                        target_repo,
+                        target_repo if role == "submodule" else (orig_repo or target_repo),
+                    )
+                    for row_id, target_repo, role in targets
+                ],
+                branch=branch,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                ci_task=ci_task,
+                ci_checks=ci_checks,
+                multi=multi,
+            )
+            if watched is not None:
+                # Ended here: the bots' part, which walks `targets`, has nothing to read.
+                status, findings, targets = watched, watched_findings, []
         for row_id, target_repo, role in targets:
             if multi and role == "root" and handler in ("mark_ready", "external_approval"):
                 # The root's own merge request waits for its members: it is
@@ -2606,6 +3113,7 @@ async def run_task(
                     db,
                     rows,
                     root_repo=target_repo,
+                    orig_repo=orig_repo or target_repo,
                     branch=branch,
                     base=item_base,
                     title=title,
@@ -2641,6 +3149,7 @@ async def run_task(
                     has_rebase_bounce=has_rebase_bounce,
                     reviewers=reviewers,
                     ci_checks=ci_checks,
+                    post_merge_publish_jobs=post_merge_publish_jobs,
                     merge_requested=requested,
                     check_clean=check_clean,
                     repo_row_id=row_id,
@@ -2653,6 +3162,8 @@ async def run_task(
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
                     round=round,
+                    watch_ci=watch_ci,
+                    reply=reply,
                     pipeline=pipeline,
                     reads=reads,
                     declared=declared,
@@ -2728,6 +3239,7 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        answered = exc.status is not None
         if isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable)):
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
@@ -2752,14 +3264,36 @@ async def run_task(
                     {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
                 )
             )
+        elif exc.no_answer and exc.reason in (None, "unreachable") and status == "failed":
+            # Nothing about the work failed: no repair, no fix cycle. The session
+            # ends unfinished, as a rate limit's does, and the walk parks.
+            parked = await db.write(
+                lambda c, e=str(exc): waits.note_no_answer(
+                    c,
+                    work_item_id,
+                    node_id=node_id,
+                    task=hook_point,
+                    error=e,
+                    started=started,
+                )
+            )
+            status = "rate_limited" if parked else "infra_stop"
     except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
         # The person's checkout: stopped for them, as a refused take is.
         log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
         unobserved = str(exc)
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
+    else:
+        # A local refusal (an empty branch, say) says nothing about the network.
+        answered = status != "config_error"
 
-    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if answered:
+        await db.write(
+            lambda c: waits.note_answered(c, work_item_id, node_id=node_id, task=hook_point)
+        )
+    # A rate-limited or network-parked wait stays open as it was: ending it would
+    # restart its deadline.
     if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
@@ -2774,6 +3308,18 @@ async def run_task(
             session_id=session_id,
             note=note,
         )
+        if handler == "merge" and status == "capped_out" and merge_requested:
+            held = next((t for t in targets if t[0] == awaiting_landing), None)
+            if held is not None:
+                log += await _held_by_threads(
+                    db,
+                    member_forges.get(mounts_by_row.get(held[0]), live_forge),
+                    work_item_id,
+                    held,
+                    branch,
+                    item_base,
+                    reviewers,
+                )
     recorded = await _builtins.finish_session(
         db,
         log_path,
@@ -2787,7 +3333,12 @@ async def run_task(
         forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
-    # `builtins.mr_rebase` does, so the node's declared span re-verifies it.
+    # `builtins.mr_rebase` does, so the node's declared span re-verifies it,
+    # over a root that is done or still waiting. A root that stopped, parked
+    # or failed keeps its own outcome, and the move is held for the node's
+    # next completion (`walk.run_once`): restarting now would re-verify into a
+    # rate limit, or hide why it stopped. Not over a drop from the merge
+    # queue, whose own restart reopens the gates.
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
@@ -2801,7 +3352,17 @@ async def run_task(
         return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
-    return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
+    if moved and has_rebase_bounce and recorded in ("done", "waiting"):
+        return BASE_MOVED
+    if moved and has_rebase_bounce and recorded != "merge_rejected":
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, ChainEvent.BASE_MOVE_HELD, {"node_id": node_id, "before": ""}
+            )
+        )
+    # The session ended unfinished; what the walk does next is park on the wait
+    # scheduler, which re-enters with no steer and restarts nothing.
+    return "waiting" if parked and recorded == "rate_limited" else recorded
 
 
 async def _observed(
@@ -2859,6 +3420,7 @@ async def _observed(
             next_at=note.next_at if note else None,
             extra=note.extra if note else None,
             started_extra=note.started_extra if note else None,
+            deadline=note.deadline if note else None,
         )
     )
     if outcome == "timed_out" and by_deadline:
@@ -2970,6 +3532,7 @@ async def _ready_root(
     rows,
     *,
     root_repo: Path,
+    orig_repo: Path,
     branch: str,
     base: str,
     title: str,
@@ -3003,7 +3566,15 @@ async def _ready_root(
     try:
         if root["merge_state"] == "pending" and not has_source:
             log, opened = await _bump_pointer_only_root(
-                forge, db, rows, branch=branch, base=base, title=title, work_item_id=work_item_id
+                forge,
+                db,
+                rows,
+                branch=branch,
+                base=base,
+                title=title,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                orig_repo=orig_repo,
             )
             if not opened:
                 return log, "done"
@@ -3023,7 +3594,16 @@ async def _ready_root(
 
 
 async def _bump_pointer_only_root(
-    forge: Forge, db, rows, *, branch: str, base: str, title: str, work_item_id: str
+    forge: Forge,
+    db,
+    rows,
+    *,
+    branch: str,
+    base: str,
+    title: str,
+    work_item_id: str,
+    node_id: str,
+    orig_repo: Path,
 ) -> tuple[str, bool]:
     """A requested bump of a root with no source changes: straight onto the
     item's base branch in the root (`base`) when it takes the push
@@ -3060,18 +3640,20 @@ async def _bump_pointer_only_root(
             raise auth.stamp(exc) from None  # a refused token is not sent a second time
         refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
     await forge.push(repo=root_repo, branch=branch)
+    body = mr_ops.mr_body(
+        work_item_id,
+        mr_ops.MRMeta(
+            description=f"Moves {', '.join(bumped)} to the revisions merged for "
+            f"work item {work_item_id}."
+        ),
+    )
+    await _record_opening(db, forge, work_item_id, node_id, orig_repo, body)
     mr = await forge.open_mr(
         repo=root_repo,
         branch=branch,
         base=base,
         title=f"chore: bump submodule pointers for {title}",
-        body=mr_ops.mr_body(
-            work_item_id,
-            mr_ops.MRMeta(
-                description=f"Moves {', '.join(bumped)} to the revisions merged for "
-                f"work item {work_item_id}."
-            ),
-        ),
+        body=body,
     )
     await db.write(
         lambda c: store.update_repo_state(

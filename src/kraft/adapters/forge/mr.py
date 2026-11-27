@@ -4,8 +4,9 @@ land -- vocabulary both CLI backends share.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from kraft import item_paths
 from kraft.adapters.forge.models import (
     MR,
     ApprovalState,
+    DescriptionRevision,
     ForgeError,
     MRRef,
     ReviewResult,
@@ -27,6 +29,10 @@ from kraft.worker.worktree_read import read_worktree_file
 #: far higher. The same body is built for both backends, so the cap is picked
 #: from the smaller one, not from whichever forge this item happens to use.
 MR_BODY_MAX_CHARS = 65_536
+
+#: What a GitLab open appends to the body it created with, so Kraft's own text
+#: is an edit a note links (`GlabCli.open_marker`). Hidden when rendered.
+OPEN_MARKER = "\n\n<!-- kraft -->"
 
 #: gh and glab take the body as one argument, and Linux refuses an argument over
 #: 128 KiB (MAX_ARG_STRLEN) before either starts. A character can be four bytes,
@@ -171,10 +177,9 @@ def mr_body(
     MR title had to clip it). Signed with a footer naming Kraft and the work
     item, kept whole when the rest is truncated, unless `ATTRIBUTION` is off.
 
-    No commit list and no branch line: the forge already shows both, and every
-    sync rewrote them back over a person's edit. Rebuilt on every call all the
-    same, so an authored body re-read after a repair replaces the old one
-    (Kraft-c09h).
+    No commit list and no branch line: the forge already shows both. Rebuilt on
+    every call, so an authored body re-read after a repair replaces the old one
+    (Kraft-c09h), unless a person edited the description (`run._describe_mr`).
 
     A caller that could not resolve the artifact (missing node, missing file, a
     path that failed containment) hands in an empty `MRMeta` and still gets a
@@ -190,8 +195,8 @@ def mr_body(
         return sign if ATTRIBUTION else title.strip() or f"Work item {work_item_id}"
     footer = f"\n\n---\n{sign}" if ATTRIBUTION else ""
 
-    room = MR_BODY_MAX_CHARS - len(footer)
-    room_bytes = MR_BODY_MAX_BYTES - len(footer.encode())
+    room = MR_BODY_MAX_CHARS - len(footer) - len(OPEN_MARKER)
+    room_bytes = MR_BODY_MAX_BYTES - len(footer.encode()) - len(OPEN_MARKER)
     if len(body) > room or len(body.encode()) > room_bytes:
         head = body[: room - len(_TRUNCATION_MARKER)]
         # The byte cut may end mid-character; `ignore` drops that partial one.
@@ -206,6 +211,32 @@ def mr_body(
         body = head + _TRUNCATION_MARKER
 
     return body + footer
+
+
+def body_hash(body: str) -> str:
+    """A description's identity across a forge round trip: a web editor saves
+    CRLF, and a forge may trim the ends, neither of which is a person's edit."""
+    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode()).hexdigest()
+
+
+def only_bots_since(
+    live: str, revisions: Iterable[DescriptionRevision], ours: Collection[str]
+) -> bool:
+    """Whether every save since Kraft's own text (a hash in `ours`) was a bot's.
+    Newest first, and the newest must be `live`: anything else, an unknown editor
+    or a history that never reaches Kraft's text, may be a person's. A save of
+    unknown text is never Kraft's, so only a bot's passes, and never as the newest:
+    a forge notes a save after it lands, so `live` may be a later one not yet noted."""
+    revisions = list(revisions)
+    newest = revisions[0].text if revisions else None
+    if newest is None or body_hash(newest) != body_hash(live):
+        return False
+    for revision in revisions:
+        if revision.text is not None and body_hash(revision.text) in ours:
+            return True
+        if not revision.bot:
+            return False
+    return False
 
 
 #: A forge title is a headline; a Kraft work item title is a paragraph (the
@@ -331,6 +362,12 @@ def parse_json(raw: str, what: str):
         raise ForgeError(f"{what} did not return JSON: {raw[:200]!r}") from exc
 
 
+#: Pages of 100 a bot read takes of each list: 3,000 rows of each list a bot-heavy
+#: merge request might hold. Past it the read raises (`strict`) rather than reading a
+#: truncated list as whole, which stops the wait where it once lost the newest rows.
+BOT_PAGES = 30
+
+
 class CliWaits:
     """The two external-wait reads `gh` and `glab` answer the same way. A
     mixin rather than a function because `FakeForge` answers both from a
@@ -360,7 +397,7 @@ class CliWaits:
         for r in reviewers:
             try:
                 results.append(
-                    await self._bot_review(repo, branch, r.bot)
+                    await self._bot_review(repo, branch, r.bot, replies=r.replies)
                     if r.bot is not None
                     else await self._check_review(repo, branch, r.check)
                 )

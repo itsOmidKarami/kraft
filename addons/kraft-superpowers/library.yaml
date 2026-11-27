@@ -33,7 +33,8 @@ steering:
       not hold brainstorming's conversation (the work item stands in for it)
       or follow its hand-off to writing-plans (Kraft's plan node writes the
       plan), and do not use executing-plans or subagent-driven-development (a
-      task that implements does so itself, in this session),
+      task that implements does so in this session, and may dispatch its own
+      sub-agents for independent parts),
       using-git-worktrees, finishing-a-development-branch or
       requesting-code-review: Kraft's nodes do those. If you cannot load a
       skill these instructions name, stop with status "needs_context" naming

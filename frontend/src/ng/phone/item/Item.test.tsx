@@ -456,6 +456,24 @@ describe("the other composers (C.7)", () => {
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/cancel", body: { reason: "wrong repo", close_mr: true } }));
   });
 
+  // #1343: the cancel screen of a never-started item says nothing was made
+  // yet, even though the preview still names the branch it would have had.
+  it("Cancel for a never-started item says nothing was made yet, naming no branch or worktree", async () => {
+    mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [] }), "/work-items/w1?compose=cancel", {
+      "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "kraft/x", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }],
+    });
+    expect(await screen.findByText("Nothing was made yet, so there is nothing to keep. A cancelled item stays cancelled.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing was made yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/branch|worktree/)).toBeNull();
+  });
+
+  it("Cancel names a GitHub MR with # on the close switch", async () => {
+    mount(item("running"), "/work-items/w1?compose=cancel", {
+      "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "kraft/x", worktree: "/w", findings: 2, threads: 1 }, mr: { ref: 142, url: "https://github.com/o/r/pull/142", state: "open" }, spend: { spent_usd: 3.72, cap_usd: 10 } }],
+    });
+    await screen.findByRole("switch", { name: "Also close #142 on the forge" });
+  });
+
   it("keeps a refusal under the button and the text in the box", async () => {
     mount(gateItem(), "/work-items/w1?compose=reject", { "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await userEvent.type(await screen.findByRole("textbox"), "no");
@@ -539,13 +557,19 @@ describe("⋮ (C.5)", () => {
   });
 });
 
-describe("a skipped gate in the chain (R15b-03)", () => {
-  it("reads skipped in its row, not approved", async () => {
-    const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
-    mount(item("running"), "/work-items/w1", { "GET /work-items/w1/events": [200, [skipped]] });
+describe("a gate in the chain reads its rounds, not the page's events (R15b-03)", () => {
+  const ended = (outcome: string, by: string | null) => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] });
+  it.each([
+    ["skipped", ended("skipped", null), "skipped", "approved"],
+    ["approved by you", ended("approved", "human"), "approved", "agent"],
+    ["approved by the assistant, not by an agent", ended("approved", "assistant"), "approved", "agent"],
+    ["approved by an agent", ended("approved", "agent"), "approved by an agent", "skipped"],
+  ])("reads %s in its row", async (_, round, words, not) => {
+    mount(item("running", null, { gate_rounds: { plan_approval: [round] } }), "/work-items/w1");
     await userEvent.click(await screen.findByRole("button", { name: "2 done" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/ })).toHaveTextContent("skipped"));
-    expect(screen.getByRole("button", { name: /approve plan/ })).not.toHaveTextContent("approved");
+    const row = await screen.findByRole("button", { name: /approve plan/ });
+    expect(row).toHaveTextContent(words);
+    expect(row).not.toHaveTextContent(not);
   });
 });
 

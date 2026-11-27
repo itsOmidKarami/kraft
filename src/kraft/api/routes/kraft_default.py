@@ -10,5 +10,7 @@ from kraft.api import api_router
 
 @api_router.get("/kraft-default")
 async def kraft_default(request: Request):
+    """The lines behind the board's drift banner: where this config differs from what the
+    installed Kraft ships."""
     found = getattr(request.app.state, "kraft_default", None) or {}
     return {"lines": found.get("lines", []), "signature": found.get("signature")}

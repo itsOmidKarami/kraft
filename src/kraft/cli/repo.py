@@ -849,6 +849,8 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
                 _print("saved worktrees: false: its items run in place")
     elif not ns.json:
         _say_connected(result)
+        if ns.in_place:
+            _print("saved worktrees: false: its items run in place")
     if not (ns.json or added or result.get("already_connected")):
         if not os.environ.get("KRAFT_WORK_ITEM_ID"):
             _show_api_account(result)

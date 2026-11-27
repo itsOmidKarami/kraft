@@ -249,3 +249,11 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
 .rv-word-change:is(.tok-kw, .tok-str, .tok-num) { color: color-mix(in oklab, currentColor 65%, var(--text)); }
 .rv-next { flex: none; margin: 0; padding: 2px 16px 8px; font-size: var(--fs-meta); color: var(--text-sub); }
 .rv-file-name:focus-visible, .rv-num:focus-visible { outline-offset: -2px; }
+
+/* A past round of a gate, read-only (RoundReview). */
+.rv-round-body { flex: 1 1 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 20px 32px; }
+.rv-round-title { margin: 0; color: var(--text); font-size: var(--fs-h2); font-weight: 600; }
+.rv-round-summary { display: flex; flex-direction: column; gap: 6px; max-width: 760px; font-size: var(--fs-meta); color: var(--text-sub); }
+.rv-round-summary p { margin: 0; }
+.rv-round-outcome, .rv-round-count { color: var(--text); font-size: var(--fs-label); }
+.rv-round-ended { color: var(--text-muted); font-size: var(--fs-label); }

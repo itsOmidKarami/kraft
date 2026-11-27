@@ -184,7 +184,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         if: steps.impact.outputs.tag != ''
         with:
           enable-cache: true
@@ -388,7 +388,7 @@ jobs:
         # and isn't tied to a personal account the way a PAT would be.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -458,6 +458,7 @@ jobs:
           git push
 
       - name: check PyPI serves this release
+        id: pypi-served
         # v1.2.0 reached GitHub but never PyPI, and nothing said so. A publish
         # step that "passed" is not the same as the version being installable.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
@@ -535,3 +536,21 @@ jobs:
             sleep 10
           done
           echo "::warning::kraft-sdlc.kraft ${TAG#v} is not on the Marketplace after 5 minutes; check it by hand"
+
+      - name: publish to the MCP registry
+        # The registry lists one fixed version per publish and never follows
+        # PyPI, so each stable release publishes server.json again. The stamp
+        # step above already wrote this version into it. Login is GitHub OIDC
+        # (the id-token permission), which proves the io.github.itsOmidKarami
+        # namespace with no stored secret. Last, and gated only on PyPI serving
+        # the release, so a registry failure never holds back the extension. An
+        # "invalid audience" error means the pinned publisher is too old: bump
+        # the version and its checksum from that release's checksums file.
+        if: ${{ !cancelled() && steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.pypi-served.outcome == 'success' }}
+        run: |
+          curl -sfLo "$RUNNER_TEMP/mcp-publisher.tar.gz" \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.9/mcp-publisher_linux_amd64.tar.gz
+          echo "4d527ca8f1ced0394c962dc925c2a4a4addef441cbefd62501c875e9481823a8  $RUNNER_TEMP/mcp-publisher.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+          "$RUNNER_TEMP/mcp-publisher" publish

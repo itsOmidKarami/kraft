@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import plistlib
 import shutil
@@ -48,24 +49,14 @@ def _real_user_manager_home() -> str | None:
 
 
 def _operator_has_a_real_service() -> bool:
-    """True when this machine already has `com.kraft.daemon` / `kraft.service`
-    installed for real.
+    """True when this machine already has `kraft.service` installed for real.
 
-    The label and the unit name are global (one daemon, one name), so the
-    real-service tests below cannot be sandboxed away from an operator's own
-    registration: their `load -w` collides with it, and their teardown
-    `unload -w` would unload *and persistently disable* the live daemon.
+    The unit name is global (one daemon, one name), so the real-systemd tests
+    below cannot be sandboxed away from an operator's own registration: their
+    `enable --now` collides with it, and their teardown `disable --now` would
+    stop and disable the live daemon.
     Checked against the real `$HOME`, before any monkeypatching.
     """
-    if sys.platform == "darwin":
-        if (pathlib.Path.home() / "Library/LaunchAgents/com.kraft.daemon.plist").is_file():
-            return True
-        return (
-            subprocess.run(
-                ["launchctl", "list", "com.kraft.daemon"], capture_output=True
-            ).returncode
-            == 0
-        )
     if (pathlib.Path.home() / ".config/systemd/user/kraft.service").is_file():
         return True
     if not shutil.which("systemctl"):
@@ -276,7 +267,7 @@ def _accepts(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
+def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path, *, timeout: float = 15.0) -> None:
     """`install-service` on a free KRAFT_PORT, baked into the unit at write time,
     once the daemon it supervises answers health there with its own pid."""
 
@@ -298,19 +289,14 @@ def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
         cli.main(["admin", "uninstall-service"])
         assert _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
 
-    # A cold `kraft` started by launchd/systemd while the parallel suite saturates the machine
-    # took over the default 15s to answer, and 45s under heavier load: wait 90s. The tests
-    # calling this carry their own timeout for that and the two 15s teardown waits.
-    on_a_free_port(start, owns, stop, timeout=90.0)
+    on_a_free_port(start, owns, stop, timeout=timeout)
 
 
-@pytest.mark.timeout(240)
 @pytest.mark.skipif(sys.platform != "darwin", reason="launchd is macOS-only")
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
-@pytest.mark.skipif(
-    _operator_has_a_real_service(),
-    reason="this machine has a real kraft service installed; the test would unload it",
-)
+# Above every wait inside, so the `finally` runs: the thread timeout `os._exit`s
+# past it and would leave the KeepAlive job running (Kraft-jfswm).
+@pytest.mark.timeout(240)
 def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatch):
     """Not faked: a real `launchctl load`, a real supervised `kraft admin
     start`, a real `launchctl unload`. Fully sandboxed -- the plist's own
@@ -324,16 +310,27 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     run_dir = tmp_path / "kraft-home" / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+    # Its own label: never the operator's `com.kraft.daemon`, which it would
+    # otherwise load over and `unload -w` (disable) on the way out.
+    label = f"com.kraft.daemon.test-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(cli.admin, "_LAUNCHD_LABEL", label)
     try:
-        _install_on_a_free_port(monkeypatch, run_dir)
+        # 1.5 s on an idle machine, 60 s with 56 busy loops on 14 CPUs: a full boot
+        # of the real server, inside this test's 240 s.
+        _install_on_a_free_port(monkeypatch, run_dir, timeout=120.0)
     finally:
-        cli.main(["admin", "uninstall-service"])
-        assert not cli.admin._launchd_plist_path().exists()
-        stopped = _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
-        assert stopped, "uninstall-service did not stop the supervised daemon"
+        try:
+            cli.main(["admin", "uninstall-service"])
+            assert not cli.admin._launchd_plist_path().exists()
+            stopped = _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
+            assert stopped, "uninstall-service did not stop the supervised daemon"
+        finally:
+            # By label, so a job whose plist is already gone is still unloaded.
+            subprocess.run(
+                ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True
+            )
 
 
-@pytest.mark.timeout(240)
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd --user is Linux-only")
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
 @pytest.mark.skipif(not shutil.which("systemctl"), reason="no systemctl on this box")

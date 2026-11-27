@@ -1,22 +1,191 @@
-"""A forge task's failure names its cause (`forge_auth`, `forge_unreachable`) in
-the stop's facts (Kraft-9d8b2.67)."""
+"""A forge task's failure in a walk: which stop a failure Kraft runs itself
+makes (Kraft-s7c04.24), and the cause (`forge_auth`, `forge_unreachable`) it
+names in the stop's facts (Kraft-9d8b2.67)."""
 
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kraft import waits
+from kraft import escalate, store, waits
 from kraft.adapters import forge as _forge
+from kraft.adapters.forge.models import OPEN_THREADS_NOTE
+from kraft.automated_review import as_reviewers
+from kraft.builtins import RebaseConflict
+from kraft.executor import dispatch, gates
 
 from .test_walk import (
     FORGE_REPO,
     _agent,
+    _counter,
     _exec,
     _forge_task,
     _loop_policy,
-    _RaisingForge,
+    _stop_reason,
+    _sub,
     _walk,
 )
+
+# -- an in-process failure (Kraft-s7c04.24) -------------------------------------------
+
+
+class _RaisingForge:
+    """A forge whose `open_mr` fails with no findings to report -- the shape
+    `ForgeError` takes in `run.py`: `findings = None`, so `finish_session`
+    writes no result file at all (a blind in-process failure). Every other
+    method a test below might touch on is left unimplemented; nothing here
+    reaches them."""
+
+    async def find_mr(self, **kwargs):
+        return None
+
+    async def open_mr(self, **kwargs):
+        raise _forge.ForgeError("boom: no capacity")
+
+
+@pytest.mark.parametrize(
+    (
+        "co_task",
+        "env",
+        "asked",
+        "loop_opens",
+        "reason_names",
+        "reason_lacks",
+        "conflicting",
+        "fix_loop",
+    ),
+    [
+        # `on.mr.open` fails with nothing a worker commit could ever change: the
+        # handler runs in the orchestrator, not the worktree. No fix cycle, no
+        # loop counter bumped, and the reason names the in-process cause.
+        (None, {}, None, False, ["open [forge]", "Reinstall"], [], False, True),
+        # The CI wait's forced rebase hit a conflict: the forge task answered
+        # `conflict`, which is the branch's to resolve, not the daemon's.
+        (
+            None,
+            {},
+            None,
+            False,
+            ["rebase conflict", "ci [forge]", "Could not apply de76ada", "worktree"],
+            ["Reinstall", "daemon"],
+            True,
+            True,
+        ),
+        # The same answer in a node with no fix loop stops as `failed`
+        # (`rebase-conflict-requires-explicit-handler`), with git's line in the reason.
+        (
+            None,
+            {},
+            None,
+            False,
+            ["task failed in node checks", "ci [forge]", "Could not apply de76ada"],
+            ["Reinstall", "daemon"],
+            True,
+            False,
+        ),
+        # A co-failing worker-fixable task alone justifies the cycle.
+        (
+            _sub("suite", [sys.executable, "-c", "import sys; sys.exit(1)"]),
+            {},
+            None,
+            True,
+            [],
+            [],
+            False,
+            True,
+        ),
+        # A co-task's real findings (a review, or the node's own red pipeline)
+        # are not discarded by refusing the cycle.
+        (
+            _agent("review"),
+            {"KRAFT_FAKE_AGENT_FINDING": "a real defect a worker can fix"},
+            None,
+            True,
+            [],
+            [],
+            False,
+            True,
+        ),
+        # Ordering control (review finding): a question a fix agent already
+        # asked reaches the human, even on a round whose re-measure looks
+        # unwinnable on its own -- placed after `needs_context_question` in
+        # `walk_node` for exactly this.
+        (
+            None,
+            {},
+            "should I use library X or Y?",
+            False,
+            ["needs_context: should I use library X or Y?"],
+            ["Reinstall"],
+            False,
+            True,
+        ),
+    ],
+    ids=[
+        "blind-failure-alone",
+        "a-rebase-conflict-in-the-ci-wait",
+        "a-rebase-conflict-with-no-fix-loop",
+        "beside-a-co-failing-subprocess",
+        "beside-a-co-tasks-findings",
+        "a-pending-question-outranks-it",
+    ],
+)
+async def test_an_in_process_blind_failure_opens_no_fix_cycle_of_its_own(
+    item_on,
+    tmp_path,
+    fake_agent,
+    monkeypatch,
+    co_task,
+    env,
+    asked,
+    loop_opens,
+    reason_names,
+    reason_lacks,
+    conflicting,
+    fix_loop,
+):
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    if asked is not None:
+        monkeypatch.setattr(dispatch, "needs_context_question", lambda *a, **k: asked)
+    task = _forge_task("open", "mr.open_draft")
+    if conflicting:
+        fake = _forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+        monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+
+        async def conflicts(*args, **kwargs):
+            raise RebaseConflict("Could not apply de76adab0... docs(reference)\n", ["a.md"])
+
+        monkeypatch.setattr(_forge.run._builtins, "mr_rebase_forced", conflicts)
+        task = _forge_task("ci", "mr.ci")
+    tasks = [task, *([co_task] if co_task else [])]
+    loop = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
+    it = await item_on([_exec("checks", *tasks, **loop)])
+    if conflicting:
+        await fake.open_mr(
+            repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
+        )
+
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    assert bool(it.events("fix_cycle_started")) is loop_opens
+    assert (_counter(it, "checks.fix_loop") is not None) is loop_opens
+    if not loop_opens:
+        reason = _stop_reason(it)
+        assert all(part in reason for part in reason_names), reason
+        assert not any(part in reason for part in reason_lacks), reason
+        expected_kind = (
+            ("conflict" if fix_loop else "failed")
+            if conflicting
+            else "question"
+            if reason.startswith("needs_context:")
+            else "infra"
+        )
+        assert it.row()["stop_kind"] == expected_kind
+        # A conflict stops as `failed` does -- an agent can resolve it -- so
+        # auto-escalation answers it; an infra stop or a question does not.
+        assert gates.stuck_stop(it.events()) is conflicting
 
 
 class _RaisingWith(_RaisingForge):
@@ -101,6 +270,75 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
         assert ("Reinstall" in stop["reason"]) == (cause is None)
         # Plain text on the card: a backtick would show literally.
         assert "`" not in stop["reason"]
+
+
+class _RefusedOnThreads(_forge.FakeForge):
+    """A forge that refuses the merge in words that name no cause."""
+
+    async def merge(self, *, repo, branch="", mr, head=""):
+        raise _forge.ForgeError("GraphQL: Pull request is not mergeable")
+
+
+@pytest.mark.parametrize(
+    ("file", "fields", "kept"),
+    [
+        ("docs/403 forbidden.md", {}, None),
+        ("notes/connection refused.txt", {}, None),
+        ("docs/a\n403 forbidden.md", {}, None),
+        ("src/calc.py", {}, None),
+        (
+            "src/calc.py",
+            {"fix_loop": {"tasks": [_agent("repair")]}},
+            "a worker commit cannot change them. Reinstall and restart",
+        ),
+        ("docs/plan.md", {"escalation": _agent("esc")}, "(stuck escalation spent"),
+    ],
+    ids=[
+        "auth-words",
+        "network-words",
+        "a-line-break-in-the-name",
+        "plain",
+        "an-infra-stop",
+        "a-stuck-escalation",
+    ],
+)
+async def test_a_file_name_in_a_merge_stops_threads_is_never_its_cause(
+    item_on, tmp_path, fake_agent, monkeypatch, file, fields, kept
+):
+    """The stop names the thread, and a thread's file name is repository content: it
+    must not read as a refused credential or an unreachable forge. The thread comes
+    last, so the escalation prompt, which cuts the reason there, keeps the stop's
+    advice (Kraft-6c4js)."""
+    bot = as_reviewers([{"bot": "coderabbitai"}])[0]
+    thread = {"id": "t1", "file": file, "line": 3, "body": "b"}
+    fake = _RefusedOnThreads(merge_detail="MERGEABLE/BLOCKED", resolved_rule=True)
+    fake.feedback_script = [[_forge.ReviewerFeedback(bot, None, threads=(thread,))]]
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    wait = {**_forge_task("wait", "mr.automated_review"), "reviewers": [{"bot": "coderabbitai"}]}
+    it = await item_on(
+        [_exec("review", wait), _exec("land", _forge_task("merge", "mr.merge"), **fields)], "land"
+    )
+    await fake.open_mr(
+        repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
+    )
+
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop.get("facts") or {}).get("cause") is None
+    assert "GraphQL: Pull request is not mergeable" in stop["reason"]
+    named = " ".join(file.split())
+    assert stop["reason"].endswith(f"{named}:3 (coderabbitai)"), "the person sees the thread"
+    escalated = escalate._reason_line(stop, "needs_human")
+    assert named not in escalated
+    assert kept is None or kept in escalated, "what Kraft says before the thread is kept"
+    # The node's own escalation can push too: it is told of the threads, not their files.
+    started = it.events("stuck_escalation_started")
+    assert bool(started) is ("escalation" in fields)
+    assert not any(named in e["payload"]["reason"] for e in started)
+    told = fake_agent.prompts()
+    assert not any(named in p for p in told)
+    assert any(OPEN_THREADS_NOTE in p for p in told) is ("escalation" in fields)
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
@@ -192,3 +430,46 @@ async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
     assert (row["status"], row["stop_kind"]) == ("rate_limited", "rate_limit")
     assert row["retry_at"] == (moment + timedelta(seconds=30)).isoformat()
     assert not it.events("work_item_needs_human")
+
+
+@pytest.mark.parametrize(
+    ("fix_loop", "blind", "names"),
+    [
+        (False, False, "task failed in node checks: await_ci [forge]"),
+        (True, True, "await_ci [forge] failed in node checks"),
+    ],
+    ids=["no-fix-loop", "blind-in-a-fix-loop-node"],
+)
+async def test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait(
+    item_on, tmp_path, fake_agent, monkeypatch, fix_loop, blind, names
+):
+    # Reads: pending while the bots are pending (the wait parks), then red.
+    fake = _forge.FakeForge(
+        ci_states=["pending", "failed"],
+        ci_failed_jobs=[(), (_forge.FailedJob("test", "failed", "script_failure"),)],
+        review_results=["pending"],
+    )
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    if blind:
+        # What a multi-repo item's red leaves the walk: a failed review wait
+        # with no findings, so no result file, as there.
+        monkeypatch.setattr(_forge.run, "_job_findings", lambda *a, **k: None)
+    review = {**_forge_task("review", "mr.automated_review"), "config": {"watch_ci": True}}
+    node = {
+        "id": "checks",
+        "kind": "exec",
+        "steps": [
+            {"id": "settle", "tasks": [review]},
+            {"id": "ci", "tasks": [_forge_task("await_ci", "mr.ci")]},
+        ],
+        **({"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}),
+    }
+    it = await item_on([node])
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+    assert it.status() == "waiting"  # the red lands in a log that already has lines
+    await it.database.write(lambda c: store.mark_reentered(c, it.id))
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    reason = _stop_reason(it)
+    assert names in reason and f"{_forge.run.CI_RED_LINE}test failed" in reason, reason
+    assert "review [forge]" not in reason

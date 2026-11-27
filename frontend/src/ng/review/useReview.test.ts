@@ -6,7 +6,7 @@ import type { EventType } from "../../types/vocab.generated";
 import * as http from "../http";
 import { COALESCE_MS } from "../item/useItem";
 import { parsePatch } from "./patch";
-import { THREADS_POLL_MS, useCompare, useExpanded, useShownHead, useThreads } from "./useReview";
+import { THREADS_POLL_MS, useCompare, useExpanded, useRoundThreads, useShownHead, useThreads } from "./useReview";
 
 const ev = (work_item_id: string, seq: number, type: EventType): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
 const calls = (part: string) => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes(part)).map(([p]) => String(p));
@@ -137,5 +137,29 @@ describe("useThreads", () => {
     act(() => useStore.getState().applyEvent(ev("w1", 12, "node_started")));
     await act(async () => void vi.advanceTimersByTime(COALESCE_MS + 1));
     expect(calls("/threads")).toHaveLength(2);
+  });
+});
+
+describe("useRoundThreads", () => {
+  it("shows loading, not the last round's threads, when the gate or the round changes", async () => {
+    const thread = (id: string) => [{ id } as ReviewThread];
+    vi.mocked(http.request).mockImplementation(async (p) => ({ status: 200, body: String(p).includes("round=1") ? thread("one") : [] }));
+    const { result, rerender } = renderHook((p: { gate: string; round: number }) => useRoundThreads("w1", p.gate, p.round), { initialProps: { gate: "g", round: 1 } });
+    await act(async () => {});
+    expect(result.current).toEqual({ state: "ready", data: thread("one") });
+    for (const next of [{ gate: "g", round: 2 }, { gate: "h", round: 2 }]) {
+      vi.mocked(http.request).mockReturnValueOnce(new Promise(() => {}));
+      rerender(next);
+      expect(result.current).toEqual({ state: "loading" });
+    }
+  });
+
+  it("keeps its threads while the same round is read again (the item's version moved)", async () => {
+    vi.mocked(http.request).mockResolvedValue({ status: 200, body: [{ id: "one" } as ReviewThread] });
+    const { result, rerender } = renderHook((p: { stamp: string }) => useRoundThreads("w1", "g", 1, p.stamp), { initialProps: { stamp: "a" } });
+    await act(async () => {});
+    vi.mocked(http.request).mockReturnValueOnce(new Promise(() => {}));
+    rerender({ stamp: "b" });
+    expect(result.current.state).toBe("ready");
   });
 });

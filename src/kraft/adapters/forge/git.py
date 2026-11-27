@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from kraft import forges
 from kraft.adapters.forge import git_auth
-from kraft.adapters.forge.models import ForeignCommits, ForgeError
+from kraft.adapters.forge.models import ForeignCommits, ForgeError, dropped_connection
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
 from kraft.forges import ForgeAccount
 from kraft.remote import lfs
@@ -102,6 +102,15 @@ def assert_on_branch(worktree: Path, branch: str) -> None:
 CLI_TIMEOUT_S = 120.0
 
 
+def _calls_the_forge(args: list[str]) -> bool:
+    """Whether this command talks to the forge, so running out of time is the network's."""
+    return (
+        args[0] in ("gh", "glab")
+        or args[:2] in (["git", "push"], ["git", "fetch"], ["git", "pull"], ["git", "ls-remote"])
+        or args[:3] == ["git", "lfs", "pre-push"]
+    )
+
+
 def _shown(args: list[str]) -> str:
     """The command as an error names it. An argument over 200 characters is
     clipped: a merge request body can be 100 KB, and the error lands in the
@@ -133,7 +142,9 @@ async def run_cli(
         timeout = CLI_TIMEOUT_S
     try:
         # `to_thread` can't be cancelled, so the kill has to be subprocess.run's
-        # own. Every call here is a read or idempotent, so abandoning one is safe.
+        # own. Abandoning a timed-out call is safe: a read is repeated, and a write's
+        # caller treats the timeout as unclear and reconciles before any resend
+        # (`replies.send.classify`).
         return await asyncio.to_thread(
             subprocess.run,
             args,
@@ -146,7 +157,9 @@ async def run_cli(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ForgeError(f"{_shown(args)} timed out after {timeout:g}s") from exc
+        raise ForgeError(
+            f"{_shown(args)} timed out after {timeout:g}s", no_answer=_calls_the_forge(args)
+        ) from exc
     except FileNotFoundError as exc:
         # The same error for a missing working directory as for a missing binary.
         if not Path(repo).is_dir():
@@ -169,7 +182,10 @@ async def run_git(
     done = await run_cli(repo, args, env=env, timeout=timeout, stdin=stdin)
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
-        raise ForgeError(f"{_shown(args)} failed: {detail}")
+        raise ForgeError(
+            f"{_shown(args)} failed: {detail}",
+            no_answer=_calls_the_forge(args) and dropped_connection(detail),
+        )
     return done.stdout
 
 

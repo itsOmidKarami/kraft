@@ -114,7 +114,9 @@ async def test_each_fallback_candidate_gets_its_own_output_dir(
 @pytest.fixture
 def paused_session(monkeypatch):
     """The dispatch resumes the paused session `old` of the provider's `prov`."""
-    monkeypatch.setattr(dispatch, "_resumable_session", lambda *a, **k: ("old", "prov"))
+    monkeypatch.setattr(
+        dispatch, "_resumable_session", lambda *a, **k: dispatch.ResumedSession("old", "prov")
+    )
 
 
 async def test_outputs_note_survives_resume(item_on, fake_agent, paused_session, monkeypatch):
@@ -373,7 +375,7 @@ async def test_declared_variables_are_the_chains_current_declaration(item_on):
 @pytest.mark.parametrize(
     ("target", "fields", "reads_chain"),
     [
-        pytest.param("ci.pipeline", {"pipeline": "7"}, True, id="ci.pipeline"),
+        pytest.param("ci.pipeline", {"config": {"pipeline": "7"}}, True, id="ci.pipeline"),
         pytest.param("mr.ci", {}, False, id="mr.ci"),
     ],
 )

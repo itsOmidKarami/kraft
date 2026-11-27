@@ -148,9 +148,14 @@ async def test_a_cancel_mid_rebase_in_the_checkout_waits_for_git(
     )
     git(repo, "checkout", "-q", branch)
     write(repo, "f", "the person's edit\n")
-    write(repo, ".git/hooks/pre-rebase", "#!/bin/sh\nsleep 1\n").chmod(0o755)
+    git_is_running = repo / ".git" / "rebase-hook-ran"
+    write(repo, ".git/hooks/pre-rebase", f"#!/bin/sh\ntouch '{git_is_running}'\nsleep 1\n").chmod(
+        0o755
+    )
     rebasing = asyncio.ensure_future(inplace.rebase(run_dirs, it.row(), base="main"))
-    await asyncio.sleep(0.5)
+    while not git_is_running.exists():
+        assert not rebasing.done(), "the rebase ended before git ran its hook"
+        await asyncio.sleep(0.01)
     rebasing.cancel()
 
     with pytest.raises(inplace.AutostashClash if clashes else asyncio.CancelledError):

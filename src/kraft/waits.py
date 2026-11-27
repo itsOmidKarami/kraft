@@ -40,7 +40,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from kraft import events, store, when_free
@@ -149,6 +149,7 @@ def observe(
     next_at: datetime | None = None,
     extra: dict | None = None,
     started_extra: Mapping[str, object] | None = None,
+    deadline: datetime | None = None,
 ) -> Literal["pending", "settled", "timed_out", "error"]:
     """Record one observation of `task`'s wait, in the caller's transaction,
     and say what it amounts to. `state` is what the forge saw: `pending`,
@@ -170,7 +171,10 @@ def observe(
     and so comes back in `OpenWait.last`. `started_extra` is what the wait is
     *about*, kept in its start: an open wait that was started about something
     else (`ci.pipeline` re-resolving another id) ends `superseded` and a new one
-    starts, with its own clock."""
+    starts, with its own clock. `deadline`, when given, is the instant a pending
+    observation is tested against and clamped to, in place of the wait's start
+    plus its timeout: a wait whose limit counts from something else (a review
+    wait from the push) says so here, and no other wait changes."""
     now = now or datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
@@ -200,7 +204,7 @@ def observe(
             "initial_interval_s": bounds.initial_interval.total_seconds(),
             "max_interval_s": bounds.max_interval.total_seconds(),
             "started_at": now.isoformat(),
-            "deadline": (now + bounds.timeout).isoformat(),
+            "deadline": (deadline or now + bounds.timeout).isoformat(),
             **(started_extra or {}),
         }
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_STARTED, started)
@@ -212,7 +216,7 @@ def observe(
             "timeout_s": bounds.timeout.total_seconds(),
             "initial_interval_s": bounds.initial_interval.total_seconds(),
             "max_interval_s": bounds.max_interval.total_seconds(),
-            "deadline": (start + bounds.timeout).isoformat(),
+            "deadline": (deadline or start + bounds.timeout).isoformat(),
         }
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_REBOUNDED, changed)
         wait = OpenWait({**wait.started, **changed}, wait.last)
@@ -246,13 +250,13 @@ def observe(
         "result": result,
         **(extra or {}),
     }
-    deadline = datetime.fromisoformat(wait.started["deadline"])
-    if state == "settled" or now >= deadline:
+    due_by = deadline or datetime.fromisoformat(wait.started["deadline"])
+    if state == "settled" or now >= due_by:
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_OBSERVED, seen)
         outcome = "settled" if state == "settled" else "timed_out"
         end(outcome)
         return outcome
-    due = min(next_at or now + wait.bounds.interval_after(n), deadline)
+    due = min(next_at or now + wait.bounds.interval_after(n), due_by)
     events.append(
         conn,
         work_item_id,
@@ -273,6 +277,138 @@ def next_observation(conn, work_item_id: str, tasks) -> str | None:
         and "next_observation_at" in wait.last
     ]
     return min(due, key=datetime.fromisoformat, default=None)
+
+
+# --- a forge the network cut off -----------------------------------------------
+
+#: How many tries a task gets while the forge does not answer, spaced by
+#: doubling from `_NO_ANSWER_FIRST_S` up to `_NO_ANSWER_MAX_S`: about 90 minutes
+#: of a machine that is awake and offline.
+NO_ANSWER_TRIES = 10
+#: The tries for a repo whose forge has never answered Kraft: a wrong host, port or
+#: `api_url` fails the same way as a dropped network (an offline machine cannot
+#: resolve a name either), so only the history tells them apart. About 3.5 minutes.
+FIRST_CONTACT_TRIES = 3
+_NO_ANSWER_FIRST_S = 30
+_NO_ANSWER_MAX_S = 900
+#: A try that starts this long after it was due: the machine slept or the server
+#: was down, so the gap says nothing about the network and the try is not spent.
+_NO_ANSWER_LATE = timedelta(minutes=2)
+
+
+def _last_no_answer(conn, work_item_id: str, task: str) -> dict | None:
+    """`task`'s standing `forge_no_answer`, or None once the forge answered it
+    or the run restarted (a person's retry is a fresh budget)."""
+    row = conn.execute(
+        "SELECT type, payload FROM events WHERE work_item_id = ? AND ("
+        "(type IN (?, ?) AND json_extract(payload, '$.task') = ?)"
+        f" OR type IN ({', '.join('?' * len(RESTARTS_RUN))})) ORDER BY seq DESC LIMIT 1",
+        (work_item_id, ForgeEvent.FORGE_NO_ANSWER, ForgeEvent.FORGE_ANSWERED, task, *RESTARTS_RUN),
+    ).fetchone()
+    return json.loads(row["payload"]) if row and row["type"] == ForgeEvent.FORGE_NO_ANSWER else None
+
+
+def _tries(conn, work_item_id: str) -> int:
+    """`NO_ANSWER_TRIES` once any item in this item's repo opened a merge request
+    or heard back after a drop; `FIRST_CONTACT_TRIES` before. Not `branch_pushed`:
+    a push over ssh says nothing about an `api_url`."""
+    answered = conn.execute(
+        "SELECT 1 FROM events e JOIN work_items w ON w.id = e.work_item_id"
+        " WHERE e.type IN (?, ?)"
+        " AND w.repo = (SELECT repo FROM work_items WHERE id = ?) LIMIT 1",
+        (ForgeEvent.MR_OPENED, ForgeEvent.FORGE_ANSWERED, work_item_id),
+    ).fetchone()
+    return NO_ANSWER_TRIES if answered else FIRST_CONTACT_TRIES
+
+
+def _busy(error: str) -> bool:
+    """Whether a parked try was the forge still merging (`MergeBusy`), not the network."""
+    from kraft.adapters.forge.models import MergeBusy  # the adapters import this module
+
+    return error.startswith(MergeBusy.PREFIX)
+
+
+def note_no_answer(
+    conn, work_item_id: str, *, node_id: str, task: str, error: str, started: datetime
+) -> bool:
+    """Record a forge call the network cut off; True to park and try again, False
+    when the tries are spent. `started` is when this try began: a call can itself
+    take minutes to time out, and that must not read as a machine that slept."""
+    last = _last_no_answer(conn, work_item_id, task)
+    attempt = 1
+    if last is not None:
+        late = (
+            "retry_at" in last
+            and started - datetime.fromisoformat(last["retry_at"]) > _NO_ANSWER_LATE
+        )
+        attempt = last["attempt"] + (0 if late else 1)
+    ids = {"node_id": node_id, "task": task, "attempt": attempt, "error": error}
+    tries = _tries(conn, work_item_id)
+    if attempt > tries:
+        if _busy(error):
+            reason = (
+                f"{task}: the forge was still merging the merge request at each of {tries}"
+                f" tries: {error}\nIt has held the merge without finishing it. Look at the"
+                " merge request on the forge, then retry."
+            )
+        elif tries == NO_ANSWER_TRIES:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "The Kraft server's machine could not reach the forge. Check its network,"
+                " then retry."
+            )
+        else:
+            reason = (
+                f"{task} got no answer from the forge in {tries} tries: {error}\n"
+                "This repo's forge has never answered Kraft. The network may just have been"
+                " down, and then retrying is all it needs. Otherwise check its setup: the"
+                " forge account's api_url, the remote's host and port, and ssh access."
+            )
+        events.append(conn, work_item_id, ForgeEvent.FORGE_NO_ANSWER, {**ids, "reason": reason})
+        return False
+    delay = min(_NO_ANSWER_FIRST_S * 2 ** (attempt - 1), _NO_ANSWER_MAX_S)
+    # From now, not from when it was due: a machine that wakes spends one try.
+    retry_at = datetime.fromisoformat(_now()) + timedelta(seconds=delay)
+    events.append(
+        conn,
+        work_item_id,
+        ForgeEvent.FORGE_NO_ANSWER,
+        {**ids, "retry_at": retry_at.isoformat()},
+    )
+    return True
+
+
+def note_answered(conn, work_item_id: str, *, node_id: str, task: str) -> None:
+    """The forge answered `task`: an outage it was parked on is over."""
+    if (last := _last_no_answer(conn, work_item_id, task)) is not None:
+        events.append(
+            conn,
+            work_item_id,
+            ForgeEvent.FORGE_ANSWERED,
+            {"node_id": node_id, "task": task, "attempts": last["attempt"]},
+        )
+
+
+def no_answer_park(conn, work_item_id: str, tasks) -> tuple[str, str] | None:
+    """`(retry_at, reason)` when one of `tasks` is parked on the network, the
+    latest try's. A `retry_at` already past is an earlier outage's."""
+    now = datetime.fromisoformat(_now())
+    parked = [
+        p
+        for task in tasks
+        if (p := _last_no_answer(conn, work_item_id, task)) is not None
+        and "retry_at" in p
+        and datetime.fromisoformat(p["retry_at"]) > now
+    ]
+    if not parked:
+        return None
+    p = max(parked, key=lambda x: datetime.fromisoformat(x["retry_at"]))
+    waiting = (
+        "waiting for the forge to finish a merge it is making"
+        if _busy(p["error"])
+        else "waiting for the network: no answer from the forge"
+    )
+    return p["retry_at"], f"{waiting} (try {p['attempt']} of {_tries(conn, work_item_id)})"
 
 
 # --- the scheduler --------------------------------------------------------------
@@ -309,6 +445,8 @@ async def _re_enter_one(app, row) -> bool:
     st = app.state
     wid = row["id"]
     node_id = row["current_node_id"]
+    if deps.task_is_live(app, wid):
+        return False  # the walk that parked it is still returning: next tick
 
     # Bracketed from *before* the claim to the hand-off. The claim makes this
     # item read `active`, and `tick`'s own SELECT filters `status = 'waiting'`,

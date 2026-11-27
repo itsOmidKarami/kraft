@@ -261,8 +261,11 @@ def test_in_place_saves_worktrees_off(app, capsys, repo, before):
     on a connected repo is its own save."""
     if before:
         cli.main(["repo", "connect", str(repo), *before, "-y"])
+    capsys.readouterr()
     cli.main(["repo", "connect", str(repo), "--in-place", "--no-tests", "-y"])
+    out = capsys.readouterr().out
     assert asyncio.run(client.repos())[0]["worktrees"] is False
+    assert out.count("saved worktrees: false: its items run in place") == 1
 
 
 @pytest.mark.parametrize(

@@ -170,6 +170,17 @@ describe("nodeGraph rounds", () => {
     expect(g.loop!.tasks.map((t) => [t.label, t.state, t.meta])).toEqual([["repair", "todo", "stopped by judge"], ["judge", "failed", "stop"]]);
   });
 
+  it.each([
+    ["done", "done", "ok"],
+    ["paused", "paused", undefined],
+    ["cancelled", "cancelled", "bad"],
+    ["archived", "archived", undefined],
+    ["running", "running", "run"],
+  ] as const)("calls the newest round of a %s item standing on the node %s, not running unless it is (#1113)", (display_status, outcome, tone) => {
+    const g = nodeGraph(looped({ display_status }), node, NOW, []);
+    expect(g.rounds!.rows.at(-1)).toEqual({ n: 2, tone, outcome });
+  });
+
   it("calls the newest round running while the node is the one the run stands on, and done once it has moved on", () => {
     const running = nodeGraph(looped(), node, NOW, []);
     expect(running.rounds!.rows.map((r) => [r.n, r.tone, r.outcome])).toEqual([[1, "bad", "sent to the fix loop"], [2, "run", "running"]]);

@@ -7,7 +7,6 @@ import argparse
 import contextlib
 import functools
 import io
-import os
 from collections.abc import Iterable
 from typing import ClassVar
 
@@ -91,7 +90,13 @@ def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     if len(found) == 1:
         word = found[0] + " "
     elif found:
-        word = os.path.commonprefix(found)
+        # Sorted, so what the first and last share, every option shares.
+        # (os.path.commonprefix did this; Python 3.15 deprecates it.)
+        first, last = found[0], found[-1]
+        n = 0
+        while n < min(len(first), len(last)) and first[n] == last[n]:
+            n += 1
+        word = first[:n]
     return lead + " ".join([*done, word]), found if len(found) > 1 else []
 
 

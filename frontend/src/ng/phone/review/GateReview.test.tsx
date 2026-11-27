@@ -296,6 +296,35 @@ describe("Request changes (F.3)", () => {
   });
 });
 
+describe("a round of a gate (F.6)", () => {
+  const ended = { n: 1, requested_at: "t", ended_at: "2026-09-13T09:05:00Z", outcome: "rejected", by: "human", note: null, sent_to: "plan", verdict: null, reopened: false, reviewer: null, review: { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" }, threads: { total: 1, open: 1, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] };
+  const gone = gateItem({ pending_gate: null, stop: null, gate_rounds: { final_review: [ended] } });
+
+  it("reads one round: its review and its threads, never the gate's decided text", async () => {
+    const calls = mount(gone, "/work-items/w1/review?gate=final_review&round=1", { "GET /work-items/w1/threads": [200, [thread({ gate: "final_review" })]] });
+    expect(await screen.findByText("No bound on the cache.")).toBeInTheDocument();
+    expect(screen.getByText("Two things.")).toBeInTheDocument();
+    expect(screen.queryByText("This item is not waiting at this gate.")).toBeNull();
+    expect(calls.find((c) => c.query.get("round") === "1")).toBeDefined();
+  });
+
+  // Each thread names its file as the desktop's round view does, and "whole change" when it has none; the quote shows its code.
+  it.each([
+    ["names its file and lines", {}, "search/cache.py", "Lines 5–7"],
+    ["says the whole change for no file", { file_path: null, start_line: null, end_line: null, side: null }, "whole change", ""],
+  ])("a thread %s", async (_name, over, file, lines) => {
+    mount(gone, "/work-items/w1/review?gate=final_review&round=1", { "GET /work-items/w1/threads": [200, [thread({ gate: "final_review", end_line: 7, quote: " a = 1\n+b = 2\n+c = 3", ...over } as Partial<ReviewThread>)]] });
+    const card = (await screen.findByText("No bound on the cache.")).closest(".ph-thread")!;
+    expect(card.querySelector(".ph-thread-head")).toHaveTextContent(new RegExp(`^agent · ${file}${lines ? ` · ${lines}` : ""}$`));
+    if (lines) expect(card.querySelector(".ph-thread-quote")).toHaveTextContent("+b = 2");
+  });
+
+  it("says when the gate has no such round", async () => {
+    mount(gone, "/work-items/w1/review?gate=final_review&round=4");
+    expect(await screen.findByText("final_review has no round 4.")).toBeInTheDocument();
+  });
+});
+
 describe("the document screen (F.5)", () => {
   it("shows a document over the review, and says when it is gone", async () => {
     mount(gateItem(), "/work-items/w1/review?doc=d1", { "GET /documents/d1": [200, { title: "Spec · cache", path: ".engineering/specs/cache.md", content: "## Goal\n\nCache embeddings." }] });

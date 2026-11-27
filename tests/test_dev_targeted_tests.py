@@ -46,6 +46,9 @@ def tt():
         (["addons/a/library.yaml"], False),
         ([".kraft/collection.json"], False),
         (["plugins/kraft/skills/a/SKILL.md"], True),
+        (["plugins/kraft-lite/skills/gate/SKILL.md"], True),
+        (["plugins/kraft-lite/evals/gate.json"], True),
+        (["plugins/kraft-lite/kl.py"], False),
         (["docsite/content/a.md"], False),
         (["docs/café.md"], False),
         (None, True),
@@ -65,6 +68,9 @@ def tt():
         "kraft-collection-addon",
         "kraft-collection-manifest",
         "skill",
+        "kraft-lite-skill",
+        "kraft-lite-eval",
+        "kraft-lite-python",
         "a-docs-page",
         "a-non-ascii-path",
         "no-list-at-all",
@@ -120,6 +126,8 @@ def test_the_blind_command_lists_what_just_test_warns_about(tt, monkeypatch, cap
         "tests/support/remote.py",
         "tests/support/stub.txt",
         "tests/support/fake_reviewer.py",
+        "plugins/kraft-lite/skills/x/SKILL.md",
+        "plugins/kraft-lite/kl.py",
         "docs/intent/x.md",
         "README.md",
     ]
@@ -129,6 +137,7 @@ def test_the_blind_command_lists_what_just_test_warns_about(tt, monkeypatch, cap
         "src/kraft/b.txt",
         "tests/support/stub.txt",
         "tests/support/fake_reviewer.py",
+        "plugins/kraft-lite/skills/x/SKILL.md",
         "docs/intent/x.md",
     ]
 
@@ -200,6 +209,9 @@ _SHIM = "src/kraft/worker/bin/kraft"
 _POLICY = "config/policy.yaml"
 _SKILL = "plugins/kraft/skills/board/SKILL.md"
 _METHOD = "src/kraft/skills/plan/SKILL.md"
+_LITE_SKILL = "plugins/kraft-lite/skills/gate/SKILL.md"
+_LITE_METHOD = "plugins/kraft-lite/methods/plan.md"
+_LITE_EVAL = "plugins/kraft-lite/evals/gate.json"
 
 
 @pytest.mark.parametrize(
@@ -229,6 +241,11 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         (_SKILL, None, "---\nname: board\n---\n", None),
         (_METHOD, "---\nname: plan\n---\n", "---\nname: plan\n---\nMore.\n", "edit"),
         (_METHOD, None, "---\nname: plan\n---\n", None),
+        (_LITE_SKILL, "---\nname: gate\n---\n", "---\nname: gate\n---\nMore.\n", "edit"),
+        (_LITE_METHOD, "a\n", "b\n", "edit"),
+        (_LITE_EVAL, "[]\n", "[1]\n", "edit"),
+        (_LITE_SKILL, None, "---\nname: gate\n---\n", None),
+        (_LITE_SKILL, "---\nname: gate\n---\n", None, None),
     ],
     ids=[
         "comment-added-to-config-yaml",
@@ -251,6 +268,11 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         "plugin-skill-added",
         "kraft-skill-edited",
         "kraft-skill-added",
+        "kraft-lite-skill-edited",
+        "kraft-lite-method-edited",
+        "kraft-lite-eval-edited",
+        "kraft-lite-skill-added",
+        "kraft-lite-skill-deleted",
     ],
 )
 def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(
@@ -281,6 +303,13 @@ def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(
         assert {"tests/cli/test_admin.py", "tests/api/test_skip.py"} <= set(expected)
     elif adds == "edit":
         expected = next(t for prefix, t in tt.EDIT_TESTS if path.startswith(prefix))
+        if path.startswith("plugins/kraft-lite"):
+            assert expected == (
+                "plugins/kraft-lite/tests",
+                "tests/plugins/test_kraft_lite_parity.py",
+            )
+        if path == _METHOD:
+            assert "tests/plugins/test_kraft_lite_parity.py" in expected
     else:
         expected = adds
     named = plan.steps[0].argv
@@ -358,3 +387,74 @@ def test_the_worker_count_is_the_machines_else_cpus_plus_two(
     monkeypatch.setattr(tt.os, "cpu_count", lambda: cpus)
     env = {} if given is None else {"KRAFT_TEST_WORKERS": given}
     assert tt.workers(env) == expected
+
+
+_ACP = "fixtures/fake_acp_agent.py"
+
+
+@pytest.mark.parametrize(
+    ("path", "files", "adds"),
+    [
+        (
+            _ACP,
+            {"tests/adapters/test_acp.py": "AGENT = 'fake_acp_agent.py'"},
+            ["tests/adapters/test_acp.py"],
+        ),
+        (_ACP, {"tests/test_acp.py": "import fake_acp_agent"}, ["tests/test_acp.py"]),
+        (_ACP, {"tests/test_other.py": "x = 1"}, []),
+        (_ACP, {"README.md": "fake_acp_agent.py", "justfile": "run fake_acp_agent.py"}, []),
+        (_ACP, {"tests/support/acp.py": "NAME = 'fake_acp_agent.py'"}, None),
+        (_ACP, {"src/kraft/doctor.py": "# fake_acp_agent.py"}, None),
+        (
+            _ACP,
+            {"tests/test_acp.py": "'fake_acp_agent'", "tests/support/x.py": "fake_acp_agent"},
+            None,
+        ),
+        (_ACP, {"tests/test_data/test_x.yaml": "fake_acp_agent"}, None),
+        ("fixtures/fake_acp_agent.sh", {}, None),
+        ("fixtures/bin/fake_acp_agent.py", {}, None),
+    ],
+    ids=[
+        "named-by-a-test",
+        "imported-by-a-test",
+        "named-by-none",
+        "named-only-in-docs-and-the-justfile",
+        "named-by-a-support-helper",
+        "named-in-src",
+        "one-non-test-reader-is-enough",
+        "a-test-named-data-file-is-not-a-test",
+        "not-python",
+        "not-directly-under-fixtures",
+    ],
+)
+def test_a_fixture_script_adds_the_tests_that_name_it_instead_of_the_full_suite(
+    tt, tmp_path, path, files, adds
+):
+    repo = make_repo(tmp_path)
+    base = commit_all(repo, "base")
+    write(repo, path, "print(1)\n")
+    for name, text in files.items():
+        write(repo, name, text)
+    plan = tt.plan([path], base, repo)
+    if adds is None:
+        assert path in plan.reason
+        return
+    assert plan.reason is None
+    named = plan.steps[0].argv
+    assert named[3 + len(tt.GENERATED_TESTS) : named.index("--no-testmon")] == adds
+
+
+def test_a_deleted_fixture_script_stays_blind(tt, tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, _ACP, "print(1)\n")
+    base = commit_all(repo, "base")
+    (repo / _ACP).unlink()
+    assert _ACP in tt.plan([_ACP], base, repo).reason
+
+
+def test_a_git_that_fails_leaves_a_fixture_script_blind(tt, tmp_path):
+    repo = make_repo(tmp_path)
+    base = commit_all(repo, "base")
+    write(repo, _ACP, "print(1)\n")
+    (repo / ".git" / "HEAD").write_text("garbage")
+    assert _ACP in tt.plan([_ACP], base, repo).reason

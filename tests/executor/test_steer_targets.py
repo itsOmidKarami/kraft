@@ -10,7 +10,7 @@ import pytest
 from support.harness import write_harness_profiles
 
 from kraft import executor, store
-from kraft.executor import dispatch
+from kraft.executor import dispatch, prompts
 from kraft.paths import config_dir
 
 #: Two agent tasks and a subprocess task running side by side in one step.
@@ -124,18 +124,34 @@ def _log_init(it, sid, cli_session):
     log.write_text(json.dumps({"type": "system", "subtype": "init", "session_id": cli_session}))
 
 
-async def test_a_paused_agent_task_resumes_its_own_session(item_on, launched):
+@pytest.mark.parametrize(
+    ("taken", "resumes", "note"),
+    [
+        pytest.param(None, "cli-front", prompts.AGENT_RESUMED_NOTE, id="the-log-names-it"),
+        # A person worked in a fork of it: the row carries the fork's id, and the
+        # agent is told so rather than "carry on as instructed".
+        pytest.param(
+            "cli-fork", "cli-fork", prompts.TAKEOVER_RESUMED_NOTE, id="a-takeover-left-one"
+        ),
+    ],
+)
+async def test_a_paused_agent_task_resumes_its_own_session(item_on, launched, taken, resumes, note):
     """`resumed-agent-task-preserves-its-session-when-possible`: the paused
     session's provider id rides `--resume`, and the prompt is the steer and a
     note to carry on -- not the whole brief again."""
     it = await _paused(item_on, "work.main.front")
     _log_init(it, "s0", "cli-front")
+    if taken:
+        await it.database.write(lambda c: store.set_cli_session_id(c, it.id, "s0", taken))
 
     await _dispatch(it, "work.main.front", executor.Steer("mind the tests", source="human"))
     sent = launched["work.main.front"]
-    assert sent["resume_session_id"] == "cli-front"
+    assert sent["resume_session_id"] == resumes
     assert "mind the tests" in sent["task_instruction"]
     assert "Build the front end." not in sent["task_instruction"]
+    assert note in sent["task_instruction"]
+    other = {prompts.AGENT_RESUMED_NOTE, prompts.TAKEOVER_RESUMED_NOTE} - {note}
+    assert not any(n in sent["task_instruction"] for n in other)
     assert it.events("agent_session_resumed")[0]["payload"] == {
         "task": "work.main.front",
         "session_id": "s0",

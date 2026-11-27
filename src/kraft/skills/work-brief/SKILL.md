@@ -19,12 +19,14 @@ Read these first:
   They are in your instructions above, or named there by path.
 - What the chain did: `kraft view events --json` (the worktree you are in names
   the work item). Ask for JSON: the plain view cuts every payload short, and
-  the facts you need are past the cut. These events matter:
+  the facts you need are past the cut. If the whole history is too long to
+  read, ask for one type at a time (`--type findings_measured`). These events
+  matter:
 
   | Event | What it tells you |
   |---|---|
-  | `findings_measured` | One round of the tests and the review. `measured_tasks` are the checks that ran in it and `unmeasured_tasks` the ones that did not: a step that fails stops the steps after it, so a round of red tests has no review in it. A test command that failed is named in a finding, so a round with no test finding passed every command it selected. `dropped` is there only when a reviewer wrote findings wrongly, and that review is not a clean one. |
-  | `test_scopes_selected` | The test commands the round ran, each by its full name. `targeted` maps a scope to the narrower command it ran instead; `full_reason` says why a scope that declares one ran its full command. An older event has neither: every scope ran in full. None selected means nothing was tested. |
+  | `findings_measured` | One round of the tests and the review. `measured_tasks` are the checks that ran in it and `unmeasured_tasks` the ones that did not: a step that fails stops the steps after it, so a round of red tests has no review in it. A round marked `reply_round` was made after Kraft replied to a review bot, and a review it lists in `unmeasured_tasks` was skipped because the bots said nothing new. A test command that failed is named in a finding, so a round with no test finding passed every command it selected. `findings` is what the reviewers raised (`severity`, `message`, `file`, `line`). `dropped` is there only when a reviewer wrote findings wrongly, and that review is not a clean one. |
+  | `test_scopes_selected` | The test commands the round selected (`commands`), each by its full name, written before they run. `targeted` maps a scope to the narrower command it ran instead; `full_reason` says why a scope that declares one ran its full command. An older event has neither: every scope ran in full. An event with no commands listed means nothing was tested. |
   | `fix_cycle_started` | A repair attempt. `max_attempts` is how many the loop allows. If `cycle` starts again at 1, a retry restarted the loop: count each run on its own. |
   | `fix_cycle_refunded` | The attempt with that `cycle` did not count. |
   | `judge_verdict` | What the fix-loop judge said about going on. It rules only when a repair left something to fix, so most runs have none. |
@@ -36,7 +38,9 @@ Read these first:
   be run (a sandboxed worker with no network cannot reach Kraft at all), an
   older item's events lack a field named here, or the verification node has no
   `findings_measured`. Then work from what you have and say in the brief what
-  you could not read; do not reconstruct it from memory.
+  you could not read; do not reconstruct it from memory. What was verified then
+  says it could not be read, and gives only what you checked yourself, marked as
+  your own run, not the chain's.
 - The size of the change: `git diff --stat origin/<base>...HEAD`, where
   `<base>` is the branch the work goes into (the repository's default unless
   the work item names another). Read files where you need to, but do not
@@ -53,11 +57,13 @@ Every brief has these four sections, in this order:
    the change, so check the plan's tasks against the diff, and say in one
    sentence whether all of them have a change behind them.
 3. **What was verified.** From the last round: each check that ran and what it
-   reported, and the test commands it ran. A scope listed in `targeted` ran only
-   its targeted command, so say "targeted tests passed", never "tests passed". If a check did not run in it, name
-   that check as not run. Then what it took to get there: the rounds that
+   reported, and the test commands it selected. A scope listed in `targeted` ran
+   only its targeted command, so say "targeted tests passed", never "tests
+   passed". If a check did not run in it, name that check as not run. Then what it took to get there: the rounds that
    were red before a repair turned them green, and how many repair attempts
-   were spent out of how many. If the judge ruled, say what it said.
+   were spent out of how many. If the judge ruled, say what it said. A check a
+   person skipped is reported as skipped, never as passed, and a refunded
+   attempt doesn't count as spent.
 4. **What approving does.** Say it plainly: approving **opens a draft merge
    request on the forge and starts CI**. The work is then published, even
    though it is still a draft. A human who does not know that may approve
@@ -73,7 +79,8 @@ a brief without one as a run without one.
 
 - If the review raised a finding in any round, add **What the review found,
   and what was done about it.** Each finding, and whether a repair fixed it or
-  it was left open. A minor finding that never opened a fix cycle still goes
+  it was left open: one in the last round's `findings` is still open, one only an
+  earlier round raised was fixed. A minor finding that never opened a fix cycle still goes
   here: a finding nobody is shown has been silently discarded.
 - If a plan task, or something the spec asks for, has no change behind it,
   add **What was deliberately left out.** Name it, and say why if the work

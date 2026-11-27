@@ -204,9 +204,10 @@ def build() -> MCPServer:
         name, still read; pass `chain`.
 
         `runner` is where the item's steps run: a machine or a group from
-        workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
-        in-place or workspace-member item is refused. Leave
-        it out unless a human asked for one.
+        workers.yaml, `any` or `local`. A name must be in workers.yaml; an
+        in-place item or one with workspace members is refused a remote runner.
+        A remote machine builds the same sandbox for a sandboxed item. Leave it
+        out unless a human asked for one.
 
         `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
         this item only. If it has custom content (its own prompts, commands,
@@ -443,8 +444,9 @@ def build() -> MCPServer:
         retry's prompt: the node it stopped on (after a time or budget cap, the
         step it stopped in), or `path` (canonical: `node`,
         `node.step` or `node.step.task`) and everything after it; `restart`
-        reruns the whole chain. This is the only way back onto an item that
-        stopped for a human: resume only takes a paused item. With every slot busy
+        reruns the whole chain. This is the way back onto an item that stopped
+        for a human; resume_work_item also takes one stopped on an agent's
+        question, with the answer as its steer. With every slot busy
         the item is queued (status "queued") and starts on its own when one
         frees. An item that comes after an unfinished one is blocked (status
         "blocked") and starts when they complete."""
@@ -522,7 +524,11 @@ def build() -> MCPServer:
         or a runner that went away. Change nothing in the checkout and pass what
         you saw as `reason`. A failing test, lint, type check or build error is
         never a re-run. Once per fix attempt; refused outside one, or when CI is
-        not red for the current head."""
+        not red for the current head. On an item whose fix loop stopped for a
+        person (stuck or at its cap), it re-runs the jobs and retries the node,
+        for the person, their assistant or an escalation, never the item's own
+        worker session. A `ci.pipeline` wait's pipeline is re-run only by a
+        person, never through this tool."""
         return await client.ci_rerun(reason, work_item_id)
 
     @server.tool()
@@ -571,8 +577,9 @@ def build() -> MCPServer:
         binding; naming a field replaces the stored override rather than merging
         with it, but a call that does not name `runner` keeps the stored one. `runner` is
         where the steps run: a machine or a group from
-        workers.yaml, `any` or `local`; a sandboxed, in-place or workspace-member
-        item is refused. It takes effect at the next step launch."""
+        workers.yaml, `any` or `local`; an in-place item or one with workspace
+        members is refused a remote runner. A remote machine builds the same
+        sandbox for a sandboxed item. It takes effect at the next step launch."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, runner=runner, clear=clear, work_item_id=work_item_id
         )
@@ -596,13 +603,15 @@ def build() -> MCPServer:
         with (above the item-wide `set_agent_overrides`), an `extra_prompt`
         appended to each of their instructions (a person's to set: refused
         from an MCP session; `clear` drops it with the rest), and the `reviewers` its
-        automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
-        over the repository's; `[]` expects none) -- without touching the Policy
+        automated-review wait reads (each `{"bot": LOGIN, "replies": bool,
+        "resolve_fixed": bool}` or `{"check": NAME}`, over the repository's; `[]` expects none;
+        `resolve_fixed` needs `replies`) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `runner` is
         where the node's steps run: a machine or a group from workers.yaml,
-        `any` or `local`; a sandboxed, in-place or workspace-member
-        item is refused. `clear` resets this node back to the template's own
+        `any` or `local`; an in-place item or one with workspace members is
+        refused a remote runner. A remote machine builds the same sandbox for
+        a sandboxed item. `clear` resets this node back to the template's own
         binding; naming a field sets it and keeps the node's other fields.
         409s once the node has started, except a `runner` alone, which takes
         effect at the node's next step launch."""
@@ -626,8 +635,9 @@ def build() -> MCPServer:
     ) -> dict:
         """Set or clear a Kraft work item's own policy override, for that item
         only -- never its chain or any other item. `policy` holds
-        item-wide fields (`max_attempts`, `timeout_minutes`,
-        `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
+        item-wide fields (`max_attempts`, `timeout_minutes`, the review-bot
+        reply limits `reply_cap_per_thread`, `reply_rounds_per_head`,
+        `reply_timeout_minutes`, `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
         profile an escalation turn runs on, or "item" for the one the item's
         own work ran on -- the caps `time_cap_minutes`,
         `total_time_cap_minutes` (a wait's total cap is its timeout),

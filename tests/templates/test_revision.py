@@ -416,7 +416,7 @@ _EMIT_AND_WAIT = (
                 "id": "run",
                 "kind": "forge",
                 "target": "ci.pipeline",
-                "pipeline": "$PIPELINE_ID",
+                "config": {"pipeline": "$PIPELINE_ID"},
                 "reads": ["emit.main.run"],
             }
         ],
@@ -438,11 +438,14 @@ def test_a_revision_may_skip_a_ci_pipeline_node_and_its_writer():
     assert _revise(chain, skip=[_skip("emit"), _skip("wait_ci")]) is not chain
 
 
-def test_an_override_stays_within_the_administrator_maxima():
-    chain = _chain(max_attempts=3)
-    with pytest.raises(revision.RevisionError, match="max_attempts"):
-        _revise(chain, overrides={"feedback": _override(max_attempts=9)})
-    assert _revise(chain, overrides={"feedback": _override(max_attempts=2)}) is not chain
+@pytest.mark.parametrize(
+    "key", ["max_attempts", "reply_cap_per_thread"], ids=["attempts", "reply-cap"]
+)
+def test_an_override_stays_within_the_administrator_maxima(key):
+    chain = _chain(**{key: 3})
+    with pytest.raises(revision.RevisionError, match=key):
+        _revise(chain, overrides={"feedback": _override(**{key: 9})})
+    assert _revise(chain, overrides={"feedback": _override(**{key: 2})}) is not chain
 
 
 def test_an_added_node_stays_within_the_administrator_maxima():

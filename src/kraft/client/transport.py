@@ -137,6 +137,28 @@ def base_url() -> str:
     return f"http://{config.url_host(host)}:{port}"
 
 
+#: Variables a named harness sets in the commands its agent runs: (variable, harness, source).
+#: Add a harness only with an official source that it sets the variable and only there;
+#: AGENT, AI_AGENT, CURSOR_AGENT, GEMINI_CLI and CODEX_SANDBOX were left out for want of one.
+AGENT_SHELL_VARIABLES = (
+    (
+        "CLAUDE_CODE_CHILD_SESSION",
+        "Claude Code",
+        "code.claude.com/docs/en/env-vars: set to 1 in subprocesses Claude Code spawns through "
+        "the Bash, PowerShell and Monitor tools, hook commands and status line commands, and "
+        "only by Claude Code itself, not by the IDE extensions. Needs Claude Code v2.1.172 or "
+        "later; an older one goes undetected and is recorded as a person, as before. Not "
+        "CLAUDECODE: the same page says the IDE extensions also set it in their integrated "
+        "terminals, where a person types, so it would record that person as an agent.",
+    ),
+)
+
+
+def agent_shell() -> bool:
+    """True when this process runs under a coding agent's shell (see `AGENT_SHELL_VARIABLES`)."""
+    return any(name in os.environ for name, _harness, _source in AGENT_SHELL_VARIABLES)
+
+
 def http() -> httpx.AsyncClient:
     """A configured client. Module-level so tests can point it at the ASGI app."""
     if (remote := target()) is not None:
@@ -160,13 +182,16 @@ def http() -> httpx.AsyncClient:
         # `escalation_running` guard against the very escalation turn
         # calling it (`kraft.executor.gates.auto_escalate_stuck`).
         headers["X-Kraft-Session-Id"] = session_id
-    client = os.environ.get("KRAFT_CLIENT")
+    # An explicit KRAFT_CLIENT wins (honour-system escape hatch, documented only in the CLI
+    # docs page, never in an error); else an agent's shell is tagged; else nothing is sent.
+    client = os.environ.get("KRAFT_CLIENT") or ("agent-shell" if agent_shell() else None)
     if client:
         # Which front door this call came in by, so a route can tell an agent's
         # decision from a person's (Kraft-s7c04.43). The bearer token above
         # cannot: it is attached to every call this module makes, so a human
         # typing `kraft item approve` carries the same credential an MCP client
-        # does. Only the MCP server sets this, in `mcp.serve_stdio`.
+        # does. The MCP server sets `KRAFT_CLIENT` in `mcp.serve_stdio`; a call
+        # from a coding agent's shell is tagged `agent-shell` by `agent_shell`.
         headers["X-Kraft-Client"] = client
     return httpx.AsyncClient(base_url=base_url(), headers=headers, timeout=30)
 

@@ -9,6 +9,7 @@ import { CHIP_TONE } from "../../graph/types";
 import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
+import { roundsOf } from "../../item/gateRounds";
 import { useItem, type ItemDetail } from "../../item/useItem";
 import { useReason } from "../../ui/Reason";
 import { ADD_NOTE } from "../../ui/reasons";
@@ -18,7 +19,8 @@ import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
 import { targetLabel } from "../../review/model";
 import { readReview } from "../../review/url";
-import { useArtifact, useCompare, useShownHead, useThreads } from "../../review/useReview";
+import { RoundSummary } from "../../review/RoundSummary";
+import { useArtifact, useCompare, useRoundThreads, useShownHead, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
@@ -54,7 +56,32 @@ export function GateReviewRoute() {
       </>
     );
   if (loaded.state === "missing") return <ItemMissing />;
+  // `?gate=&round=`: one past round, read as it was; `decided()` is for the page of a gate that is not waiting.
+  const at = readReview(params, loaded.item);
+  if (at.round && at.gate) return <RoundScreen item={loaded.item} gate={at.gate} round={at.round} version={loaded.version} />;
   return <GateReview item={loaded.item} events={events} reload={loaded.reload} />;
+}
+
+/** One round of a gate on the phone: how it ended, its review, and each thread it holds, read-only. */
+function RoundScreen({ item, gate, round, version }: { item: ItemDetail; gate: string; round: number; version: string }) {
+  const threads = useRoundThreads(item.id, gate, round, version);
+  const found = roundsOf(item, gate).find((r) => r.n === round);
+  const missing = !found || (threads.state === "error" && threads.status === 404);
+  return (
+    <>
+      <ScreenHeader id={<>{capitalise(gateName(item.chain_definition.nodes, gate))} · round {round}</>} />
+      <div className="ph-content">
+        {missing ? <p className="ph-error" role="alert">{gate} has no round {round}.</p> : (
+          <>
+            <RoundSummary round={found} />
+            {threads.state === "loading" && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
+            {threads.state === "error" && <p className="ph-error" role="alert">{threads.error}</p>}
+            {threads.state === "ready" && <section aria-label="Threads" className="ph-list">{threads.data.map((t) => <ThreadNote key={t.id} thread={t} named />)}</section>}
+          </>
+        )}
+      </div>
+    </>
+  );
 }
 
 export function GateReview({ item, events, reload }: { item: ItemDetail; events: KraftEvent[]; reload?: () => Promise<unknown> }) {
@@ -234,16 +261,16 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
 /** One thread under its file, read-only: an agent's note or a person's. Its
  *  range is named as the desktop names it, side and all, with the lines it
  *  was written on; a comment not sent yet is marked pending (R10b-03). */
-function ThreadNote({ thread }: { thread: ReviewThread }) {
+function ThreadNote({ thread, named }: { thread: ReviewThread; /** Name the file, as the desktop's round view does ("search/cache.py · Lines 12–14"), for a list of threads that is not under their files. */ named?: boolean }) {
   const first = thread.comments[0];
   const agent = first && first.author !== "you";
   const range = threadRange(thread);
-  const where = range ? rangeName(range).replace(/^./, (c) => c.toLowerCase()) : "";
+  const where = range ? (named ? rangeName(range) : rangeName(range).replace(/^./, (c) => c.toLowerCase())) : "";
   const status = thread.draft ? "pending" : thread.state === "resolved" ? "resolved" : "";
   const quote = range && thread.quote ? thread.quote.split("\n") : [];
   return (
     <div className={`ph-thread${thread.state === "resolved" ? " ph-is-resolved" : ""}`}>
-      <b className="ph-thread-head">{agent ? "agent" : "you"}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
+      <b className="ph-thread-head">{agent ? "agent" : "you"}{named && ` · ${thread.file_path ?? "whole change"}`}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
       {quote.length > 0 && (
         <div className="ph-thread-quote" role="group" aria-label={LINES_COMMENTED_ON}>
           {quote.map((l, i) => <div key={i} className={`ph-diff-line${l[0] === "+" ? " ph-diff-add" : l[0] === "-" ? " ph-diff-del" : ""}`}>{l}</div>)}

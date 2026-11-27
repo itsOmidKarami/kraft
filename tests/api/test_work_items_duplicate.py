@@ -70,6 +70,30 @@ def test_a_chain_the_policy_now_refuses_is_a_422(client, repo, templates_dir):
 
 
 @pytest.mark.parametrize(
+    ("title", "description"),
+    [("", ""), (" \t\n", " \t\n")],
+    ids=["empty", "whitespace"],
+)
+def test_duplicate_without_a_title_or_description_is_refused(client, repo, title, description):
+    """A legacy item with no text to fold into a title cannot be duplicated."""
+    src_id = _paused(client, repo)
+    db = client.app.state.db
+    client.portal.call(
+        db.write,
+        lambda c: c.execute(
+            "UPDATE work_items SET title = ?, description = ? WHERE id = ?",
+            (title, description, src_id),
+        ),
+    )
+
+    r = client.post(f"/api/work-items/{src_id}/duplicate")
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "title cannot be empty: give the item a title first"
+    assert _item_count(client) == 1
+
+
+@pytest.mark.parametrize(
     ("stored", "title", "description"),
     [("t", "t", "d"), ("t\nmore of it\n", "t", "more of it\n\nd"), (" ", "d", "d")],
     ids=["one-line", "stored-by-1.4-on-two-lines", "stored-by-1.4-blank"],

@@ -166,9 +166,24 @@ AGENT_ONLY = {
     [
         ('kind: subprocess, command: "true"', {"command", "outputs", "reads"}),
         ("kind: builtin, ref: kraft.mr_rebase", {"ref", "execution", "suite"}),
-        ("kind: forge, target: mr.sync", {"target", "wait", "reviewers"}),
+        ("kind: forge, target: mr.sync", {"target", "wait"}),
+        (
+            "kind: forge, target: mr.automated_review",
+            {
+                "target",
+                "wait",
+                "config.reviewers",
+                "config.watch_ci",
+                "config.grace_period",
+                "policy.reply_timeout_minutes",
+            },
+        ),
+        (
+            'kind: forge, target: ci.pipeline, config: {pipeline: "1"}',
+            {"target", "wait", "reads", "config.pipeline"},
+        ),
     ],
-    ids=["subprocess", "builtin", "forge"],
+    ids=["subprocess", "builtin", "forge", "review-wait", "pipeline-wait"],
 )
 async def test_a_task_that_runs_no_agent_lists_no_agent_only_field(st, task, own):
     text = SCRATCH.replace('kind: subprocess, command: "true"', task)

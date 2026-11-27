@@ -121,11 +121,50 @@ def anchors(markdown: str) -> set[str]:
     return found
 
 
+def site_pages(pages_dir: Path, components: Path) -> dict[str, set[str]]:
+    """The marketing pages: site code (`docsite/app/pages/*.vue`), not files
+    under `content/`. Each is one page for every version, and a link to it
+    from anywhere lands. Its anchors are the `id="..."` of the page file and
+    of the page component it draws (`<WhyPage` is
+    `components/why/WhyPage.vue`), where its sections are.
+    """
+    found: dict[str, set[str]] = {}
+    for page in sorted(pages_dir.glob("*.vue")):
+        address = "/" if page.stem == "index" else f"/{page.stem}"
+        text = page.read_text(encoding="utf-8")
+        for name in re.findall(r"<([A-Z][a-z]+)Page\b", text):
+            drawn = components / name.lower() / f"{name}Page.vue"
+            if drawn.exists():
+                text += drawn.read_text(encoding="utf-8")
+        found[address] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
+    # A section of site pages, such as the blog: its index.vue is the folder's
+    # address.
+    for index in sorted(pages_dir.glob("*/index.vue")):
+        text = index.read_text(encoding="utf-8")
+        found[f"/{index.parent.name}"] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
+    # The blog's posts (docsite/blog/*.md, its README aside) and its feed.
+    posts = pages_dir.parents[1] / "blog"
+    if (pages_dir / "blog").is_dir():
+        found["/blog/feed.xml"] = set()
+        for post in sorted(posts.glob("*.md")):
+            if post.name != "README.md":
+                found[f"/blog/{post.stem}"] = set()
+    return found
+
+
 def pages(content: Path) -> dict[str, set[str]]:
-    """Every page's address, and the anchors on it."""
+    """Every page's address, and the anchors on it: the docs under
+    `content/`, and the marketing pages in the app beside it (site_pages).
+    The home page, `/`, is always one.
+    """
+    app = content.parent / "app"
     return {
-        route(path.relative_to(content)): anchors(path.read_text(encoding="utf-8"))
-        for path in sorted(content.rglob("*.md"))
+        "/": set(),
+        **site_pages(app / "pages", app / "components"),
+        **{
+            route(path.relative_to(content)): anchors(path.read_text(encoding="utf-8"))
+            for path in sorted(content.rglob("*.md"))
+        },
     }
 
 

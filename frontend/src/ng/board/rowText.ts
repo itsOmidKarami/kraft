@@ -1,5 +1,5 @@
 import { until } from "../../format";
-import type { ChainNode, ItemAction, SliceSummary, TaskProgress, WorkItem } from "../../types";
+import type { ChainNode, ItemAction, SliceChild, SliceSummary, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { within } from "../item/cursor";
 import { admits } from "../item/status";
@@ -51,6 +51,17 @@ export function slicesLine(i: Pick<WorkItem, "slices">): string {
   return `slices: ${parts.join(", ") || `${s.total} in all`}`;
 }
 
+/** A slice's own name under its parent: Kraft files it `<parent> · slice N: <name>`, and the parent's row already says the rest. */
+export const sliceName = (title: string) => /^.* · slice \d+: (.+)$/s.exec(title)?.[1] ?? title;
+
+/** The slices a parent's board row lists: only those that need a person. A slice has no row of its own, so this
+ *  is the board's one way to it; the summary line counts the rest, and the item page shows the whole family. */
+export const slicesNeedingYou = (i: Pick<WorkItem, "children">) => (i.children ?? []).filter((c) => groupOf(c as Pick<WorkItem, "display_status" | "current_node_id">) === "needs"); // a child's display_status is typed a plain string; groupOf files one it does not know as running
+
+/** A slice's state under its parent, with the node it stands at. */
+export const sliceState = (c: Pick<SliceChild, "display_status" | "current_node_id">) =>
+  `${c.display_status.replace(/_/g, " ")}${c.current_node_id ? ` · ${nodeWords(c.current_node_id)}` : ""}`;
+
 /** The note a group's accessible name carries: `2 of 3 slices done`. */
 export const slicesDone = (s: SliceSummary | null | undefined): string => (s && s.total ? `${s.done} of ${s.total} slices done` : "");
 
@@ -75,6 +86,12 @@ export const queuedVerbWords = (verb: string) => QUEUED_VERB[verb] ?? nodeWords(
 /** Up to the first full stop that ends a sentence, not one inside "$0.04". */
 const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 
+/** A merge request's number with its forge's sign, from the URL `mr_ref` carries: `#N` on GitHub (`/pull/N`),
+ *  `!N` on GitLab (`/-/merge_requests/N`). A URL that says neither keeps the old `!` — the sign GitLab uses
+ *  and the one every existing fixture already reads — rather than guessing a forge from the host. */
+export const mrRefText = (ref: { number: number; url?: string | null }): string =>
+  `${/\/pull\/\d+(?:[/?#]|$)/.test(ref.url ?? "") ? "#" : "!"}${ref.number}`;
+
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
   const node = nameOf(i.chain_definition?.nodes, nodeOf(i));
@@ -91,7 +108,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
           case "budget":
           // A checkout stop goes on to what the person should do; the item page says it whole.
           case "checkout": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you${where}`;
-          default: return i.stop?.reason ?? `waiting for you${where}`;
+          // A reason in paragraphs (the fix-loop judge's) is still one row.
+          default: return i.stop?.reason?.replace(/\s+/g, " ").trim() ?? `waiting for you${where}`;
         }
       case "failed": return `failed${where}`;
       case "paused": return i.current_node_id ? `paused${where}` : "created paused";
@@ -109,7 +127,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
       case "queued": return waitingForCheckout(i.queued) ?? "waiting to start";
       case "blocked": return "waiting on another item";
       case "escalated": return "escalation running";
-      case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
+      case "done": return i.mr_ref ? `merged ${mrRefText(i.mr_ref)}` : "completed";
       case "cancelled": return "cancelled";
       default: return "";
     }

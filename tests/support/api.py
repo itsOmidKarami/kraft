@@ -288,6 +288,22 @@ add:
 """
 
 
+#: The default chain with a `ci.pipeline` wait on pipeline 7 after merge-request feedback.
+PIPELINE_ONE_OFF = """\
+extends: default
+add:
+  - after: merge_request_feedback
+    node:
+      id: pipeline_watch
+      kind: exec
+      tasks:
+        - id: wait
+          kind: forge
+          target: ci.pipeline
+          pipeline: '7'
+"""
+
+
 LIBRARY_ONLY_ONE_OFF = "extends: default\nremove: [work_brief]\n"
 #: The caller headers `routes.gates._decided_by` reads as an MCP session and as a worker.
 MCP_HEADERS = {"X-Kraft-Client": "mcp"}
@@ -356,6 +372,8 @@ def _post_default(client, repo):
             "repo": str(repo),
             "chain_template": "default",
             "autostart": True,
+            # The default chain's gates have a reviewer; these tests act at the gate.
+            "auto_gate": False,
         },
     ).json()["id"]
 
@@ -545,7 +563,15 @@ def _in_state(client, repo, state: dict, **body) -> str:
     from kraft.templates.models import AgentTask
     from kraft.vocab import ThreadLabel
 
-    wid = _paused(client, repo, chain_template="default", **body)
+    # A `ci.pipeline` wait is in no library chain: a one-off adds one (`pipeline`:
+    # True, or the one-off's own text), approved below.
+    one_off = state.get("pipeline")
+    chain = (
+        {"one_off_chain": one_off if isinstance(one_off, str) else PIPELINE_ONE_OFF}
+        if one_off
+        else {}
+    )
+    wid = _paused(client, repo, **(chain or {"chain_template": "default"}), **body)
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
     kid = _paused(client, repo, chain_template="default") if state.get("slices") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
@@ -553,6 +579,8 @@ def _in_state(client, repo, state: dict, **body) -> str:
             "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
             (state["status"], state["node"], wid),
         )
+        if chain:
+            c.execute("UPDATE work_items SET one_off_pending = 0 WHERE id = ?", (wid,))
         if "stop" in state:
             kw = {"budget": state["budget"]} if "budget" in state else {}
             store.mark_needs_human(c, wid, state["node"], state["reason"], kind=state["stop"], **kw)
@@ -603,6 +631,14 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
             events.append(c, wid, "mr_opened", {"number": 7, "url": "u"}, node_id=state["node"])
+    if state.get("worktree") and not body.get("in_place"):
+        # Its worktree on its branch, as a started item has one. An in-place item
+        # has none: its branch is forced below, in the checkout.
+        from support.harness import git
+
+        branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+        git(Path(repo), "worktree", "add", "-b", branch, str(worktree))
     if state.get("escalation"):
         _create_escalation_session(wid, f"esc-{wid}", state["node"])
         with (
@@ -610,8 +646,9 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c,
         ):
             events.append(c, wid, "escalation_message", {"session_id": f"esc-{wid}"})
-    if state.get("paused_agent"):
-        # Paused at the node's first agent task, as a pause leaves it.
+    if agent := state.get("agent_session") or ("paused" if state.get("paused_agent") else None):
+        # A session of the node's first agent task, paused as a pause leaves it
+        # (`paused_agent`) or ended as `agent_session` says.
         with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c:
             c.row_factory = sqlite3.Row
             row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -619,7 +656,7 @@ def _in_state(client, repo, state: dict, **body) -> str:
         node = next(n for n in chain.nodes if n.id == state["node"])
         task = next(t for s in node.steps for t in s.tasks if isinstance(t.task, AgentTask))
         _create_escalation_session(
-            wid, f"agent-{wid}", state["node"], hook_point=task.path, status="paused"
+            wid, f"agent-{wid}", state["node"], hook_point=task.path, status=agent
         )
     if body.get("in_place") and state["node"]:
         # Started in place: its branch is there, as taking the checkout leaves it.
@@ -724,3 +761,11 @@ def _on_api_account(
             )
         }
     )
+
+
+def assert_refusal_hides_the_override(response) -> None:
+    """An agent reads its refusals; one that names how to be recorded as a person gets used."""
+    assert response.status_code == 403, response.text
+    text = response.text.lower()
+    assert "kraft_client" not in text
+    assert "override" not in text

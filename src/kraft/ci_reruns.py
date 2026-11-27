@@ -13,11 +13,14 @@ from __future__ import annotations
 import sqlite3
 
 from kraft import events
-from kraft.templates.models import ForgeAction, ForgeTask, ResolvedNode
-from kraft.vocab import RESTARTS_RUN, ChainEvent, ForgeEvent, GateEvent
+from kraft.templates.models import ForgeAction, ForgeTask, ResolvedNode, ResolvedTask
+from kraft.vocab import RESTARTS_RUN, ChainEvent, ForgeEvent, GateEvent, StopKind, WorkItemStatus
 
 __all__ = [
     "waits_on_mr_ci",
+    "stopped_for_a_person",
+    "pipeline_waits",
+    "pipeline_stopped_for_a_person",
     "open_fix_cycle",
     "reran_last_cycle",
     "reruns",
@@ -31,6 +34,44 @@ def waits_on_mr_ci(node: ResolvedNode | None) -> bool:
     for `None`: a node the caller could not find in the item's chain."""
     return node is not None and any(
         isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_CI for t in node.tasks()
+    )
+
+
+def stopped_for_a_person(row) -> bool:
+    """Whether the item's fix loop stopped for a person, stuck or at its cap:
+    the stops whose reason can say CI failed outside the code, which a person
+    re-runs (`POST /ci-rerun`) and retries in one step. The caller checks the
+    node waits on merge-request CI."""
+    return row["status"] == WorkItemStatus.NEEDS_HUMAN and row["stop_kind"] in (
+        StopKind.STUCK,
+        StopKind.CAP,
+    )
+
+
+def pipeline_waits(node: ResolvedNode | None) -> list[ResolvedTask]:
+    """`node`'s `ci.pipeline` waits, each on one pipeline by id: none for
+    `None`, a node the caller could not find in the item's chain."""
+    if node is None:
+        return []
+    return [
+        t
+        for t in node.tasks()
+        if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.CI_PIPELINE
+    ]
+
+
+def pipeline_stopped_for_a_person(row) -> bool:
+    """Whether the item stopped for a person in a way a red `ci.pipeline`
+    pipeline leaves it: failed (red, with no fix loop or at its cap), stuck, at
+    a cap, or on the forge's own infrastructure. A person, and only a person,
+    re-runs that pipeline's failed jobs (`POST /ci-rerun`) and retries: the id
+    is one a worker chose, and a re-run is a write with the server's token
+    (#1301). The caller checks the node has a `ci.pipeline` wait."""
+    return row["status"] == WorkItemStatus.NEEDS_HUMAN and row["stop_kind"] in (
+        StopKind.STUCK,
+        StopKind.CAP,
+        StopKind.FAILED,
+        StopKind.INFRA,
     )
 
 

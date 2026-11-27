@@ -10,8 +10,9 @@ from support.harness import IN_PLACE, commit_all, git, write
 
 from kraft import events, store
 from kraft.executor import context, dispatch
-from kraft.executor.context import BASE_MOVED
+from kraft.executor.context import BASE_MOVED, ENDED_EARLY, RATE_LIMITED
 from kraft.findings import Finding
+from kraft.vocab import ChainEvent
 
 
 def _agent(task_id, **fields):
@@ -99,6 +100,77 @@ async def test_a_step_that_does_not_pass_stops_the_node(
     assert got_verdict == verdict
     assert [t.task.id for t in got_failed] == failed
     assert fake_dispatch.calls == ["a"], "a later step must not run after an earlier one stopped"
+
+
+@pytest.mark.parametrize(
+    ("early", "reports", "severity", "answers", "declined", "verdict", "calls"),
+    [
+        (True, "b", "critical", {}, None, ENDED_EARLY, ["a", "b2"]),
+        (False, "b", "critical", {}, None, "ok", ["a", "b2", "c"]),
+        (True, "b", "minor", {}, None, "ok", ["a", "b2", "c"]),
+        (True, "b", "critical", {"b2": "failed"}, None, "failed", ["a", "b2"]),
+        (True, "b", "critical", {"b2": "paused"}, None, "paused", ["a", "b2"]),
+        (True, "b", "critical", {"b2": "rate_limited"}, None, RATE_LIMITED, ["a", "b2"]),
+        (True, "b", "critical", {}, "this-commit", "ok", ["a", "b2", "c"]),
+        (True, "b", "critical", {}, "another-commit", ENDED_EARLY, ["a", "b2"]),
+        (True, "c", "critical", {}, None, "ok", ["a", "b", "b2"]),
+    ],
+    ids=[
+        "ends-early",
+        "early-off",
+        "below-the-loop-severities",
+        "a-failed-co-task-keeps-failed",
+        "a-pause-outranks-it",
+        "a-rate-limit-outranks-it",
+        "declined-on-this-commit",
+        "declined-on-another-commit",
+        "in-the-last-step",
+    ],
+)
+async def test_eligible_findings_end_a_measurement_early(
+    item_on, fake_dispatch, early, reports, severity, answers, declined, verdict, calls
+):
+    """A step that advanced with a finding the loop would take ends the measurement
+    before the next step, unless a stop or a failure outranks it, the fix loop
+    declined it on this commit, or there is no later step to skip."""
+    node = _steps(["a"], ["b", "b2"], ["c"])
+    node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    node["fix_loop"]["early"] = early
+    it = await item_on([node])
+    head = dispatch._config.git_read(it.repo, "rev-parse", "HEAD")
+    finding = {
+        "severity": severity,
+        "message": "found it",
+        "file": "a.py",
+        "line": 1,
+        "source_plugin": "p",
+    }
+    path = {t.task.id: t.path for step in it.chain.chain.nodes[0].steps for t in step.tasks}
+    (it.run_dirs.results / "r.json").write_text(
+        json.dumps({"status": "done", "findings": [finding]})
+    )
+    await it.session("r", path[reports], "done", node="n", round=0, head_sha=head)
+    if declined:
+        payload = {
+            "node_id": "n",
+            "cycle": 0,
+            "verdict": "stop_downgrade",
+            "reasoning": "",
+            "findings": [finding],
+            "head_sha": head if declined == "this-commit" else "0" * 40,
+            "ended_early": True,
+        }
+        await it.database.write(
+            lambda c: events.append(c, it.id, ChainEvent.JUDGE_VERDICT, payload)
+        )
+    fake_dispatch.answer = lambda task_id: answers.get(task_id, "done")
+
+    got, failed, _ = await _measure(it, round=0)
+
+    assert got == verdict
+    assert fake_dispatch.calls == calls
+    if verdict == ENDED_EARLY:
+        assert failed == []
 
 
 def _timed(order, slow="a"):
@@ -301,6 +373,96 @@ async def test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_a
     assert dispatch.needs_context_question(it.database, it.id, node, 0) == asked
 
 
+@pytest.mark.parametrize(
+    ("early", "read"),
+    [(True, ["b"]), (False, ["b", "c"])],
+    ids=["early-reads-the-steps-it-reached", "otherwise-as-before"],
+)
+async def test_a_measurement_reads_only_the_steps_it_reached(item_on, early, read):
+    """After an early end the cursor names the step it reached: a later step's row
+    from an earlier measurement is not this one's result, a reached step's older
+    (reused) row is."""
+    steps = [{"id": f"s{i}", "tasks": [_agent(t)]} for i, t in enumerate("abc")]
+    loop = {"tasks": [_agent("fix")], "early": early}
+    node_def = {"id": "verify", "kind": "exec", "steps": steps, "fix_loop": loop}
+    it = await item_on([node_def], repo="/r")
+    node = it.chain.chain.nodes[0]
+    a_path, b_path, c_path = (step.tasks[0].path for step in node.steps)
+    (it.run_dirs.results / "b0.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "findings": [
+                    {
+                        "severity": "important",
+                        "message": "b finding",
+                        "file": "a.py",
+                        "line": 1,
+                        "source_plugin": "p",
+                    }
+                ],
+            }
+        )
+    )
+    (it.run_dirs.results / "c0.json").write_text(
+        json.dumps({"status": "needs_context", "question": "stale?"})
+    )
+    await it.session("b0", b_path, "done")
+    await it.session("c0", c_path, "needs_context")
+    await it.session("a0", a_path, "done")
+    await it.database.write(lambda c: store.set_current_step(c, it.id, 1))
+
+    has_session: dict[str, bool] = {}
+    found, _ = dispatch.collect_findings(it.database, it.id, node, 0, has_session=has_session)
+    question = dispatch.needs_context_question(it.database, it.id, node, 0)
+
+    assert has_session[c_path] is ("c" in read)
+    assert any(f.source_plugin == c_path for f in found) is ("c" in read)
+    assert (question == "stale?") is ("c" in read)
+    assert "b finding" in [f.message for f in found]
+
+
+@pytest.mark.parametrize(
+    "in_round, inputs, head, has",
+    [
+        (True, ["bot_feedback"], None, False),
+        (False, ["bot_feedback"], None, True),
+        (True, ["bot_feedback"], "abc", True),
+        (True, [], None, True),
+    ],
+    ids=[
+        "reply-round-skip",
+        "ordinary-skip",
+        "reply-round-real-session",
+        "reply-round-non-triage-task-with-no-head",
+    ],
+)
+async def test_a_skipped_triage_in_a_reply_round_is_an_unmeasured_task(
+    item_on, in_round, inputs, head, has
+):
+    """`a-reply-round-s-triage-reads-only-what-is-new`: a triage that started no agent
+    because nothing new was said (a `done` row with no head) has no session in a reply
+    round, so the record lists it as unmeasured instead of "found nothing". Only the
+    triage's skip row is special, and an ordinary measurement is unchanged."""
+    node_def = {
+        "id": "verify",
+        "kind": "exec",
+        "steps": [{"id": "s0", "tasks": [_agent("triage", inputs=inputs)]}],
+        "fix_loop": {"tasks": [_agent("fix")]},
+    }
+    it = await item_on([node_def], repo="/r")
+    node = it.chain.chain.nodes[0]
+    path = node.steps[0].tasks[0].path
+    await it.session("t0", path, "done", head_sha=head)
+
+    has_session: dict[str, bool] = {}
+    dispatch.collect_findings(
+        it.database, it.id, node, 0, has_session=has_session, reply_round=in_round
+    )
+
+    assert has_session[path] is has
+
+
 async def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(item_on):
     """A gate rejection or ci_wait poll re-entering a fix_loop node must not
     inherit the last pass's fix-task needs_context (review finding 5).
@@ -328,10 +490,11 @@ def _f(message):
     return Finding("critical", message, "a.py", 1, "p")
 
 
-def _round(n, messages, *, fixed=True):
+def _round(n, messages, *, fixed=True, unmeasured=()):
     return {
         "round": n,
         "findings": [_f(m) for m in messages],
+        "unmeasured": [_f(m) for m in unmeasured],
         "fix_result_path": f"/r/{n}.json" if fixed else None,
     }
 
@@ -353,6 +516,10 @@ def _round(n, messages, *, fixed=True):
         # fix removed it -- so nothing was reverted.
         ([_round(0, ["escape"]), _round(1, [], fixed=False), _round(2, ["escape"])], []),
         ([_round(0, ["escape"]), _round(1, ["escape"])], []),
+        # A gap where an early end did not re-read it is no fix, and an unread
+        # finding in the latest round is not one to fix.
+        ([_round(0, ["escape"]), _round(1, [], unmeasured=["escape"]), _round(2, ["escape"])], []),
+        ([_round(0, ["escape"]), _round(1, []), _round(2, [], unmeasured=["escape"])], []),
     ],
     ids=[
         "a-finding-that-came-back",
@@ -360,6 +527,8 @@ def _round(n, messages, *, fixed=True):
         "one-that-is-gone-now",
         "a-gap-with-no-fix-in-it",
         "two-rounds-cannot-hold-one",
+        "a-gap-where-it-was-not-re-read",
+        "not-re-read-in-the-latest-round",
     ],
 )
 def test_regressed_fingerprints_finds_a_finding_a_fix_undid(history, regressed):
@@ -372,13 +541,13 @@ def test_regressed_fingerprints_finds_a_finding_a_fix_undid(history, regressed):
 # -- the unresolved findings a retry is seeded with (Kraft-7sec) -------------
 
 
-def _measured(cycle, *findings):
+def _measured(cycle, *findings, severity="important"):
     return {
         "node_id": "verify",
         "cycle": cycle,
         "findings": [
             {
-                "severity": "important",
+                "severity": severity,
                 "message": message,
                 "file": file,
                 "line": line,
@@ -406,12 +575,30 @@ def _measured(cycle, *findings):
         # A blind task failure with nothing structured reported falls through
         # to the caller's own `last_rejection`, rather than seeding an empty note.
         ([_measured(0)], None, None),
+        # The on_failure repair's re-measure (cycle -1) is what is still there when a
+        # cap stopped the node before cycle 1 recorded (Kraft-a51c5)...
+        (
+            [_measured(0, ("old bug", "a.py", 1)), _measured(-1, ("triage bug", "b.py", 2))],
+            ["triage bug"],
+            ["old bug"],
+        ),
+        # ...even when it found nothing at the loop's severities.
+        (
+            [
+                _measured(0, ("old bug", "a.py", 1)),
+                _measured(-1, ("nit", "b.py", 2), severity="minor"),
+            ],
+            None,
+            None,
+        ),
     ],
     ids=[
         "the-latest-measurements-findings",
         "not-one-resolved-in-a-later-cycle",
         "no-measurement-yet",
         "no-eligible-finding",
+        "the-repairs-re-measure-when-newest",
+        "a-re-measure-with-only-below-severity-findings",
     ],
 )
 async def test_unresolved_findings_steer_seeds_the_latest_measurements_findings(
@@ -430,3 +617,147 @@ async def test_unresolved_findings_steer_seeds_the_latest_measurements_findings(
         return
     assert all(text in note for text in present), note
     assert not any(text in note for text in absent), note
+
+
+@pytest.mark.parametrize(
+    ("history", "stuck"),
+    [
+        (
+            [_round(0, ["p"]), _round(1, [], unmeasured=["p"]), _round(2, ["p"]), _round(3, ["p"])],
+            "p",
+        ),
+        (
+            [
+                _round(0, ["p"]),
+                _round(1, [], unmeasured=["p"]),
+                _round(2, [], unmeasured=["p"]),
+                _round(3, ["p"]),
+            ],
+            None,
+        ),
+        (
+            [_round(0, ["p"]), _round(1, ["p"]), _round(2, ["p"]), _round(3, [], unmeasured=["p"])],
+            None,
+        ),
+    ],
+    ids=["held-not-reset", "held-not-extended", "never-stuck-while-unread"],
+)
+def test_an_unmeasured_finding_holds_its_stuck_streak(history, stuck):
+    """A round that did not re-read a finding neither extends nor resets its streak,
+    and an unread finding is never reported stuck."""
+    assert dispatch.stuck_fingerprint(history, 3) == (_f(stuck).fingerprint if stuck else None)
+
+
+@pytest.mark.parametrize(
+    ("rounds", "stuck", "regressed"),
+    [
+        # A fresh entry records no pre-repair measurement: the re-measure is the baseline.
+        ([(-1, ["p"]), (1, ["p"]), (2, ["p"])], "p", []),
+        ([(-1, ["p"]), (1, []), (2, ["p"])], None, ["p"]),
+        # A re-entry's repair ran no fix: the streak starts again there.
+        ([(0, ["p"]), (1, ["p"]), (-1, ["p"]), (2, ["p"])], None, []),
+        # Gone only at the repair's re-measure: no fix removed it, so none reverted it.
+        ([(1, ["p"]), (-1, []), (2, ["p"])], None, []),
+    ],
+    ids=[
+        "the-re-measure-starts-the-streak",
+        "a-re-measure-finding-a-fix-undid",
+        "a-re-entry-repair-resets-the-streak",
+        "a-gap-of-only-the-repair-is-no-fix",
+    ],
+)
+async def test_a_repairs_re_measure_is_a_round_with_no_fix(item_on, rounds, stuck, regressed):
+    """An `on_failure` repair's re-measure (cycle -1) is a round the stuck and regression checks
+    read, and no fix ran before it (Kraft-d8gne)."""
+    it = await item_on([_NEEDS_CONTEXT_NODE], repo="/r")
+    for cycle, messages in rounds:
+        payload = _measured(cycle, *[(m, "a.py", 1) for m in messages])
+        await it.database.write(
+            lambda c, p=payload: events.append(c, it.id, "findings_measured", p)
+        )
+        if cycle > 0:
+            await it.database.write(
+                lambda c, n=cycle: store.create_session(
+                    c,
+                    id=f"fix{n}",
+                    work_item_id=it.id,
+                    node_id="verify",
+                    hook_point="fix",
+                    log_path="/l",
+                    result_path=f"/r{n}",
+                    round=n,
+                )
+            )
+
+    history = dispatch.judge_history(
+        it.database, it.id, "verify", frozenset({"important"}), fix_paths=["fix"]
+    )
+
+    message = {f.fingerprint: f.message for h in history for f in h["findings"]}
+    assert message.get(dispatch.stuck_fingerprint(history, 3)) == stuck
+    assert [message[fp] for fp in dispatch.regressed_fingerprints(history)] == regressed
+
+
+def _raw(message, *, source="code-review", label="n.ci.ci"):
+    """A finding as a `findings_measured` payload stores it: the session it was read
+    from in `jobs`."""
+    return {
+        "severity": "critical",
+        "message": message,
+        "file": "a.py",
+        "line": 1,
+        "source_plugin": source,
+        "jobs": [{"label": label, "log_ref": "x"}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("previous", "read", "unread", "found", "kept"),
+    [
+        ({"findings": [_raw("lint")]}, ["n.wait.bots"], ["n.ci.ci"], [], ["lint"]),
+        (
+            {"findings": [_raw("lint", source="n.ci.ci", label="make ci")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            ["lint"],
+        ),
+        (
+            {"findings": [_raw("lint", source="n.ci.ci", label="n.wait.bots")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            [],
+        ),
+        (
+            {"findings": [_raw("lint")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [Finding("critical", "lint", "a.py", 1, "code-review")],
+            [],
+        ),
+        ({"findings": [_raw("lint")]}, ["n.ci.ci"], [], [], []),
+        (
+            {"findings": [], "unmeasured": [_raw("lint")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            ["lint"],
+        ),
+    ],
+    ids=[
+        "by-the-session-that-read-it",
+        "a-blind-failure",
+        "read-by-another-task",
+        "re-read-now",
+        "its-task-was-read",
+        "carried-again",
+    ],
+)
+def test_unmeasured_findings_are_the_last_findings_of_the_tasks_not_read(
+    previous, read, unread, found, kept
+):
+    """Which task read a finding is the session it came from, never its source_plugin:
+    a red pipeline the bot wait saw is the bot wait's, which was read."""
+    got = dispatch.unmeasured_findings(previous, read, unread, found)
+    assert [f["message"] for f in got] == kept

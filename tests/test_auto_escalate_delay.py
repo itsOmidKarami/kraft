@@ -5,8 +5,10 @@ run()/resume() already returned."""
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
+import psutil
 import pytest
 from support.harness import v1_chain, v1_item
 
@@ -129,8 +131,18 @@ async def test_tick_spends_no_slot_on_a_gate_no_agent_may_review(
         await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
 
 
+@pytest.mark.parametrize(
+    ("taken_over", "spawned", "dispatched"),
+    [
+        pytest.param(False, 1, 1, id="free"),
+        # A person's session is open in its worktree: no agent goes in beside them.
+        # `tick` itself spawns nothing (not only `auto_escalate_stuck` declining a
+        # step later), so no task holds the item's slot.
+        pytest.param(True, 0, 0, id="taken-over"),
+    ],
+)
 async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
-    tmp_path, monkeypatch, repo, stub_app
+    tmp_path, monkeypatch, repo, stub_app, taken_over, spawned, dispatched
 ):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     calls = []
@@ -160,9 +172,23 @@ async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
     await app.state.db.write(
         lambda c: store.mark_needs_human(c, "w1", "a", "stuck", stuck=True, kind="stuck")
     )
+    if taken_over:
+        await app.state.db.write(
+            lambda c: store.take_takeover_lock(
+                c,
+                "w1",
+                pid=os.getpid(),
+                pid_start=psutil.Process().create_time(),
+                session_id="U",
+                resumed_from=None,
+                branch="b",
+                tip="t",
+            )
+        )
     await auto_escalate_delay.tick(app)
+    assert len(app.state.tasks) == spawned
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-    assert len(calls) == 1
+    assert len(calls) == dispatched
 
 
 async def test_tick_bounds_dispatches_by_max_concurrent(tmp_path, monkeypatch, repo, stub_app):

@@ -68,6 +68,7 @@ def test_a_group_is_the_set_the_audit_found(group, members):
         ),
         (Verb.ARCHIVE, {S.COMPLETED, S.ABANDONED}),
         (Verb.UNBLOCK, {S.PAUSED, S.BLOCKED}),
+        (Verb.TAKEOVER, {S.PAUSED, S.NEEDS_HUMAN}),
     ],
     ids=[v.value for v in Verb],
 )
@@ -120,6 +121,7 @@ DOOR_VERB = {
     "abandon": Verb.ABANDON,
     "archive": Verb.ARCHIVE,
     "unblock": Verb.UNBLOCK,
+    "takeover": Verb.TAKEOVER,
 }
 
 

@@ -721,6 +721,27 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
     await db.write(_capped)
 
 
+def _concurrency_group(db, row: dict, launch_factory) -> str | None:
+    """The `concurrency_group` of the test scope `row` (a `worker_sessions` row) ran, read from
+    today's repos.yaml: a session's recorded command is its scope's command as written. None
+    for an agent session, a repo that no longer reads, or no factory to read it with."""
+    if not row.get("command") or launch_factory is None:
+        return None
+    repo = db.read(
+        lambda c: c.execute(
+            "SELECT repo FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    try:
+        # Inside the try too: a repos.yaml that fails to load gives a poisoned entry whose
+        # every read raises, and a restart must still start (`deps.launch`).
+        entry = launch_factory(repo[0]).repo_entry if repo else None
+        return entry.concurrency_group_of(row["command"]) if entry is not None else None
+    except ConfigError as exc:
+        logger.warning("repo of %s unreadable, its test group not held: %s", row["id"], exc)
+        return None
+
+
 async def _guarded_adopt(
     db,
     session_id: str,
@@ -740,6 +761,9 @@ async def _guarded_adopt(
     egress: bool = False,
     #: A local session (no `runner`): it counts against the local worker's limit while it runs.
     local: bool = False,
+    #: The test scope's `concurrency_group` the session held: held again, so the next scope
+    #: of that group waits for it.
+    concurrency_group: str | None = None,
 ) -> None:
     """`_adopt`, but a crash marks the work item needs_human instead of
     vanishing. `reattach` hands its tasks to the caller directly rather than
@@ -755,7 +779,7 @@ async def _guarded_adopt(
     link = _local_link.current() if local else None
     key = ids.session_ref(work_item_id, session_id)
     if link is not None:
-        link.adopt(key)
+        link.adopt(key, concurrency_group)
     try:
         await _adopt(
             db,
@@ -1104,6 +1128,9 @@ async def reattach(
                     sandbox=r["sandbox"],
                     egress=r["egress"] is not None,
                     local=not r["runner"],
+                    concurrency_group=None
+                    if r["runner"]
+                    else _concurrency_group(db, r, launch_factory),
                 )
             )
             summary.adopted.append(ids.session_ref(r["work_item_id"], sid))

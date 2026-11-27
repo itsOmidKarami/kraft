@@ -156,7 +156,41 @@ async def test_glab_open_mr_posts_a_draft_with_these_fields(cli, tmp_path, meta,
         *lookups,
         "api projects/:id/merge_requests -X POST -i -f source_branch=kraft/abc "
         "-f target_branch=release -f title=Draft: Teach it -f description=why" + fields,
+        GET,
     ]
+
+
+#: The marked body: the call log is one line per line, so its blank line shows.
+_MARK = [f"{PUT} -f description=why", "", "<!-- kraft -->"]
+
+
+@pytest.mark.parametrize(
+    "live, put, sent",
+    [
+        ("why\r\n", "{}", [GET, *_MARK]),
+        ("why, and a person's line", "{}", [GET]),
+        (FAIL, "{}", [GET]),
+        ("why", FAIL, [GET, *_MARK]),
+    ],
+    ids=["kraft-s-text-marked", "person-edited-kept", "read-failed", "mark-failed"],
+)
+async def test_glab_open_mr_marks_its_own_text_as_an_edit(cli, tmp_path, live, put, sent):
+    """GitLab links no note to a creation text, so Kraft writes its body again with
+    a marker: only over its own text, and a failure still leaves the merge request
+    opened."""
+    cli.stub("git", "")
+    view = FAIL if live is FAIL else json.dumps({"iid": 54, "description": live})
+    cli.stub(
+        "glab",
+        routes={"api*merge_requests -X POST*": GLAB_MR_VIEW, f"{GET}*": view, f"{PUT}*": put},
+    )
+
+    mr = await forge.GlabCli().open_mr(
+        repo=tmp_path, branch="kraft/abc", base="main", title="t", body="why"
+    )
+
+    assert mr.number == 54
+    assert cli.calls("glab")[1:] == sent
 
 
 async def test_glab_open_mr_refuses_a_user_gitlab_does_not_know(cli, tmp_path):
@@ -416,6 +450,20 @@ async def test_glab_merge_409_is_a_head_that_moved_and_names_the_forges(
         assert caught.value.status == refusal.status
 
 
+async def test_glab_merge_sends_nothing_while_gitlab_is_merging(cli, tmp_path):
+    """A retry after an ask whose answer was lost (Kraft-l1hbl): GitLab holds the
+    merge request `locked` while it merges, which parks the item to read it again
+    (`MergeBusy`). By branch, as `run_task` asks: `locked` is not `opened`."""
+    cli.stub("git", "0")
+    locked = json.dumps({"iid": 54, "state": "locked", "head_pipeline": None})
+    cli.stub("glab", routes={**_NO_TRAIN, **glab_mr(locked, open=False)}, default="{}")
+
+    with pytest.raises(forge.MergeBusy, match="!54 is locked"):
+        await forge.GlabCli().merge(repo=tmp_path, branch="kraft/abc", mr=NO_MR, head=_HEAD)
+
+    assert not [c for c in cli.calls("glab") if "/merge " in c]
+
+
 async def test_glab_merge_names_the_branch_when_no_number_is_known(cli, tmp_path):
     """`run_task` threads no number (0): the branch resolves the merge request,
     and the PUT never targets `merge_requests/0`."""
@@ -559,7 +607,7 @@ async def test_glab_open_mr_resolves_a_user_as_glab_does(cli, tmp_path, routes, 
 
     if expect.startswith("assignee_ids"):
         await opening
-        assert expect in cli.calls("glab")[-1]
+        assert expect in cli.calls("glab")[-2]
     else:
         with pytest.raises(forge.ForgeError, match=expect):
             await opening

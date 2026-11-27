@@ -14,7 +14,7 @@ setup:
     # or a check that may have no network.
     uv run vale --version
     cd frontend && npm ci
-    @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (CONTRIBUTING.md)"
+    @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (docs/agent-tooling.md)"
 
 # superpowers and impeccable, for every agent this repo is worked on with.
 #
@@ -156,7 +156,7 @@ fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
 # The Markdown Vale checks: the docs site, the README and the contributor docs.
 # .github/workflows/test.yml's `lint` job lists the same paths.
-vale_paths := "docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md vscode/README.md"
+vale_paths := "docsite/content docsite/blog README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md docs/agent-tooling.md docs/ci.md docs/maintainers.md docs/writing-docs.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md plugins/herdr/README.md addons/kraft-superpowers/README.md"
 
 # A dev home starts as a copy of the tracked config/ with thin chains that extend
 # the built-in kraft-default (read from this checkout), plus the throwaway repo
@@ -226,6 +226,14 @@ console-screenshot *args: _dev-home
     cd frontend && npx playwright install chromium
     {{dev_env}} uv run python dev/console_screenshot.py {{args}}
 
+# Re-record the README's loop (.github/assets/run.gif and run.mp4) in the web UI of a fresh
+# `just dev` (`just dev-reset` first); CHROMIUM=PATH uses a browser of your own
+[doc("Docs: re-record the README's GIF of one work item, filed to final review")]
+readme-gif *args: _dev-home
+    cd frontend && [ -d node_modules ] || npm ci
+    [ -n "${CHROMIUM:-}" ] || (cd frontend && npx playwright install chromium)
+    {{dev_env}} uv run python dev/readme_gif.py {{args}}
+
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
 dev-reset:
     rm -rf .dev
@@ -263,16 +271,20 @@ bundle:
     rm -rf src/kraft/_bundled/config/.kraft
 
 # Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and
-# chains/). tests/plugins/test_kraft_lite_parity.py fails until this is run.
-[doc("Copy the packaged library into plugins/kraft-lite/config")]
+# chains/) and of the worker methods (methods/<name>.md, one per
+# src/kraft/skills/<name>/SKILL.md; flat, so no harness loads them as skills).
+# tests/plugins/test_kraft_lite_parity.py fails until this is run.
+[doc("Copy the packaged library and worker methods into plugins/kraft-lite")]
 kraft-lite-config:
     rm -rf plugins/kraft-lite/config && mkdir -p plugins/kraft-lite/config/chains && cp config/library.yaml plugins/kraft-lite/config/ && cp config/chains/*.yaml plugins/kraft-lite/config/chains/
+    rm -rf plugins/kraft-lite/methods && mkdir -p plugins/kraft-lite/methods && for d in src/kraft/skills/*/; do cp "$d/SKILL.md" "plugins/kraft-lite/methods/$(basename "$d").md"; done
 
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
 # State lands in ~/.kraft, seeded from config/ on first run.
 [doc("Install `kraft` as a real command; state in ~/.kraft")]
 install: bundle
-    uv tool install --from . kraft-sdlc --force
+    # The Python in .python-version, the one CI builds with, not uv's newest.
+    uv tool install --python "$(cat .python-version)" --from . kraft-sdlc --force
     @echo "installed. run: kraft"
     @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
 
@@ -366,7 +378,7 @@ test *ARGS:
 # The unit tier on another Python, in its own environment (.venv-<version>) so
 # it never disturbs the default one: `just test-py 3.12`, or add pytest args,
 # `just test-py 3.13 -k search`. CI runs the whole supported range on main (a
-# pull request skips 3.13); use this to reproduce one version's failure. Full
+# pull request skips 3.13 and 3.15); use this to reproduce one version's failure. Full
 # run, no testmon: its data is per-env.
 [positional-arguments]
 [doc("Unit tier on another Python: just test-py 3.12 [pytest args]")]
@@ -528,10 +540,11 @@ vocab:
     uv run python dev/gen_vocab.py
 
 # Rewrite tests/api/api_shapes.json, the keys each GET route the web UI reads
-# answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to
-[doc("Rewrite the API response-shape table from the real server")]
+# answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to, and
+# frontend/e2e/contract/mocks/shippedChains.json, the shipped chains the demo's items run
+[doc("Rewrite the API response-shape table and the demo's recorded chain from the real server")]
 shapes:
-    WRITE_API_SHAPES=1 just test tests/api/test_api_shapes.py --no-testmon -n 0
+    WRITE_API_SHAPES=1 WRITE_DEMO_CHAIN=1 just test tests/api/test_api_shapes.py tests/api/test_demo_chain.py --no-testmon -n 0
 
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
@@ -585,7 +598,7 @@ fix:
 # by hand -- there's no test enforcing it since GitLab CI's config (and the
 # test that checked it) was retired. It covers those two jobs only: the e2e,
 # frontend, vscode, playwright and kraft-lite jobs have recipes of their own
-# (CONTRIBUTING.md, "What CI checks").
+# (docs/ci.md, "What CI checks").
 [doc("CI's lint and test jobs, in order, on the full suite (no testmon)")]
 ci-test: ci-checks
     uv run pytest -m "not e2e" -n logical

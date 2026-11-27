@@ -26,7 +26,11 @@ export const STATES: DisplayState[] = [
 
 import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
+import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
+import { ago, agoPy } from "./clock";
+import { agentRun, isAgentSession, runningS, runOutput, scopeRunsOf, type Run } from "./taskKinds";
+import { changedFiles, contentDiff, docBody, gateTitle, isDocsPath, isLate, isTest, itemDocs, mrOf, statusOf, symbolOf, type Content } from "./ngContent";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -83,7 +87,7 @@ export function repo(path: string, i: number, long = false) {
     allow_cross_repo: i === 2,
     // The rest of a `repos.yaml` entry, at config.RepoEntry's defaults, with a setup command so none warns.
     setup_command: "uv sync", managed: true, ci_checks: true, automated_review: null, sandbox: null, policy: null, intent_dir: null,
-    areas: {}, env: {}, env_passthrough: [], local_files: [], carry: [], library_auto_update: false, worktrees: true,
+    areas: {}, env: {}, env_passthrough: [], local_files: [], carry: [], library_auto_update: false, post_merge_publish_jobs: [], worktrees: true,
     submodules: long && i === 0
       ? [
           { path: "vendor/kraft-lite", enabled: true, test_command: "pytest -q", chain_override: null },
@@ -182,9 +186,99 @@ export interface ItemBundle {
   threads?: any[];
   /** Bead ids the item names: what GET /work-items/{id}/cancel-preview lists under `beads` (Mark complete's "beads" row). */
   beads?: string[];
+  /** The reviews submitted on the item (`reviews` rows): what `gateRoundsOf` puts in each round's `review`. */
+  reviews?: any[];
+  /** What the item is about (ngContent.ts): its brief, files and merge request. Only the default sample's board items carry it. */
+  content?: Content;
 }
 
-export function logLines(sessionId: string, n: number, long: boolean): any[] {
+/** The tasks whose agent hands work to sub-agents (Claude Code's Agent tool, `subagents.py`): the implementer, which the
+ *  plan skill says can hand a plan's tasks to sub-agents (`src/kraft/skills/plan/SKILL.md`), and, though no skill asks
+ *  them to, verification's repair and its code review, as an agent plausibly does. An author of a spec, plan, chain
+ *  revision, brief or summary, a gate's reviewer, the judge and an escalation turn read a document or two and work alone. */
+export const DELEGATES = new Set(["implementation.main.implement", "verification.fix_loop.main.repair", "verification.review.code_review"]);
+/** The tasks that change the item's files; every other agent only reads them (a code review changes nothing,
+ *  `src/kraft/skills/code-review/SKILL.md`). */
+const EDITS = new Set(["implementation.main.implement", "verification.fix_loop.main.repair"]);
+/** FNV-1a: a stable 32-bit number from a session id, which varies its log and sub-agents. */
+const fnv = (s: string) => [...s].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0, 0x811c9dc5);
+
+/** An agent session's log on an item with content (ngContent.ts): what `logLines` writes, about the item's own files,
+ *  and, for a task that delegates, sub-agents (one to three for the implementer, up to two for a repair or a review),
+ *  each about one of them. A sub-agent writes as Claude Code's do: a line of its own, a tool call, a `task_progress`
+ *  and, once done, a `task_notification` with its answer and usage, which `subagentList` reads as `subagents.Fold`
+ *  does. While its session runs, the first is still at work. They run inside the session's `wall_ms` (while it runs,
+ *  its task's usual one): together at most four fifths of it. */
+function contentLog(sid: string, hook: string, c: Content, status: string, wall_ms?: number): any[] {
+  const h = fnv(sid);
+  const edits = EDITS.has(hook);
+  const all = c.files.filter((f) => !isLate(f));
+  const stOf = new Map(all.map((f) => [f[0], statusOf(f)]));
+  // Before the implementer runs, a file it adds is not there to read.
+  const early = /^(spec|plan|chain_revision)/.test(hook) && all.some((f) => !statusOf(f));
+  const files = (early ? all.filter((f) => !statusOf(f)) : all).map(([p]) => p);
+  const at = (k: number) => files[(h + k) % files.length];
+  const test = files.find(isTest);
+  const lines: any[] = [];
+  const line = (src: string, text: string, more: Record<string, unknown> = {}) => lines.push({ n: lines.length + 1, t: t((lines.length + 1) / 10), src, text, ...more });
+  const subs = DELEGATES.has(hook) ? Math.min(files.length, (hook === "implementation.main.implement" ? 1 : 0) + (h % 3)) : 0;
+  const wall = wall_ms ?? agentRun(hook).wall_s * 1000;
+  const why = edits ? " before I change it" : "";
+  for (let i = 1; i <= 12; i++) {
+    const f = at(i);
+    const fn = symbolOf(f);
+    const src = (["sys", "stdout", "agent", "tool"] as const)[i % 4];
+    if (src === "sys") line(src, `[kraft] dispatch ${sid.slice(0, 8)} attempt 1 cwd=/Users/dev/.kraft/worktrees/${sid.slice(0, 12)}`);
+    else if (src === "stdout") line(src, test ? `${test}::${symbolOf(test)} PASSED [ ${String(i * 8).padStart(3)}%]` : `${f}: 0 problems`);
+    else if (src === "agent") line(src, isDocsPath(f) ? `Reading ${f} to see what the page says now${why}.` : `Reading ${f} to see what ${fn} does${why}.`);
+    else if (edits) line(src, JSON.stringify({ type: "tool_use", name: "Edit", input: { file_path: f, old_string: `${fn}(value`, new_string: `${fn}(value, limit` } }), { summary: `Edit ${f}` });
+    else line(src, JSON.stringify({ type: "tool_use", name: "Read", input: { file_path: f } }), { summary: `Read ${f}` });
+    const k = i / 4 - 1;
+    if (i % 4 !== 0 || k >= subs) continue;
+    // A sub-agent after each of the first `subs` edits: its own file (code, then pages, then tests, then the rest such as
+    // a manifest), and a question and answer that fit what the change does to that file.
+    const code = (p: string) => /\.(py|tsx?|js)$/.test(p) && !isTest(p);
+    const subjects = [...files.filter(code), ...files.filter(isDocsPath), ...files.filter(isTest), ...files.filter((p) => !code(p) && !isDocsPath(p) && !isTest(p))];
+    const f2 = subjects[(h + k) % subjects.length], fn2 = symbolOf(f2), docs = isDocsPath(f2), st = stOf.get(f2);
+    // Another of the change's files, there before it, of the same sort and as near as can be: what a sub-agent compares with.
+    const pool = files.filter((q) => q !== f2 && !stOf.get(q) && !isTest(q) && isDocsPath(q) === docs);
+    const sib = pool.find((q) => q.startsWith(f2.replace(/[^/]+$/, ""))) ?? pool[0];
+    // The code a test covers: the change's file its name names.
+    const tested = isTest(f2) ? files.find((q) => code(q) && f2.split("/").pop()!.replace(/^test_/, "").replace(/\.test(?=\.)/, "") === q.split("/").pop()) : undefined;
+    const n = 2 + ((h >>> k) % 3);
+    const link = docs ? "links to" : "imports";
+    const [label, answer] =
+      st === "new" ? (sib ? [`Check how ${sib} is ${docs ? "laid out" : "used"} before adding ${f2}`, `Found it in ${sib}: ${f2} can follow it; nothing ${link} ${f2} yet.`]
+        : [`Find where ${f2} would be ${docs ? "linked from" : "imported"}`, `Found it: nothing ${link} ${f2} yet; ${n} places will.`])
+      : st === "deleted" ? [`Find what still ${docs ? "links to" : "uses"} ${f2} before it goes`, `Found it: nothing outside this change still ${docs ? "links to" : "uses"} ${f2}.`]
+      : isTest(f2) ? [`Check what ${f2} needs to cover${tested ? ` in ${tested}` : ""}`, `Found it in ${f2}: it needs a case for each of the ${n} paths ${tested ? `${symbolOf(tested)} takes` : "this change adds"}.`]
+      : docs ? [`Find the pages that link to ${f2}`, `Found them: ${n} pages link to ${f2}, none by an anchor this change moves.`]
+      : !code(f2) ? (sib ? [`Check what in ${sib} reads ${f2}`, `Found it in ${sib}: it reads ${f2} in ${n} places, and none reads a line this change moves.`]
+        : [`Find what reads ${f2}`, `Found it: ${n} files read ${f2}, and none reads a line this change moves.`])
+      : [[`Find who calls ${fn2} in ${f2}`, `Found it in ${f2}: ${fn2} has ${n} callers, all inside this change.`], [`Check what ${f2} must keep`, `Found it in ${f2}: ${fn2} keeps its signature for its callers; only its body changes.`], [`Find the tests that cover ${f2}`, `Found it in ${test ?? f2}: it covers ${fn2} only on the happy path.`]][k];
+    const type = k === 1 ? "general-purpose" : "Explore";
+    const id = `a${((h ^ Math.imul(k + 1, 0x9e3779b1)) >>> 0).toString(16).padStart(8, "0")}`;
+    const tag = { agent: id, agent_label: label, agent_type: type };
+    const usage = { total_tokens: 9_000 + ((h >>> (k * 5)) % 37) * 1_100, tool_uses: 3 + ((h >>> (k * 3 + 1)) % 9), duration_ms: Math.round(wall * (0.8 / subs) * (0.75 + ((h >>> (k * 4 + 2)) % 5) * 0.05)) };
+    const tool = k === 1 ? "Read" : "Grep";
+    // A search looks for its subject elsewhere, in another of the item's files where it has one; a test's, for what the
+    // code it covers defines.
+    const where = tool === "Read" ? f2 : tested ?? sib ?? files.find((q) => q !== f2) ?? f2;
+    const pattern = docs ? f2.split("/").pop() : tested ? (tested.endsWith(".py") ? "^def " : "^export ") : fn2;
+    const look = `Looking for ${docs ? "links to it" : tested ? `what ${tested} defines` : fn2} in ${where}.`;
+    line("agent", look, { ...tag, summary: `↳ ${label}: ${look}` });
+    line("tool", JSON.stringify({ type: "tool_use", name: tool, input: tool === "Read" ? { file_path: f2 } : { pattern, path: where } }), { ...tag, summary: `↳ ${label}: ${tool} ${where}` });
+    line("sys", JSON.stringify({ type: "system", subtype: "task_progress", task_id: id, subagent_type: type, description: label, last_tool_name: tool, usage }), { ...tag, summary: `↳ ${label}: ${tool} · ${Math.round(usage.total_tokens / 1000)}k tokens · ${usage.tool_uses} tool uses` });
+    if (status === "running" && k === 0) continue;
+    line("sys", JSON.stringify({ type: "system", subtype: "task_notification", task_id: id, status: "completed", summary: answer, usage }), { ...tag, agent_status: "completed", summary: `↳ ${label}: completed: ${answer} · ${Math.round(usage.duration_ms / 1000)}s` });
+  }
+  return lines;
+}
+
+/** An agent session's log. `own`: the item's content and the session's task and status, for a log about the item's own
+ *  files (`contentLog`); with no content, the shared sample's. */
+export function logLines(sessionId: string, n: number, long: boolean, own?: { content?: Content; hook: string; status: string; wall_ms?: number }): any[] {
+  if (own?.content) return contentLog(sessionId, own.hook, own.content, own.status, own.wall_ms);
   const out: any[] = [];
   const srcs = ["sys", "stdout", "agent", "tool"] as const;
   for (let i = 1; i <= n; i++) {
@@ -207,18 +301,41 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
   return out;
 }
 
+/** The log of a task that is no agent's: the command it ran, then what that printed so far, as stdout. Nothing in it is a
+ *  tool call or a sub-agent's line, so no sub-agent is listed for it (`subagentList`). `run` is what ran (`taskRun`), or
+ *  none, and then the log says `label` and its status. */
+export function commandLog(run: Run | string | null, status: string, label?: string, mr = mrOf("/Users/dev/code/kraft-plugins", 142).url): any[] {
+  return runOutput(run, status, mr, label).map((text, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text }));
+}
+
+/** A session's log by what ran it: an agent's lines, or a command's output. */
+export const sessionLog = (agent: boolean, run: Run | string | null, sid: string, n: number, long: boolean, status = "done", label?: string, mr?: string) =>
+  agent ? logLines(sid, n, long) : commandLog(run, status, label, mr);
+
 /** The sub-agents `lines` name, as the server's `/subagents` route lists them: the first runs while its session does. */
 export function subagentList(lines: any[], status: string): any[] {
   const seen = new Map<string, any>();
   for (const l of lines) {
-    if (!l.agent || seen.has(l.agent)) continue;
-    const n = seen.size;
-    const running = status === "running" && n === 0;
-    seen.set(l.agent, {
-      id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
-      started_at: "2026-11-02T23:38:52.555Z", ended_at: running ? null : "2026-11-02T23:39:34.269Z", tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
-      last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
-    });
+    if (!l.agent) continue;
+    const running = status === "running" && (seen.size === 0 || seen.keys().next().value === l.agent);
+    if (!seen.has(l.agent)) {
+      const n = seen.size;
+      seen.set(l.agent, {
+        id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
+        started_at: ago(71), ended_at: running ? null : ago(70.3), tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
+        last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
+      });
+    }
+    // A sub-agent's `task_progress` or `task_notification` line (`contentLog`'s; the sample's have none): its last tool,
+    // its usage and, once it has finished, its answer.
+    if (l.src !== "sys") continue;
+    const e = seen.get(l.agent);
+    const o = JSON.parse(l.text);
+    Object.assign(e, { tokens: o.usage.total_tokens, tool_uses: o.usage.tool_uses, duration_ms: o.usage.duration_ms, last_tool: o.last_tool_name ?? e.last_tool });
+    // One with no notification in an ended session's log was cut off (`Fold.entries`): a pause stopped it.
+    if (!running) Object.assign(e, o.subtype === "task_notification"
+      ? { status: "completed", summary: o.summary, ended_at: new Date(Date.parse(e.started_at) + e.duration_ms).toISOString() }
+      : { status: "cut_off", summary: null, ended_at: null });
   }
   return [...seen.values()];
 }
@@ -255,20 +372,23 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
   };
   const sess = (node: string, status: string, over: Record<string, unknown> = {}, hook = HOOK[node] ?? "on.task") => {
     const sid = hex(seed * 100 + sessions.length + 1);
+    // The older samples carry no frozen chain: a test, merge request or CI hook is a command's, the rest an agent's.
+    const model = hook.includes("test") || hook.includes("mr") || hook.includes("ci") ? null : "claude-opus-4-1";
+    const used = model !== null && status !== "pending";
     const s = {
       id: sid, work_item_id: id, node_id: node, hook_point: hook, status, attempt: 1, round: 0,
       created_at: t(m), started_at: t(m + 0.2), exited_at: status === "running" || status === "pending" ? null : t(m + 6),
-      tokens_in: status === "pending" ? null : 48_210 + sessions.length * 7_311,
-      tokens_out: status === "pending" ? null : 6_120 + sessions.length * 911,
-      cost_usd: status === "pending" ? null : 0.41 + sessions.length * 0.17,
+      tokens_in: used ? 48_210 + sessions.length * 7_311 : null,
+      tokens_out: used ? 6_120 + sessions.length * 911 : null,
+      cost_usd: used ? 0.41 + sessions.length * 0.17 : null,
       wall_ms: status === "running" || status === "pending" ? null : 6 * 60_000 + sessions.length * 13_000,
-      model: hook.includes("test") || hook.includes("mr") || hook.includes("ci") ? null : "claude-opus-4-1",
+      model,
       head_sha: hex(seed + 500 + sessions.length).slice(0, 40),
-      session_summary_ref: status === "done" || status === "done_with_concerns" ? `.engineering/sessions/${sid}.md` : null,
+      session_summary_ref: model !== null && (status === "done" || status === "done_with_concerns") ? `items/${id}/sessions/${sid}/out/summary.md` : null,
       ...over,
     };
     sessions.push(s);
-    logs[sid] = logLines(sid, long ? 600 : 40, long);
+    logs[sid] = sessionLog(model !== null, null, sid, long ? 600 : 40, long, status, hook.split(".").at(-1)!);
     return s;
   };
 
@@ -293,7 +413,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
         { severity: "important", message: "Unused import `Optional` in kraft/executor/fix_loop.py", file: "kraft/executor/fix_loop.py", line: 4, source_plugin: "ruff" },
         { severity: "minor", message: "Line too long (131 > 120)", file: "kraft/executor/fix_loop.py", line: 88, source_plugin: "ruff" },
         { severity: "critical", message: "test_fix_loop_carries_findings fails: AssertionError", file: "tests/test_fix_loop.py", line: 212, source_plugin: "pytest" },
-      ], noop_hooks: ["on.security.scan"] }, 2);
+      ] }, 2);
       ev("fix_cycle_started", { node_id: n.id, cycle: 1, failed_tasks: ["on.test.run"] }, 0.5);
       const f = sess("implement", "done", { round: 1 });
       ev("worker_session_created", { session_id: f.id, hook_point: f.hook_point, node_id: "implement" }, 0.1);
@@ -509,7 +629,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
       ev("work_item_completed", {}, 1);
       item.status = "completed";
       item.mr_ref = { number: 1837, url: "https://gitlab.example.com/acme/kraft/-/merge_requests/1837" };
-      if (state === "archived") { item.archived_at = t(m + 60); item.archived_by = seed % 2 ? "you" : "auto"; }
+      if (state === "archived") { item.archived_at = t(Math.min(m + 60, 128)); item.archived_by = seed % 2 ? "you" : "auto"; }
       item.display_status = state === "archived" ? "archived" : "done";
       break;
     }
@@ -548,7 +668,9 @@ const FILES_LONG = [
   `frontend/e2e-shots/${hex(3)}.png`,
 ];
 
-export function diffFor(id: string, variant: Variant) {
+/** `b`: the item's bundle; one with content (ngContent.ts) answers its own files, in the default sample only. */
+export function diffFor(id: string, variant: Variant, b?: ItemBundle) {
+  if (b?.content && variant === "default") return contentDiff(b);
   const files = (variant === "long" ? FILES_LONG : FILES_DEFAULT).map((path, i) => ({ path, insertions: 3 + (i * 7) % 90, deletions: (i * 3) % 40 }));
   const hunk = (p: string) => `diff --git a/${p} b/${p}
 index 3f2a1b0..9c8d7e6 100644
@@ -591,14 +713,18 @@ export function fixTargetFor(gate: string | null, node?: string) {
 
 // The shape of GET /work-items/:id/compare. One whitespace-only file rides along
 // so ignore_whitespace has something to drop, as git -w does for the real route.
-export function compareFor(id: string, variant: Variant, ignoreWhitespace = false, viewed: ReadonlySet<string> = new Set()) {
-  const d = diffFor(id, variant);
-  const files = d.files.map((f, i) => ({ ...f, touched_by: i % 2 ? ["verify"] : ["implementation"] }));
-  if (!ignoreWhitespace) files.push({ path: "src/reindent.py", insertions: 4, deletions: 4, touched_by: ["implementation"] });
+export function compareFor(id: string, variant: Variant, ignoreWhitespace = false, viewed: ReadonlySet<string> = new Set(), b?: ItemBundle) {
+  const d = diffFor(id, variant, b);
+  // An item with content compares base to latest over all it committed, each file touched by the node that changed it,
+  // and has no whitespace-only file.
+  const own = b?.content && variant === "default" ? changedFiles(b) : null;
+  const files = own ? own.map((f) => ({ path: f[0], insertions: f[1], deletions: f[2], touched_by: [isLate(f) ? "verification" : "implementation"] }))
+    : d.files.map((f, i) => ({ ...f, touched_by: i % 2 ? ["verify"] : ["implementation"] }));
+  if (!own && !ignoreWhitespace) files.push({ path: "src/reindent.py", insertions: 4, deletions: 4, touched_by: ["implementation"] });
   for (const f of files) (f as any).viewed = viewed.has(`${id}|${f.path}`);
   return {
     from: { target: "base", sha: "a1b2c3d" }, to: { target: "latest", sha: null }, rebased: false,
-    files, groups: [], diff: d.diff, untracked: d.untracked, truncated: d.truncated,
+    files, groups: [], diff: own ? d.landed.diff : d.diff, untracked: d.untracked, truncated: d.truncated,
     ignore_whitespace: ignoreWhitespace, diff_max_bytes: 1_000_000,
   };
 }
@@ -613,21 +739,22 @@ export function documentsFor(item: any, variant: Variant) {
     { kind: "specs", node: "spec", hook: "on.spec.requested", path: `${wt}/2026-09-12-${slug}-design.md`, title: item.title, attached: "spec" },
     { kind: "plans", node: "plan", hook: "on.plan.requested", path: `${wt}/2026-09-12-${slug}.md`, title: `Plan: ${item.title}`, attached: "plan" },
     { kind: "reviews", node: "review", hook: "on.review.requested", path: `.engineering/reviews/2026-09-13-${slug}.md`, title: `Review: ${item.title}` },
-    { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(901)}.md`, title: `Session ${hex(901)}` },
-    { kind: "sessions", node: "verify", hook: "on.test.run", path: `.engineering/sessions/${hex(902)}.md`, title: hex(902) },
+    { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `items/${item.id}/sessions/${hex(901)}/out/summary.md`, title: `Session ${hex(901)}` },
+    { kind: "sessions", node: "verify", hook: "on.test.run", path: `items/${item.id}/sessions/${hex(902)}/out/summary.md`, title: hex(902) },
   ];
   // W11 · H: summaries from hooks that write no `# ` title, so the indexer titles them with an id.
   // Ahead of the generated sessions, so they are among the results search returns.
   if (long) docs.push(
-    { kind: "sessions", node: "review", hook: "on.review.local.run", path: `.engineering/sessions/${hex(990)}.md`, title: hex(990), headingless: true },
-    { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `.engineering/sessions/${hex(991)}.md`, title: hex(991), headingless: true },
+    { kind: "sessions", node: "review", hook: "on.review.local.run", path: `items/${item.id}/sessions/${hex(990)}/out/summary.md`, title: hex(990), headingless: true },
+    { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `items/${item.id}/sessions/${hex(991)}/out/summary.md`, title: hex(991), headingless: true },
   );
-  if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(910 + i)}.md`, title: `Session ${hex(910 + i)}` });
+  if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `items/${item.id}/sessions/${hex(910 + i)}/out/summary.md`, title: `Session ${hex(910 + i)}` });
   // W13 A: run info joined from the session. Artifacts and attachments have none;
   // summaries are attempt 1, and the long variant's implement sessions span rounds 0–2.
   let implementRun = 0;
   return docs.map((d, i) => ({
-    document_id: hex(700 + i), work_item_id: item.id,
+    // The item's own id prefix: no two items' documents share an id.
+    document_id: `${item.id.slice(0, 24)}${(700 + i).toString(16).padStart(8, "0")}`, work_item_id: item.id,
     repo: item.repo, title: d.title, kind: d.kind, source_kind: d.kind === "sessions" ? "session_summary" : "artifact",
     path: d.path, node_id: d.node, hook_point: d.hook,
     worker_session_id: d.kind === "sessions" ? hex(item.id.length + i) : null,
@@ -636,7 +763,7 @@ export function documentsFor(item: any, variant: Variant) {
     session_status: d.kind === "sessions" ? "done" : null,
     attachment_kind: d.attached ?? null, session_work_item_id: d.kind === "sessions" ? item.id : null,
     headingless: d.headingless ?? false,
-    indexed_at: t(200 - i * 7),
+    indexed_at: ago(10 + i * 7),
   }));
 }
 
@@ -646,10 +773,21 @@ const headinglessLead = (hook: string) =>
     ? "Opened the merge request description from the plan and the three task commits."
     : "Reviewed the invalidation path against main; the blob_sha check holds across a rebase but not a force-push.";
 
-export function documentDetail(id: string, docs: any[]) {
+/** A document's link rows (`_links_for`), ordered by item, none first: an item's row, and a summary's session row
+ *  before it (`ingest_session_summary`). An approved gate document's are its item's only (`ingest_gate_artifact`). */
+export const linksOf = (d: any) => {
+  const item = { work_item_id: d.work_item_id, node_id: null, hook_point: null, worker_session_id: null, session_work_item_id: null };
+  return d.source_kind === "session_summary"
+    ? [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, session_work_item_id: d.session_work_item_id ?? d.work_item_id }, item]
+    : [item];
+};
+
+/** `own`: the document's text where its item has one (ngContent.ts `docBody`); else the sample text below. `made`: the
+ *  node and task a gate document's front matter names (ngContent.ts `producedBy`); the list's row names none. */
+export function documentDetail(id: string, docs: any[], own?: string, made?: { node_id: string | null; hook_point: string | null }) {
   const d = docs.find((x) => x.document_id === id) ?? docs[0];
   // W12.2: no "Status · repo · path" lead line -- the pane header already says it.
-  const body = `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
+  const body = own ?? `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
 
 ## Summary
 
@@ -671,17 +809,27 @@ def combine(plan, reports, commits):
 
 ${"Paragraph of prose. ".repeat(60)}
 `;
+  const summary = d.source_kind === "session_summary";
+  // Kraft's own files (`items/<id>/…`: a session's summary, an approved gate's document) are ingested from events, not
+  // scanned from git: no source times, and `path` is no file of the repo's checkout (`get_document`'s `origin`).
+  const ingested = String(d.path).startsWith("items/");
   return {
     id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
-    // The document's front matter, as an agent writes it (work_item_ids, node_id, hook_point, worker_session_id).
-    content: body, metadata: { work_item_ids: [d.work_item_id], node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, author: "claude-opus-4-1", words: 1240 },
-    source_created_at: t(10), source_updated_at: t(90), indexed_at: d.indexed_at,
-    origin: d.source_kind === "artifact" ? "git_scan" : "event_ingest",
-    links: [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, session_work_item_id: null }],
+    // The document's front matter less its title and kind, as the agent was told to write it (`adapters/agent.py`): a
+    // summary's names its session too.
+    content: body, metadata: { work_item_ids: [d.work_item_id], node_id: made?.node_id ?? d.node_id, hook_point: made?.hook_point ?? d.hook_point, ...(summary && { worker_session_id: d.worker_session_id }) },
+    source_created_at: ingested ? null : t(10), source_updated_at: ingested ? null : t(90), indexed_at: d.indexed_at,
+    origin: ingested || summary ? "event_ingest" : "git_scan",
+    links: linksOf(d),
   };
 }
 
-export function artifactFor(item: any, variant: Variant) {
+/** `b`: the item's bundle; one with content answers its gate document's own text, by its kind (`items/<id>/docs/<kind>.md`). */
+export function artifactFor(item: any, variant: Variant, b?: ItemBundle) {
+  const kind = b?.content && /\/docs\/([^/]+)\.md$/.exec(item.gate_artifact ?? "")?.[1];
+  if (kind) {
+    return { work_item_id: item.id, path: item.gate_artifact, title: gateTitle(b!, kind), content: docBody(b!, { kind: `${kind}s` }), truncated: false, artifact_max_bytes: 65536, absolute_path: `/Users/dev/.kraft/run/${item.gate_artifact}` };
+  }
   return {
     work_item_id: item.id, path: item.gate_artifact ?? ".engineering/reviews/2026-09-13-caching-layer.md",
     title: `Review: ${item.title}`,
@@ -691,27 +839,98 @@ export function artifactFor(item: any, variant: Variant) {
   };
 }
 
+/** A round's window `(after, upto]` (`store/gates.py` `_windows`): `after` is the previous round's `ended_at`, `upto` its
+ *  own (null while pending). */
+export type RoundWindow = [after: string | null, upto: string | null];
+export const roundWindows = (list: GateRound[]): RoundWindow[] => list.map((r, i): RoundWindow => [i ? list[i - 1].ended_at : null, r.ended_at]);
+/** Whether `at` is in the window: lower bound exclusive, upper inclusive (`store/gates.py` `_in_window`). ISO strings compare as text. */
+export const within = ([after, upto]: RoundWindow, at: string): boolean => (after === null || at > after) && (upto === null || at <= upto);
+
+/** `store.gate_rounds`, ported for the event types the mock writes: a round opens at a `gate_requested` (a repeat while
+ *  one is open is the same round), and ends at the gate's approval, rejection or skip (`payload.gate`; a skip with no
+ *  gate is none, unless its node is a gate with rounds), or at the item's end. An ending with no open round is a round of its own.
+ *  Each round's `review` and `threads` ports the window rule of `store/gates.py` `_windows`, from `reviews` and `threads`:
+ *  the one thread list the threads endpoint serves, drafts left out. After a transition (`settle`) the counts come from the
+ *  bundle's own threads, without the seeded review set `ngThreads` adds, as the demo has no other thread write that moves a window. */
+export function gateRoundsOf(events: Ev[], threads: any[] = [], reviews: any[] = []): Record<string, GateRound[]> {
+  const rounds: Record<string, GateRound[]> = {};
+  const open: Record<string, GateRound> = {};
+  const round = (gate: string, at: string | null): GateRound => {
+    const list = (rounds[gate] ??= []);
+    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] };
+    list.push(r);
+    return r;
+  };
+  const end = (gate: string, at: string, outcome: GateRound["outcome"], rest: Partial<GateRound> = {}): GateRound => {
+    const r = open[gate] ?? round(gate, null);
+    delete open[gate];
+    return Object.assign(r, { ended_at: at, outcome }, rest);
+  };
+  for (const e of events) {
+    const p = e.payload as Record<string, any>;
+    // A skip after the reject cap names no gate, only the node: it is the gate's when that already has rounds.
+    const gate: string | undefined = p.gate ?? (e.type === "node_skipped" && rounds[p.node_id] ? p.node_id : undefined);
+    if (e.type === "gate_requested" && gate) {
+      if (!open[gate]) open[gate] = round(gate, e.created_at);
+    } else if ((e.type === "gate_approved" || e.type === "gate_rejected") && gate) {
+      const rejected = e.type === "gate_rejected";
+      const r = end(gate, e.created_at, rejected ? (p.verdict === "fixed" ? "fixed" : "rejected") : "approved", {
+        by: p.by ?? null, note: rejected ? p.note ?? null : null, sent_to: rejected ? p.node ?? null : null, verdict: rejected ? p.verdict ?? null : null,
+      });
+      if (p.by === "agent") r.reviewer = { kind: rejected ? "reject" : "approve", note: String(p.note ?? p.reason ?? p.summary ?? "").trim() };
+    } else if (e.type === "node_skipped" && gate) {
+      end(gate, e.created_at, "skipped", { note: p.note ?? null });
+    } else if (e.type === "work_item_completed" || e.type === "work_item_abandoned") {
+      for (const g of Object.keys(open)) end(g, e.created_at, "closed");
+    } else if (e.type === "gate_reopened" && gate && !open[gate] && rounds[gate]) {
+      rounds[gate][rounds[gate].length - 1].reopened = true;
+    } else if (e.type === "gate_auto_review_skipped" && gate && open[gate] && (p.reason === "passed" || p.reason === "undecided")) {
+      open[gate].reviewer = { kind: p.reason === "passed" ? "ready" : "undecided", note: String(p.note ?? "").trim() };
+    } else if (e.type === "work_item_needs_human" && p.kind === "cap" && typeof p.node_id === "string") {
+      const newest = rounds[p.node_id]?.[rounds[p.node_id].length - 1];
+      if (newest?.outcome === "rejected") newest.sent_to = null;
+    }
+  }
+  for (const [gate, list] of Object.entries(rounds)) {
+    roundWindows(list).forEach((w, i) => {
+      const made = reviews.filter((r) => r.gate === gate && within(w, r.submitted_at));
+      const newest = made.sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1)).at(-1);
+      if (newest) list[i].review = { id: newest.id, outcome: newest.outcome, summary: newest.summary ?? "", head_sha: newest.head_sha ?? null };
+      const mine = threads.filter((t) => t.gate === gate && !t.draft && within(w, t.created_at));
+      const by_label = { must_fix: 0, question: 0, nit: 0 };
+      for (const t of mine) if (t.label in by_label) by_label[t.label as keyof typeof by_label]++;
+      list[i].threads = { total: mine.length, open: mine.filter((t) => t.state !== "resolved").length, by_label };
+      list[i].first_threads = [...mine].sort((a, b) => Number(a.label !== "must_fix") - Number(b.label !== "must_fix")).slice(0, 3).map((t) => ({
+        id: t.id, file_path: t.file_path ?? null, start_line: t.start_line ?? null, end_line: t.end_line ?? null, label: t.label ?? null, state: t.state, body: String(t.comments[0]?.body ?? "").split("\n")[0],
+      }));
+    });
+  }
+  return rounds;
+}
+
 /** Fills in, on an item and its sessions, the keys the server's detail always sends (`board.get_work_item`) that a
  *  sample leaves out, at what the server sends an item without that fact, so the mock answers every key
  *  `tests/api/api_shapes.json` lists (`frontend/demo/apiShapes.test.ts`). A key a sample sets is kept. */
 export function serverKeys(b: ItemBundle): ItemBundle {
   const it = b.item;
   const fill = (o: any, d: Record<string, unknown>) => { for (const [k, v] of Object.entries(d)) if (!(k in o)) o[k] = v; };
-  const ran = b.sessions.reduce((n, s) => n + (s.wall_ms ?? 0), 0);
   fill(it, {
     archived_at: null, archived_by: null, fallback: null, base_ref: null, bead_cwd: null, branch: `kraft/${it.id}`, budget_set: 0, budget_usd: null,
     ci_pipeline_ref: null, current_step: 0, dependencies: [], depends_on: null, ended_at: null, ended_reason: null, escalation_session_id: null, implements_beads: null,
-    judge_stop_note: [], needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
+    judge_stop_note: [], measurement: null, needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
     queued: null, queued_request: null, reject_default: null, retry_at: null, root_merge_policy: null, run_chain: null,
-    running_time: { running_s: Math.round(ran / 1000), cap_minutes: null }, scope_runs: [], skipped_paths: [], started_at: b.sessions.map((s) => s.started_at).filter(Boolean).sort()[0] ?? null, step: null, stop_kind: null, stop_reason: null,
+    running_time: { running_s: runningS(it.materialized_chain, b.sessions), cap_minutes: null }, scope_runs: scopeRunsOf(it.materialized_chain, b.sessions), skipped_paths: [], started_at: b.sessions.map((s) => s.started_at).filter(Boolean).sort()[0] ?? null, step: null, stop_kind: null, stop_reason: null,
     submodules: null, suggested_action: null, test_result: null, worktree_exists: true, in_place: false,
     children: null, slices: null, parent_id: null, slice_key: null, slice_generation: null, docs_commit: null, pinned_head: null,
     group: null, group_state: null, paused_by_parent: 0,
+    takeover_pid: null, takeover_pid_start: null, takeover_session_id: null, takeover_resumed_from: null, takeover_branch: null, takeover_tip: null, takeover_started_at: null,
   });
+  // Not through `fill`: a transition's new event has to show, and `settle` sets it again after each transition.
+  it.gate_rounds = gateRoundsOf(b.events, b.threads ?? [], b.reviews ?? []);
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {
-    harness: "claude", command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
+    harness: isAgentSession(it.materialized_chain, s.hook_point, !!s.model) ? "claude" : null, command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, cli_session_id: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
     tokens_cache_read: 0, tokens_cache_write: 0, log_path: `${run}/${s.id}/session.log`, result_path: `${run}/${s.id}/out/result.json`,
   });
   return b;
@@ -766,19 +985,19 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
     intake: {
       enabled: variant !== "empty", interval_s: 300, priority_ceiling: 2, schedules: [],
       repos: repos.slice(0, 2).map((r) => r.path),
-      repo_pickups: Object.fromEntries(repos.map((r, i) => [r.path, { items: i === 0 ? 14 : i === 1 ? 0 : null, last_picked_up: i === 0 ? t(400) : null }])),
+      repo_pickups: Object.fromEntries(repos.map((r, i) => [r.path, { items: i === 0 ? 14 : i === 1 ? 0 : null, last_picked_up: i === 0 ? ago(30) : null }])),
       recent_pickups: variant === "empty" ? [] : Array.from({ length: long ? 25 : 5 }, (_, i) => ({
         work_item_id: hex(2000 + i), bead_id: `kraft-${hex(3000 + i).slice(0, 4)}`,
         title: i % 2 ? LONG_TITLES.capped : TITLES.capped, repo: repos[i % repos.length]?.path ?? null,
-        priority: i % 3, status: ["created", "created", "skipped: no test_command", "created", "failed: bd unreachable"][i % 5], at: t(400 - i * 30),
+        priority: i % 3, status: ["created", "created", "skipped: no test_command", "created", "failed: bd unreachable"][i % 5], at: ago(30 + i * 30),
       })),
     },
     access: { bind: variant === "empty" ? "127.0.0.1" : "0.0.0.0", port: 8765, session_expiry_days: 7, password_set: variant !== "empty", auth_required: variant !== "empty", allowed_hosts: long ? ["kraft.local", "10.0.0.12", "a-very-long-hostname.internal.acme-corporation.example.com"] : ["kraft.local"], lan_hosts: [] as string[] },
-    notify: { enabled: variant !== "empty", url_set: variant !== "empty", base_url: long ? "https://kraft.internal.acme-corporation.example.com:8765" : "http://kraft.local:8765", events: ["gate_requested", "work_item_needs_human", "work_item_completed"], last_test: variant === "empty" ? null : { at: t(500), status: long ? null : 200, ms: long ? null : 412, error: long ? "connect ETIMEDOUT 10.0.0.12:443 after 30000ms — the webhook host did not answer" : null } },
+    notify: { enabled: variant !== "empty", url_set: variant !== "empty", base_url: long ? "https://kraft.internal.acme-corporation.example.com:8765" : "http://kraft.local:8765", events: ["gate_requested", "work_item_needs_human", "work_item_completed"], last_test: variant === "empty" ? null : { at: ago(20), status: long ? null : 200, ms: long ? null : 412, error: long ? "connect ETIMEDOUT 10.0.0.12:443 after 30000ms — the webhook host did not answer" : null } },
     sessions: { sessions: empty ? [] : [
-      { id: hex(5000), label: "Chrome on macOS", ip: "127.0.0.1", created_at: t(0), last_seen_at: t(600), expires_at: t(7 * 1440), current: true },
+      { id: hex(5000), label: "Chrome on macOS", ip: "127.0.0.1", created_at: t(0), last_seen_at: ago(10), expires_at: t(7 * 1440), current: true },
       { id: hex(5001), label: long ? "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1" : "Safari on iPhone", ip: "10.0.0.44", created_at: t(-3000), last_seen_at: t(100), expires_at: t(4000), current: false },
-      ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: t(i * 20), expires_at: t(5000), current: false })) : []),
+      ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: ago(5 + i * 20), expires_at: t(5000), current: false })) : []),
     ] },
     health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", kraft_default: { signature: null, count: 0 }, run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
       index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[], repos_scanned: repos.length, embeddings: { available: true, model: "BAAI/bge-small-en-v1.5", chunks: 1830, reason: null, state: "ready" } },
@@ -790,9 +1009,9 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
 /** `GET /workers`: this machine's own worker first, then a busy ssh machine, a dial-in one that dropped, and a disabled one. */
 export const WORKERS_FIXTURE = [
   { name: "local", mode: "local", online: true, reason: null, slots_used: 1, capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: null, kraft_version: "2.5.0", give_up_after: "never", holders: [], remove_blocked: "the local worker is part of this Kraft and cannot be removed; disable it instead" },
-  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, configured_capacity: 2, enabled: true, ssh: "gpu-box.lan", groups: ["gpu", "linux"], repos: ["kraft"], last_seen: "2026-10-23T09:58:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [{ id: "a1b2c3d4", title: "Add the export button", steps: 1 }], remove_blocked: "gpu-box is running 1 step of Add the export button. Disable it so nothing new starts (Takes new steps off in Settings › Workers, or kraft admin worker disable gpu-box), then remove it once they end. A step held by a machine that is offline is freed by pausing or cancelling its item." },
-  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: "2026-10-23T08:12:00+00:00", kraft_version: "2.4.0", give_up_after: "never", holders: [], remove_blocked: null },
-  { name: "build-box", mode: "ssh", online: true, reason: "", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: false, ssh: "build-box.lan", groups: ["linux"], repos: null, last_seen: "2026-10-23T09:40:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [], remove_blocked: null },
+  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, configured_capacity: 2, enabled: true, ssh: "gpu-box.lan", groups: ["gpu", "linux"], repos: ["kraft"], last_seen: agoPy(12), kraft_version: "2.4.0", give_up_after: "2h", holders: [{ id: "a1b2c3d4", title: "Add the export button", steps: 1 }], remove_blocked: "gpu-box is running 1 step of Add the export button. Disable it so nothing new starts (Takes new steps off in Settings › Workers, or kraft admin worker disable gpu-box), then remove it once they end. A step held by a machine that is offline is freed by pausing or cancelling its item." },
+  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: agoPy(118), kraft_version: "2.4.0", give_up_after: "never", holders: [], remove_blocked: null },
+  { name: "build-box", mode: "ssh", online: true, reason: "", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: false, ssh: "build-box.lan", groups: ["linux"], repos: null, last_seen: agoPy(30), kraft_version: "2.4.0", give_up_after: "2h", holders: [], remove_blocked: null },
 ];
 
 function analyticsFor(variant: Variant) {
@@ -815,16 +1034,53 @@ function analyticsFor(variant: Variant) {
   };
 }
 
-export function searchFor(q: string, docs: any[], variant: Variant) {
-  const long = variant === "long";
+/** FTS5's tokens (`unicode61`): each run of letters and digits, case folded. */
+const TOKEN = /[\p{L}\p{N}]+/gu;
+const tokens = (s: string): string[] => String(s).toLowerCase().match(TOKEN) ?? [];
+
+/** The filters GET /search takes beside `q` (`api/routes/search.py`). */
+export type SearchFilters = { source_kind?: string | null; kind?: string | null; repo?: string | null; limit?: number };
+
+/** `snippet(documents_fts, 1, '[', ']', '…', 64)`: up to 64 tokens of the text, from a little before its first match,
+ *  each matched token in brackets, an ellipsis where it was cut. */
+function snippet(text: string, terms: string[]): string {
+  const at = [...text.matchAll(TOKEN)];
+  const first = Math.max(0, at.findIndex((m) => terms.includes(m[0].toLowerCase())));
+  const from = Math.max(0, Math.min(first - 8, at.length - 64));
+  const to = Math.min(at.length, from + 64);
+  if (!at.length) return "";
+  let out = from > 0 ? "…" : "";
+  let pos = at[from].index!;
+  for (let k = from; k < to; k++) {
+    const m = at[k];
+    out += text.slice(pos, m.index) + (terms.includes(m[0].toLowerCase()) ? `[${m[0]}]` : m[0]);
+    pos = m.index! + m[0].length;
+  }
+  return out + (to < at.length ? "…" : "");
+}
+
+/** GET /search over `docs`, each read by `body`, as the index's text search answers it (`index/service.py` `_fts`): the
+ *  filters narrow the documents; one matches when its title and text together hold every word of the query, whole
+ *  words, case aside (FTS5's implicit AND; its path is not indexed). It ranks by the whole query in its title, then by
+ *  the words its title holds, then a document before a session's summary; `limit` of them, 20 by default. */
+export function searchFor(q: string, docs: any[], variant: Variant, body: (d: any) => string = () => "", f: SearchFilters = {}) {
+  const terms = [...new Set(tokens(q))];
+  const query = terms.join(" ");
+  // `search.py` clamps what it is asked to 1..100: a limit of 0 answers one.
+  const limit = Math.max(1, Math.min(f.limit ?? 20, 100));
+  const ranked = docs.filter((d) => (!f.source_kind || d.source_kind === f.source_kind) && (!f.kind || d.kind === f.kind) && (!f.repo || d.repo === f.repo)).map((d) => {
+    const title = tokens(d.title);
+    const all = new Set([...title, ...tokens(body(d))]);
+    return { d, all, score: [Number(` ${title.join(" ")} `.includes(` ${query} `)), terms.filter((w) => title.includes(w)).length, Number(d.source_kind === "artifact")] };
+  }).filter((r) => terms.length > 0 && terms.every((w) => r.all.has(w))).sort((a, b) => b.score[0] - a.score[0] || b.score[1] - a.score[1] || b.score[2] - a.score[2]);
   return {
     query: q, mode: "hybrid",
-    results: variant === "empty" ? [] : docs.slice(0, long ? 15 : 6).map((d, i) => ({
+    results: variant === "empty" ? [] : ranked.map((r) => r.d).slice(0, limit).map((d, i) => ({
       id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
-      snippet: long ? `…${LONG_DESCRIPTION.slice(40, 380)}…` : "…carry findings_measured from the verify node into the fix loop's system prompt…",
+      snippet: snippet(body(d), terms),
       score: 0.91 - i * 0.05,
       // The item the document belongs to, so opening a result lands on a real page (Kraft-hrlqs).
-      links: [{ work_item_id: d.work_item_id, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id }],
+      links: linksOf(d),
     })),
   };
 }
@@ -876,7 +1132,7 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
     ng[sc] = b.item.id; bundles[b.item.id] = b; docs[b.item.id] = [];
   });
   const board = buildNgBoard(variant, bundles);
-  for (const id of [...board.list, ...board.archived]) docs[id] = [];
+  for (const id of [...board.list, ...board.archived]) docs[id] = itemDocs(bundles[id]);
   for (const b of Object.values(bundles)) serverKeys(b);
   return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }
@@ -891,68 +1147,50 @@ const ngBundle = (sc: string, S: Scenario) => S.bundles[S.ng[sc]];
 /** GET /theme answers light (the app reads its mode from the server, not prefers-color-scheme). */
 export const lightMode = (S: Scenario) => { Object.assign(S.settings.theme, { mode: "light" }); };
 
-/** The reviewer on final_review: the frozen chain names it and one finished session ran it. */
-export const withReviewer = (S: Scenario) => {
-  const b = ngBundle("needs-gate", S);
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "final_review").auto_review = { id: "auto_review", kind: "agent" };
-  b.item.materialized_chain = JSON.stringify(chain);
-  const from = b.sessions.find((s: any) => s.node_id === "verification" && s.status === "done") ?? b.sessions[0];
-  const sid = "a0".repeat(16);
-  b.sessions.push({ ...from, id: sid, node_id: "final_review", hook_point: "final_review.auto_review", status: "done", attempt: 1, round: 0, session_summary_ref: null });
-  b.logs[sid] = b.logs[from.id];
-  const seq = Math.max(...b.events.map((e: any) => e.seq));
-  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "worker_session_exited", payload: { session_id: sid, node_id: "final_review", status: "done" }, node_id: "final_review", created_at: b.events[b.events.length - 1].created_at });
-};
-
-/** The base frozen chain names no producer; a gate's "written by" needs `artifact` on the gate and `produces` on a task. */
-export const withProducer = (S: Scenario) => {
-  const b = ngBundle("needs-gate", S);
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "final_review").artifact = "review_brief";
-  const brief = chain.chain.nodes.find((n: any) => n.id === "work_brief");
-  brief.steps[0].tasks[0].produces = "review_brief";
-  b.item.materialized_chain = JSON.stringify(chain);
-};
-
 /** The running item's fix round ended: `committed` says whether the fix changed anything (undefined: git could not say). */
 export const withFixRoundOutcome = (committed: boolean | undefined) => (S: Scenario) => {
   const b = ngBundle("running", S);
-  const start = b.events.find((e: any) => e.type === "fix_cycle_started")!;
-  const seq = Math.max(...b.events.map((e: any) => e.seq));
-  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "fix_cycle_finished", payload: { node_id: start.node_id, cycle: start.payload.cycle, ...(committed === undefined ? {} : { committed }) }, node_id: start.node_id, created_at: start.created_at });
+  const end = b.events.find((e: any) => e.type === "fix_cycle_finished")!;
+  const { committed: _was, ...rest } = end.payload;
+  end.payload = { ...rest, ...(committed === undefined ? {} : { committed }) };
 };
 
-/** The running item's `unit_tests` is a changed-test-scope task, and its verification node ran twice: a first pass
- *  that a retry left behind (one scope, which failed), and the pass it is on (two rounds, the second picking one
- *  more scope). What a node's pass picker, a round's scopes and the phone's scope screen need to have something to show. */
+/** The running item's verification node ran twice: a first pass that a retry left behind (one scope, which failed), and
+ *  the pass it is on (two rounds, the second picking one more scope), its repo tests run as `just test-unit`. What a
+ *  node's pass picker, a round's scopes and the phone's scope screen need to have something to show. */
 export const withScopes = (S: Scenario) => {
   // The item page's running item, and the board's running card (the one the phone taps in from).
   for (const b of new Set([ngBundle("running", S), ...Object.values(S.bundles).filter((x) => x.item.bead_id === "kraft-91bc")])) scoped(b);
 };
 function scoped(b: ItemBundle) {
-  const path = "verification.test.unit_tests";
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "verification").steps.find((s: any) => s.id === "test").tasks[0].ref = "kraft.verify_changed_test_scopes";
-  b.item.materialized_chain = JSON.stringify(chain);
+  const path = "verification.tests.test_changed_scopes";
   const mine = b.sessions.filter((s: any) => s.node_id === "verification");
   for (const s of mine) s.pass = 2;
   const tests = mine.filter((s: any) => s.hook_point === path);
-  for (const s of tests) Object.assign(s, { command: "just test-unit", repository: null });
+  for (const s of tests) Object.assign(s, { command: s.command === "uv run pytest -q" ? "just test-unit" : s.command, repository: null });
+  const unit = tests.filter((s: any) => s.command === "just test-unit");
+  /** A session the seed adds, and the `worker_session_created` that made it, in time order. */
   const copy = (of: any, n: number, over: Record<string, unknown>) => {
     const s = { ...of, id: `${String(n).padStart(4, "0")}${of.id.slice(4)}`, ...over };
     b.sessions.push(s);
     b.logs[s.id] = b.logs[of.id];
+    const at = b.events.findIndex((e) => Date.parse(e.created_at) > Date.parse(s.created_at));
+    b.events.splice(at < 0 ? b.events.length : at, 0, { seq: 0, work_item_id: b.item.id, type: "worker_session_created", node_id: "verification", created_at: s.created_at,
+      payload: { session_id: s.id, node_id: "verification", hook_point: path, round: s.round, attempt: s.attempt, thread: 1 } });
+    b.events.forEach((e, k) => { e.seq = k + 1; });
     return s;
   };
   const later = (of: any, ms: number) => new Date(Date.parse(of.created_at) + ms).toISOString();
   // Attempts count up per hook point over every pass and round, as the server numbers them.
-  const old = copy(tests[0], 2, { pass: 1, status: "failed", attempt: 1, created_at: later(tests[0], -3_600_000) });
+  const old = copy(unit[0], 2, { pass: 1, status: "failed", attempt: 1, round: 0, created_at: later(unit[0], -120_000) });
   tests.forEach((s: any, i: number) => { s.attempt = i + 2; });
-  const api = copy(tests.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(tests.at(-1), 1000) });
-  b.item.scope_runs = [old, ...tests, api].map((s: any) => ({
+  const api = copy(unit.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(unit.at(-1), 1000) });
+  const runs = [old, ...tests, api];
+  b.item.scope_runs = runs.map((s: any) => ({
     session_id: s.id, node_id: "verification", hook_point: path, repository: null, round: s.round, pass: s.pass, command: s.command,
-    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true, scope: s.command === "just test-api" ? "api/**" : "tests/**", order: s.command === "just test-api" ? 1 : 0,
+    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true,
+    scope: s.command === "just test-api" ? "api/**" : s.command === "just test-unit" ? "tests/**" : "docs/**",
+    order: runs.filter((x: any) => x.pass === s.pass && x.round === s.round).indexOf(s),
   }));
   b.item.node_passes = { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] };
 }
@@ -977,11 +1215,22 @@ export const withStop = (kind: string, facts: Record<string, unknown>, extra: Re
 /** The failed item also ran `n` test scopes, the first `red` failing. */
 export const withFailedTests = (n: number, red: number) => (S: Scenario) => { withStop("failed", {})(S); Object.assign(ngBundle("failed", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
 
-/** The capped item's stop names the limit that raises it (a time cap), and the item reports its running time. */
+/** The capped item stopped instead by a running-time cap of its own (an item override), reached as its implement task
+ *  had run two hours: the sessions before that task and those two hours. An item-wide cap is the one an item override
+ *  raises, so its stop names that `limit` (`caps.item_limit`); a task's cap, the sample's, names none. */
 export const withCapLimit = (S: Scenario) => {
   const b = ngBundle("capped", S);
-  b.item.stop = { ...b.item.stop, limit: { path: "", key: "total_time_cap_minutes", value: 480, maximum: null } };
-  b.item.running_time = { running_s: 8 * 3600 + 120, cap_minutes: 480 };
+  const running_s = runningS(b.item.materialized_chain, b.sessions);
+  const minutes = Math.round(running_s / 60);
+  const reason = `the work item hit its time cap of ${minutes} minutes`;
+  const limit = { path: "", key: "time_cap_minutes", value: minutes };
+  const hit = b.events.find((e) => e.type === "time_cap_reached")!;
+  hit.payload = { ...hit.payload, scope: "", minutes, reason };
+  const stop = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
+  stop.payload = { ...stop.payload, reason, limit };
+  b.item.stop = { ...b.item.stop, reason, limit: { ...limit, maximum: null } };
+  b.item.running_time = { running_s, cap_minutes: minutes };
+  return minutes;
 };
 
 /** The running item names beads, so Mark complete says they stay open. */

@@ -228,6 +228,7 @@ async def _read(st) -> forges.ForgesFile:
 
 @api_router.get("/forges")
 async def list_forges(request: Request):
+    """The named forge accounts, without their tokens."""
     _forbid_sessions(request, "forge accounts")
     current = await _read(request.app.state)
     return {
@@ -237,6 +238,7 @@ async def list_forges(request: Request):
 
 @api_router.post("/forges", status_code=201)
 async def add_forge(request: Request):
+    """Add a forge account, with a token or the forge's own CLI."""
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
     body = await _body(request, AddForge)
@@ -260,6 +262,7 @@ async def add_forge(request: Request):
 
 @api_router.patch("/forges/{name}")
 async def edit_forge(name: str, request: Request):
+    """Change a forge account; only the fields given change."""
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
     body = await _body(request, EditForge)
@@ -338,6 +341,7 @@ async def set_token(name: str, request: Request):
 
 @api_router.delete("/forges/{name}", status_code=204)
 async def remove_forge(name: str, request: Request):
+    """Remove a forge account; refused while a repo names it."""
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
     async with st.forges_lock:
@@ -361,6 +365,7 @@ async def remove_forge(name: str, request: Request):
 
 @api_router.post("/forges/{name}/test")
 async def test_forge(name: str, request: Request):
+    """Check that the account can reach its forge and that its token works."""
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
     account = (await _read(st)).accounts.get(name)

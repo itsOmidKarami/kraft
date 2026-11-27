@@ -1,7 +1,7 @@
 import type { KraftEvent } from "../../types";
 import type { EventType } from "../../types/vocab.generated";
 import { elapsed } from "../../format";
-import { gateName, nameOf, queuedVerbWords, waitingForCheckout } from "../board/rowText";
+import { gateName, mrRefText, nameOf, queuedVerbWords, waitingForCheckout } from "../board/rowText";
 import { taskName } from "./paths";
 
 type Nodes = Parameters<typeof nameOf>[0];
@@ -10,7 +10,7 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
-const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "run_forked", "cap_counters_reset", "session_reattached"]);
+const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured", "reply_round_started", "reply_send_started", "base_move_held", "run_forked", "cap_counters_reset", "session_reattached"]);
 
 /** What reopened an approved gate (`gate_reopened`'s `reason`), as the console says it. */
 const REOPENED_WHY: Readonly<Record<string, string>> = {
@@ -43,6 +43,9 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
   const at = node && nameOf(nodes, node);
   // A gate the event names (`gate`), else the node it is on, each as a reader names it.
   const gate = p.gate ? gateName(nodes, s(p.gate)) : at;
+  // A merge request's number with its forge's sign (`mrRefText`); a missing
+  // number keeps the old `!` alone, as the line read before.
+  const mrRef = (n: unknown) => (n != null ? mrRefText({ number: Number(n), url: typeof p.url === "string" ? p.url : null }) : "!");
   switch (e.type) {
     case "work_item_created": return "filed";
     case "node_started": return `${at} started`;
@@ -93,9 +96,9 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
     case "work_item_restored": return "restored";
     case "one_off_chain_approved": return "one-off chain approved";
-    case "mr_opened": return `MR !${s(p.number)} opened`;
-    case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
-    case "mr_reopened": return `MR !${s(p.ref)} reopened`;
+    case "mr_opened": return `MR ${mrRef(p.number)} opened`;
+    case "mr_closed": return `MR ${mrRef(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
+    case "mr_reopened": return `MR ${mrRef(p.ref)} reopened`;
     case "merge_refused_unreviewed":
       return p.source === "forge"
         ? `${at} · not merged: a commit reached the merge request after the review; ${p.fast_forwarded ? "it is on the item's branch to review" : "pull it into the branch by hand"}`
@@ -193,12 +196,6 @@ export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
     }
   }
   return out.reverse().map(({ e, line }) => ({ e, line }));
-}
-
-/** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
-export function gateSkipped(events: KraftEvent[], gate: string): boolean {
-  const at = (type: EventType) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
-  return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
 }
 
 /** "now", "6m", "1h 10m": the Recent column's age. */

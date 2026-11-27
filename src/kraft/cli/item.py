@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
+import psutil
 import yaml
 
 from kraft import answers, client, render
@@ -17,7 +21,9 @@ from kraft.vocab import DiffSide, ReplyClaim, ReviewOutcome, ThreadLabel, WorkIt
 _POLICY_HELP = (
     "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
     "node, step or task by canonical path (repeatable), e.g. "
-    "merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 or max_attempts=4"
+    "merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 or max_attempts=4 "
+    "(`reply_cap_per_thread`, `reply_rounds_per_head` and `reply_timeout_minutes` bound "
+    "the replies to review bots)"
 )
 
 
@@ -51,17 +57,26 @@ def _node_overrides(pairs: list[str]) -> dict | None:
     return overrides or None
 
 
+#: What may follow `bot:LOGIN`, each after a `:`. There is no `resolve=` form.
+_BOT_OPTIONS = {"replies": ("replies", True), "resolve_fixed": ("resolve_fixed", True)}
+
+
 def _reviewer(raw: str) -> dict | None:
-    """One `--reviewer`: `bot:LOGIN` or `check:NAME`, or `none` (None), which
-    alone sends `[]`, no reviewer expected."""
+    """One `--reviewer`: `bot:LOGIN[:replies[:resolve_fixed]]` or `check:NAME`, or `none` (None),
+    which alone sends `[]`, no reviewer expected. Options are parsed after a bot's
+    login only: a check's name may hold `:`."""
     if raw == "none":
         return None
     kind, sep, name = raw.partition(":")
+    usage = f"--reviewer takes bot:LOGIN[:replies[:resolve_fixed]], check:NAME or none, not {raw!r}"
     if kind not in ("bot", "check") or not (sep and name):
-        raise argparse.ArgumentTypeError(
-            f"--reviewer takes bot:LOGIN, check:NAME or none, not {raw!r}"
-        )
-    return {kind: name}
+        raise argparse.ArgumentTypeError(usage)
+    if kind == "check":
+        return {"check": name}
+    login, *options = name.split(":")
+    if not login or any(o not in _BOT_OPTIONS for o in options):
+        raise argparse.ArgumentTypeError(usage)
+    return {"bot": login, **dict(_BOT_OPTIONS[o] for o in options)}
 
 
 def _budget(raw: str) -> float | None:
@@ -162,6 +177,77 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
         common.item_action("paused {id}", small=answers.paused),
         ns.json,
     )
+
+
+#: What the child agent must not inherit: it would make the person's own
+#: `kraft item ...` calls from inside the session read as a worker acting on its
+#: own item.
+_WORKER_ENV = ("KRAFT_WORK_ITEM_ID", "KRAFT_SESSION_ID")
+
+
+def _after_takeover(wid: str, ended: dict) -> str:
+    """What to do now: the exit's warnings, then the verbs that hand the item
+    back, by the status it was left in."""
+    lines = [f"warning: {w}" for w in ended.get("warnings", [])]
+    if ended.get("status") == WorkItemStatus.PAUSED:
+        carried = (
+            "continues your conversation"
+            if ended.get("recorded")
+            else "continues the worker's own conversation, where it has one"
+        )
+        lines += [
+            f'kraft item resume {wid} [--steer "..."]   runs the step again with your '
+            f"commits and {carried}.",
+            f"kraft item skip {wid}   if you finished the step yourself.",
+        ]
+    else:
+        lines += [
+            f"kraft item skip {wid}   if you finished the step yourself.",
+            f'kraft item retry {wid} --steer "..."   runs it again with your commits. Your '
+            "conversation won't carry over (retry always starts fresh), so put what matters "
+            "in --steer.",
+        ]
+    return "\n".join(lines)
+
+
+def _cmd_takeover(ns: argparse.Namespace) -> None:
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise ValueError("a worker does not take over an item")
+    wid = asyncio.run(client.resolve_work_item(ns.id))
+    if ns.release:
+        common.emit(
+            asyncio.run(client.takeover_end(wid)),
+            lambda ended: f"released {wid}\n{_after_takeover(wid, ended)}",
+            ns.json,
+        )
+        return
+    began = asyncio.run(
+        client.takeover_begin(wid, pid=os.getpid(), pid_start=psutil.Process().create_time())
+    )
+    print(
+        f"forking your session from {began['resumed_from']}"
+        if began["resumed_from"]
+        else "starting a fresh session (nothing to resume)"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in _WORKER_ENV}
+    # Ctrl-C belongs to the agent in front of the person, not to this wrapper.
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        subprocess.run(began["argv"], cwd=began["cwd"], env=env, check=False)
+    except OSError as exc:
+        raise ValueError(f"could not start {began['argv'][0]}: {exc}") from exc
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        try:
+            ended = asyncio.run(client.takeover_end(wid))
+        except Exception as exc:  # noqa: BLE001 -- say so, and keep the error that got us here
+            print(
+                f"kraft: could not release {wid}: {exc}; "
+                f"free it with `kraft item takeover {wid} --release`",
+                file=sys.stderr,
+            )
+        else:
+            print(_after_takeover(wid, ended))
 
 
 def _cmd_unblock(ns: argparse.Namespace) -> None:
@@ -390,7 +476,14 @@ def _cmd_escalate(ns: argparse.Namespace) -> None:
 
 
 def _cmd_rerun_ci(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.ci_rerun(ns.reason, ns.id)), common._render_action, ns.json)
+    result = asyncio.run(client.ci_rerun(ns.reason, ns.id))
+    # A person's re-run answers as the retry it ends in; a repair's names the jobs.
+    said = (
+        common._render_action
+        if "reran" in result
+        else common.item_action("retried {id}", small=answers.retried)
+    )
+    common.emit(result, said, ns.json)
 
 
 def _cmd_mr_label(ns: argparse.Namespace) -> None:
@@ -710,6 +803,19 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     pause.add_argument("id", nargs="?")
     pause.set_defaults(func=_cmd_pause)
 
+    takeover = subs.add_parser(
+        "takeover",
+        parents=[common],
+        help="open a stopped item's agent session yourself, in its worktree",
+    )
+    takeover.add_argument("id", nargs="?")
+    takeover.add_argument(
+        "--release",
+        action="store_true",
+        help="free the item from a takeover a killed terminal left behind",
+    )
+    takeover.set_defaults(func=_cmd_takeover)
+
     unblock = subs.add_parser(
         "unblock", parents=[common], help="drop what a blocked or paused item still comes after"
     )
@@ -804,7 +910,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     rerun_ci = subs.add_parser(
         "rerun-ci",
         parents=[common],
-        help="re-run the CI jobs that failed outside the code (a fix-loop repair)",
+        help="re-run the CI jobs that failed outside the code: a fix-loop repair, or a "
+        "person on a fix loop or a ci.pipeline wait stopped for them, which then retries",
     )
     rerun_ci.add_argument("id", nargs="?")
     rerun_ci.add_argument(
@@ -1000,9 +1107,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         type=_reviewer,
-        metavar="bot:LOGIN|check:NAME",
+        metavar="bot:LOGIN[:replies[:resolve_fixed]]|check:NAME",
         help="a reviewer this node's automated-review wait reads, over the repo's and the "
-        "task's (repeatable); `none` expects none",
+        "task's (repeatable); `none` expects none (`:replies`: Kraft answers that bot; "
+        "`:resolve_fixed`: and resolves the threads whose fix it confirmed)",
     )
     set_node_override.add_argument(
         "--clear", action="store_true", help="reset this node to the template's own binding"

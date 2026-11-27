@@ -25,13 +25,15 @@ def cv():
 
 
 @pytest.mark.parametrize(
-    ("change", "found"),
+    ("change", "found", "blobless"),
     [
-        ({}, []),
-        (MORE, ["release"]),
-        ({**MORE, "version": "1.1.0"}, []),
-        ({**MORE, "version": "0.9.0"}, ["release"]),
-        ({"files": {"README.md": "notes\n"}}, []),
+        ({}, [], False),
+        (MORE, ["release"], False),
+        ({**MORE, "version": "1.1.0"}, [], False),
+        ({**MORE, "version": "0.9.0"}, ["release"], False),
+        ({"files": {"README.md": "notes\n"}}, [], False),
+        (MORE, ["release"], True),
+        ({**MORE, "version": "1.1.0"}, [], True),
     ],
     ids=[
         "unchanged",
@@ -39,13 +41,28 @@ def cv():
         "changed-new-version",
         "changed-lower-version",
         "file-kraft-never-reads",
+        "blobless-clone-changed-same-version",
+        "blobless-clone-changed-new-version",
     ],
 )
-def test_a_changed_addon_needs_a_new_version(cv, tmp_path, change, found):
+def test_a_changed_addon_needs_a_new_version(cv, tmp_path, change, found, blobless):
     repo = make_collection(tmp_path, RELEASE)
     base = git(repo, "rev-parse", "HEAD")
     if change:
         publish(repo, "release", **change)
+    if blobless:  # CI's checkout: the base copy of a changed file is not on disk
+        git(repo, "config", "uploadpack.allowFilter", "true")
+        clone = tmp_path / "clone"
+        git(
+            tmp_path,
+            "clone",
+            "-q",
+            "--no-local",
+            "--filter=blob:none",
+            f"file://{repo}",
+            str(clone),
+        )
+        repo = clone
 
     assert [line.split(":")[0] for line in cv.problems(repo, base)] == found
 

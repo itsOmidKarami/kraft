@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from kraft.adapters.forge import git
-from kraft.adapters.forge.models import ForgeError, Reason, reason_for, safe_sso_url
+from kraft.adapters.forge.models import (
+    ForgeError,
+    Reason,
+    dropped_connection,
+    reason_for,
+    safe_sso_url,
+)
 from kraft.config import _REMOTE, git_read
 
 #: Values `gh api` expands itself, so they go as `-F` and nothing else does.
@@ -168,6 +174,17 @@ def _retry_after(headers: Mapping[str, str]) -> float | None:
     return None
 
 
+def error_message(body: object) -> str:
+    """What an error body says: its `message`, then each `errors[]` entry's (GitHub keeps
+    a 422's reason there, "one pending review per pull request")."""
+    if not isinstance(body, dict):
+        return ""
+    parts = [str(body.get("message") or "")]
+    for e in body.get("errors") or []:
+        parts.append(str(e.get("message", "")) if isinstance(e, dict) else str(e))
+    return "; ".join(p for p in parts if p)
+
+
 def _flags(fields: Mapping[str, Field] | None) -> list[str]:
     flags: list[str] = []
     for key, value in (fields or {}).items():
@@ -206,11 +223,12 @@ class CliTransport:
                 raise ForgeError(f"{label}: {self.cli} printed no HTTP response")
             # No request was made (not signed in, no network): no status, no reason,
             # so `failure_cause`'s text markers still decide.
-            raise ForgeError(f"{label}: {_clip(done.stderr.strip() or done.stdout)}")
+            said = done.stderr.strip() or done.stdout
+            raise ForgeError(f"{label}: {_clip(said)}", no_answer=dropped_connection(said))
         if resp.status >= 400 or (done.returncode != 0 and not graphql):
             try:
-                message = str(resp.json().get("message", ""))
-            except (ForgeError, AttributeError):
+                message = error_message(resp.json())
+            except ForgeError:
                 message = ""
             raise ForgeError(
                 f"{label}: {message or _clip(resp.text or done.stderr)} (HTTP {resp.status})",

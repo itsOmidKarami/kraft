@@ -23,6 +23,7 @@ from .api_outputs import (
     READ_BRANCH,
     READ_MORE,
     READ_NUMBER,
+    READ_THREAD,
     URL,
     check_run,
     checks_page,
@@ -43,6 +44,14 @@ from .api_outputs import (
 from .nodes import Api
 from .parity import BR, Row, assert_alike, feedback, review
 from .test_forge_cli_contract import GH_API, HEAD, _contract_token  # noqa: F401
+from .test_thread_io import (
+    _GH_COMMENT_ANSWER,
+    _GH_LAST,
+    _GH_REPLY,
+    _GH_THREAD,
+    _gh_note,
+    _thread,
+)
 
 MR7 = forge.MR(7, URL)
 QUEUED = forge.MRRef(7, URL, state="open", merge_queued=True)
@@ -135,6 +144,22 @@ ROWS: dict[str, Row] = {
     "github-update_mr": Row("update_mr", _call("update_mr", branch=BR, body="b"), _BRANCH_PR),
     "github-mr_body": Row(
         "mr_body", _call("mr_body", branch=BR), {READ_BRANCH: pr_by_branch(pull_request(body="b"))}
+    ),
+    "github-mr_description_history": Row(
+        "mr_description_history",
+        _call("mr_description_history", branch=BR),
+        {
+            "api*graphql*userContentEdits*": gql(
+                {
+                    "node": {
+                        "userContentEdits": {
+                            "nodes": [{"diff": "b", "editor": {"__typename": "Bot"}}]
+                        }
+                    }
+                }
+            ),
+            READ_BRANCH: pr_by_branch(pull_request()),
+        },
     ),
     "github-ci_status": Row(
         "ci_status",
@@ -273,6 +298,37 @@ ROWS: dict[str, Row] = {
     "github-check-feedback": Row(
         "reviewer_feedback", feedback(check="c"), {**_BRANCH_PR, _CHECK_RUNS: _FAILED_CHECK}
     ),
+    "github-viewer": Row(
+        "viewer", _call("viewer"), {"api graphql": gql({"viewer": {"login": "kraft-user"}})}
+    ),
+    "github-read_thread": Row(
+        "read_thread",
+        _call("read_thread", branch=BR, thread_id="PRT_1"),
+        {**_BRANCH_PR, READ_THREAD: _GH_THREAD},
+    ),
+    "github-reply_to_thread": Row(
+        "reply_to_thread",
+        _call("reply_to_thread", thread=_thread(7), body="Answer: ok"),
+        {"api*pulls/7/comments/901/replies*": _GH_REPLY},
+    ),
+    "github-resolve_thread": Row(
+        "resolve_thread", _call("resolve_thread", thread=_thread(7)), {"api graphql": gql({})}
+    ),
+    "github-mr_comments": Row(
+        "mr_comments",
+        _call("mr_comments", branch=BR),
+        {**_BRANCH_PR, f"api {_ISSUES}/7/comments": _GH_LAST},
+    ),
+    "github-upsert_comment": Row(
+        "upsert_comment",
+        _call("upsert_comment", branch=BR, note_id=None, body="summary"),
+        {**_BRANCH_PR, "api*issues/7/comments*": _GH_COMMENT_ANSWER},
+    ),
+    "github-delete_note": Row(
+        "delete_note",
+        _call("delete_note", branch=BR, note=_gh_note(), in_thread=False),
+        {"api*issues/comments/555*": ""},
+    ),
     "github-mr_details": Row(
         "mr_details",
         _call("mr_details", branch=BR),
@@ -313,6 +369,15 @@ ROWS: dict[str, Row] = {
                     rest_pull(3, state="closed", merged_at="2026-09-03T00:00:00Z"),
                 ]
             )
+        },
+    ),
+    "github-conversation-rule-classic-unprotected": Row(
+        "requires_resolved_threads",
+        _call("requires_resolved_threads", base="main"),
+        {
+            "api*branches/main/protection*": Api(404, '{"message": "Branch not protected"}'),
+            "api*rules/branches/main*": json.dumps([{"type": "deletion"}]),
+            "api*branches/main *": json.dumps({"protected": True}),
         },
     ),
     "github-labels-two-pages": Row(

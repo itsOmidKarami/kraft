@@ -15,7 +15,7 @@ from kraft.config import probe_repo
 from kraft.executor import dispatch
 from kraft.findings import JobRef
 
-from .test_walk import _walk
+from .test_walk import _stop_reason, _walk
 
 _BUILTIN = {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
 _FRONTEND = {"paths": ["frontend/**"], "command": "frontend-cmd"}
@@ -331,6 +331,43 @@ async def test_changed_test_scopes_report_one_aggregate_result(item_on):
         ("verify.main.t", "failed"),
         ("verify.main.t", "done"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "stop"),
+    [
+        pytest.param(
+            "error: Justfile does not contain recipe `vale`.",
+            "could not start t in node verify: kraft: no just recipe `vale` in this item's "
+            "justfile (its base is {base}): rebase it onto a base that has the recipe, "
+            "or change the test scope in repos.yaml",
+            id="no-recipe",
+        ),
+        pytest.param("FAILED tests/test_x.py::test_y", "task failed in node verify", id="red-test"),
+        pytest.param(
+            "FAILED: error: Justfile does not contain recipe `vale`.",
+            "task failed in node verify",
+            id="quoted-mid-line",
+        ),
+    ],
+)
+async def test_a_just_scope_whose_recipe_the_base_lacks_stops_as_config(
+    item_on, tmp_path, stderr, stop
+):
+    """Kraft-3y2o1: repos.yaml's scope runs `just vale`, but the item's base
+    predates the recipe. That is configuration a repair cannot fix: the item
+    stops as config naming the recipe and the base. Any other red `just` run
+    is still a test failure."""
+    just = tmp_path / "just"
+    just.write_text(f"#!/bin/sh\necho '{stderr}' >&2\nexit 1\n")
+    just.chmod(0o755)
+    it = await item_on(_verify())
+
+    scopes = [{"paths": ["**"], "command": f"{just} vale"}]
+    await _walk(it, repo_entry=entry_of({"setup_command": "", "test_scopes": scopes}))
+
+    base = git(it.repo, "rev-parse", "--abbrev-ref", "HEAD")
+    assert _stop_reason(it).startswith(stop.format(base=base))
 
 
 #: A CLI -> a project one level down that passes only when its test command

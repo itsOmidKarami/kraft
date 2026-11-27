@@ -23,6 +23,9 @@ describe("eventLine", () => {
     // The auto-escalation sentence is read whole; the row clamps it on screen.
     [ev("escalation_message", { message: "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)" }, "verification"), "escalation on verification: (Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)"],
     [ev("mr_closed", { ref: 142, by: "mara" }), "MR !142 closed by mara"],
+    [ev("mr_opened", { number: 142, url: "https://github.com/o/r/pull/142" }, "draft_merge_request"), "MR #142 opened"],
+    [ev("mr_closed", { ref: 142, url: "https://github.com/o/r/pull/142", by: "mara" }), "MR #142 closed by mara"],
+    [ev("mr_reopened", { ref: 142, url: "https://github.com/o/r/pull/142" }), "MR #142 reopened"],
     [ev("work_item_queued", { verb: "resume", from: "paused" }), "queued to resume"],
     [ev("work_item_queued", { verb: "continue", from: "needs_human", why: "checkout", held_by: "w2", held_by_title: "Cache the index" }), "queued to continue past its gate · waiting for the checkout: “Cache the index” is using it"],
     [ev("work_item_queued", { verb: "self_retry", from: "needs_human" }), "queued to retry, as its escalation asked"],

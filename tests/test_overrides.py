@@ -59,8 +59,23 @@ def test_node_override_takes_a_list_of_reviewers_each_named_one_way():
     assert overrides.validate_node_override_fields({"reviewers": []}) == []
     for bad in ({"bot": "b"}, [{"bot": "b", "check": "c"}], [{"login": "b"}]):
         assert overrides.validate_node_override_fields({"reviewers": bad}) == [
-            "reviewers must be a list of {bot: LOGIN} or {check: NAME}"
+            "reviewers must be a list of {bot: LOGIN, replies, resolve_fixed} or {check: NAME}"
         ]
+
+
+def test_replies_are_accepted_in_a_node_override():
+    assert (
+        overrides.validate_node_override_fields(
+            {"reviewers": [{"bot": "b", "replies": True, "resolve_fixed": True}]}
+        )
+        == []
+    )
+
+
+def test_resolve_without_replies_is_refused_in_its_own_words():
+    assert overrides.validate_node_override_fields(
+        {"reviewers": [{"bot": "b", "resolve_fixed": True}]}
+    ) == ["reviewers: `resolve_fixed` needs `replies: true` on the same entry"]
 
 
 @pytest.mark.parametrize(

@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import select
 import signal
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -198,7 +200,6 @@ def test_two_ephemeral_resolutions_do_not_collide_once_the_first_is_bound(serve,
 def test_a_second_sigterm_during_teardown_does_not_abort_it(serve, monkeypatch):
     """Kraft's group kill resends SIGTERM; the handler raising out of
     `proc.wait` skipped the SIGKILL fallback and printed a traceback."""
-    monkeypatch.setattr(serve.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(serve.os, "killpg", lambda pgid, sig: None)
     proc = SimpleNamespace(pid=1, wait=lambda timeout=None: os.kill(os.getpid(), signal.SIGTERM))
     before = signal.signal(signal.SIGTERM, serve._raise_interrupt)
@@ -210,3 +211,41 @@ def test_a_second_sigterm_during_teardown_does_not_abort_it(serve, monkeypatch):
     finally:
         signal.signal(signal.SIGTERM, before)
     assert not interrupted, "the second SIGTERM interrupted the teardown"
+
+
+def test_a_child_that_never_got_healthy_leaves_its_stack_and_no_group(serve):
+    """The 30s health-deadline path. SIGABRT has the child's faulthandler say
+    where it stalled, and the group kill still reaches the child's own children
+    after the child is reaped, when `os.getpgid(child)` no longer works."""
+    stalled = (
+        "import os, subprocess, time\n"
+        "def stalled_here():\n"
+        "    grandchild = subprocess.Popen(['sleep', '60']).pid\n"
+        "    print('said before it stalled')\n"
+        # Past the print's buffer: with -u the line above is already out.
+        "    os.write(1, f'{grandchild}\\n'.encode())\n"
+        "    time.sleep(60)\n"
+        "stalled_here()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, *serve.CHILD_FLAGS, "-c", stalled],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    first = proc.stdout.readline()
+    said, pid = ("", first) if first.strip().isdigit() else (first, proc.stdout.readline())
+    grandchild = int(pid)
+    before = signal.getsignal(signal.SIGTERM)
+    try:
+        serve._dump_and_terminate(proc)
+    finally:
+        signal.signal(signal.SIGTERM, before)
+    # The grandchild holds the same stdout: EOF means it has gone too.
+    if not select.select([proc.stdout], [], [], 10)[0]:
+        os.kill(grandchild, signal.SIGKILL)
+        pytest.fail("the grandchild outlived the teardown")
+    assert proc.stdout.read() == ""
+    assert said == "said before it stalled\n"
+    assert "in stalled_here" in proc.stderr.read()

@@ -1,10 +1,11 @@
 import { breakable } from "../../ui/breakable";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
+import { GATE_ROUNDS } from "../../graph/sharedWords";
 import { act } from "../../item/actions";
 import { chainGraph, drawnOf, rejectTarget } from "../../item/graph";
 import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
@@ -17,9 +18,13 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { gateSkipped } from "../../item/events";
+import { byWord, gateState, isReviewRound, newestOutcome, noteDoc, outcomeWord, ownOutcome, reviewDoc, roundShown, roundsOf, shownNote, threadCountLine, threadWhere } from "../../item/gateRounds";
+import { roundReviewUrl } from "../../review/url";
+import { LABEL_WORD } from "../../review/sharedWords";
 import { nodeSub } from "../item/model";
-import { ConfirmSheet, useSheet } from "../nav/Sheet";
+import { ConfirmSheet, ReadSheet, useSheet } from "../nav/Sheet";
+import { InlineMarkdown, Markdown } from "../../ui/Markdown";
+import { NotePreview } from "../../ui/NotePreview";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { fixLoopWords, nodeBar, overrideWords, plainName, reviewPath, wallWords, type NodeAct } from "./model";
@@ -62,11 +67,14 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const { busy, run } = useDo(reload);
   const name = nameOf(item.chain_definition.nodes, nodeId);
   const api = findNode(item.chain_definition.nodes, nodeId)!;
-  const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
+  const { nodes } = useMemo(() => chainGraph(item, now), [item, now]);
   const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
   const kindWords = gate ? "gate" : api.kind === "group" ? "group node" : "exec node";
-  const sub = nodeSub(graph, gate && gateSkipped(events, nodeId));
+  // A gate sent back says what it came to ("changes requested · you"), as the desktop's pane does; else today's words.
+  const outcome = gate ? newestOutcome(item, nodeId) : undefined;
+  const base = nodeSub(graph, gate && gateState(item, nodeId).words === "skipped");
+  const sub = outcome ? { ...base, text: outcome } : base;
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
   const message = gate ? gateMessage(materialized(item), nodeId) : undefined;
@@ -78,6 +86,13 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
   const { steps, side, loop, onFailure, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
   const passes = passList(item, nodeId, place.pass);
+  // A gate's passes are its rounds: the same `?pass=`, read from the server's rounds.
+  const gateRounds = gate ? roundsOf(item, nodeId) : [];
+  const round = gate ? roundShown(item, nodeId, place.pass) : undefined;
+  // A finished review round shows its review where a note round shows its note: the pending round has no review yet.
+  const reviewed = !!round?.ended_at && isReviewRound(round);
+  const roundNote = round && shownNote(round) ? noteDoc(nodeId, round) : null;
+  const roundReview = round && reviewed ? reviewDoc(nodeId, round) : null;
   const paths = stepsOf(api).steps;
   const escalations = escalationsIn(seen, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
@@ -124,6 +139,39 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             ))}
           </div>
         )}
+        {gate && round && (tab === "overview" || tab === "log") && (
+          <>
+            {gateRounds.length > 1 && (
+              <div className="ph-attempts ph-is-wrap" role="group" aria-label={GATE_ROUNDS}>
+                {gateRounds.map((r) => (
+                  <button key={r.n} type="button" className={`ph-attempt${r.n === round.n ? " ph-is-on" : ""}`} aria-pressed={r.n === round.n} onClick={() => setPlace({ pass: r.n === gateRounds.length ? undefined : r.n })}>
+                    round {r.n} · {outcomeWord(r)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {round.outcome !== "pending" && (
+              <div className="ph-turn" aria-label={`Round ${round.n}`}>
+                <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
+                {/* A person's note shows beside the review: it is what the next agent was told. The thread bounce's does not (it is the threads as text). */}
+                {shownNote(round) && <NotePreview className="ph-turn-text" note={shownNote(round)!} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
+                {reviewed && (
+                  <>
+                    {ownOutcome(round) && <p className="ph-turn-text">{ownOutcome(round)}</p>}
+                    {round.review?.summary && <NotePreview className="ph-turn-text" note={round.review.summary} label="Read the review" buttonClass="ph-linkbtn" onRead={() => sheet.open("round-review")} />}
+                    <p className="ph-turn-count">{threadCountLine(round)}</p>
+                    {round.first_threads.length > 0 && (
+                      <ul className="ph-turn-threads">
+                        {round.first_threads.map((t) => <li key={t.id}>{[threadWhere(t), t.label && LABEL_WORD[t.label]].filter(Boolean).join(" · ")} · <InlineMarkdown text={t.body} /></li>)}
+                      </ul>
+                    )}
+                    <Link className="ph-linkbtn" to={roundReviewUrl(item.id, nodeId, round.n)}>Open in review</Link>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
         {rounds && rounds.rows.length > 1 && (tab === "overview" || tab === "log") && (
           <div className="ph-attempts" role="group" aria-label={FIX_LOOP_ROUNDS}>
             {rounds.rows.map((r) => (
@@ -155,7 +203,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             {gate && (
               <Block title="Review path">
                 <ol className="ph-path">
-                  {reviewPath(item, api, events).map((r) => (
+                  {reviewPath(item, api, place.pass).map((r) => (
                     <li key={r.title} className="ph-path-step">
                       <span className="ph-path-title">{r.title}{r.chip && <Badge tone={r.chip.tone}>{r.chip.word}</Badge>}</span>
                       <span className="ph-path-text">{r.text}</span>
@@ -246,6 +294,8 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{btn(bar.secondary, false)}{btn(bar.primary, true)}</ActionBar>}
+      {sheet.is("round-review") && roundReview && <ReadSheet title={roundReview.title} text={roundReview.by} onClose={sheet.close}><Markdown text={roundReview.content} /></ReadSheet>}
+      {sheet.is("round-note") && roundNote && <ReadSheet title={roundNote.title} text={roundNote.by} onClose={sheet.close}><Markdown text={roundNote.content} /></ReadSheet>}
       {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
       {sheet.is("skip") && (
         <ConfirmSheet

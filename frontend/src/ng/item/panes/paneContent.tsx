@@ -14,6 +14,7 @@ import { findNode } from "../cursor";
 import { drawnOf } from "../graph";
 import { PHASE_WORDS } from "../groupView";
 import { stepsOf, taskName } from "../paths";
+import { isPastRound, newestOutcome } from "../gateRounds";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
 import { GroupOverview, NodeConfig, NodeOverview } from "./NodePane";
@@ -50,6 +51,9 @@ export type PaneArgs = {
   round?: number;
   /** The scope of an open changed-test-scope task that is picked: its chip's key. */
   scope?: string;
+  /** The round of a gate the URL names (`?pass=`), and the way to pick another; undefined is the newest. */
+  pass?: number;
+  setPass?: (n: number | undefined) => void;
   attempt?: number;
   /** Pin the tabs to one attempt; undefined follows the newest. */
   setAttempt: (attempt: number | undefined) => void;
@@ -116,9 +120,9 @@ export function paneContent(a: PaneArgs): PaneContent {
       crumbs: [toChain],
       gate: true,
       title: node.id,
-      sub: `gate node · ${pending ? "waiting for you" : stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
-      body: <GateBody item={item} version={a.version} gate={node} events={a.events} />,
-      footer: pending ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
+      sub: `gate node · ${pending ? "waiting for you" : newestOutcome(item, node.id) ?? stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
+      body: <GateBody item={item} version={a.version} gate={node} picked={a.pass} onPick={a.setPass} />,
+      footer: pending && !isPastRound(item, node.id, a.pass) ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
     };
   }
   // A node inside a group (`slices.implementation`) sits under its group's crumb.

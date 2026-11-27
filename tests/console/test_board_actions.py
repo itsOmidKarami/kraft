@@ -249,7 +249,11 @@ def test_a_refused_action_reads_the_board_and_the_item_again(board, monkeypatch,
         if reads:
             await console.until(pilot, lambda: detail_reads)
         before = len(detail_reads)
-        await pilot.press("t", "enter")
+        await pilot.press("t")
+        # The steer check reads the item before the dialog opens; an Enter sent
+        # sooner lands on the board and the retry is never asked.
+        await console.until(pilot, lambda: isinstance(app.screen, Note))
+        await pilot.press("enter")
         await console.until(pilot, lambda: board_reads)
         if reads:
             await console.until(pilot, lambda: len(detail_reads) >= before + 2)

@@ -29,6 +29,18 @@ DIM = "\033[2m"
 #: string shears every column to its right (spec F §2.1).
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
+#: `rowText.ts`'s `mrRefText`, as `console/words.py`'s `mr_ref_text`.
+_PULL = re.compile(r"/pull/\d+(?:[/?#]|$)")
+
+
+def mr_ref_text(ref: dict) -> str:
+    """`mrRefText`: `#N` on GitHub (`/pull/N`), `!N` on GitLab
+    (`/-/merge_requests/N`). A URL that says neither keeps the old `!` —
+    the sign GitLab uses and the one every existing fixture already reads —
+    rather than guessing a forge from the host."""
+    return f"{'#' if _PULL.search(ref.get('url') or '') else '!'}{ref['number']}"
+
+
 #: Display status -> ANSI colour, as the web's TONE (frontend/src/ng/item/status.ts):
 #: blue is running, yellow needs a person, red failed, green done, the rest dim.
 DISPLAY_COLORS = total(
@@ -439,7 +451,7 @@ def _forge_text(text: str) -> str:
 
 def forge_mr(mr: dict) -> str:
     labels = ",".join(mr["labels"])
-    parts = [f"!{mr['number']} {mr['title']} [{mr['state']}]", labels, mr["url"]]
+    parts = [f"{mr_ref_text(mr)} {mr['title']} [{mr['state']}]", labels, mr["url"]]
     return _forge_text(" ".join(filter(None, parts)))
 
 
@@ -462,7 +474,7 @@ def forge_merged(items: list) -> str:
     return _forge_text(
         "\n".join(
             " ".join(
-                filter(None, [f"!{m['number']} {m['title']}", ",".join(m["labels"]), m["url"]])
+                filter(None, [f"{mr_ref_text(m)} {m['title']}", ",".join(m["labels"]), m["url"]])
             )
             for m in items
         )

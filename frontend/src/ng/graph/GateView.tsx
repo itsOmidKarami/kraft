@@ -4,6 +4,11 @@ import { NodeGlyph } from "./NodeGlyph";
 import { accessibleName, CHIP_TONE, type GlyphState } from "./types";
 import "./graph.css";
 import { Badge } from "../ui/Badge";
+import type { Rounds } from "../item/nodeGraph";
+import { RoundPicker } from "./RoundPicker";
+import { NotePreview } from "../ui/NotePreview";
+import { InlineMarkdown } from "../ui/Markdown";
+import { Link } from "react-router-dom";
 
 type Reviewer = { id?: string; icon?: string; state?: GlyphState; running?: boolean; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean; mode?: "decides" | "checks_first" };
 type Props = {
@@ -12,8 +17,17 @@ type Props = {
   reviewer?: Reviewer;
   message?: string;
   doc?: { label: string; onClick?: () => void };
-  reject?: { id: string; label?: string; icon?: string; onClick?: () => void };
+  /** `taken`: the round shown sent work back to `id`, so the target is drawn solid; `fixed`: its reviewer repaired the worktree itself. */
+  reject?: { id: string; label?: string; icon?: string; onClick?: () => void; taken?: boolean; fixed?: boolean };
   note?: string;
+  /** What the round shown was decided with: its note, under the message, as a short preview. `onRead` opens the whole note. */
+  said?: { note: string; at: string; n: number; onRead?: (button: HTMLElement) => void };
+  /** What the round shown was decided with when it is a review round (a review or threads): beside `said`. `href` opens
+   *  the round on the review page; `onRead` opens the whole summary. */
+  review?: { outcome?: string; summary: string; count: string; threads: { id: string; where: string; label: string | null; body: string }[]; href: string; onRead?: (button: HTMLElement) => void };
+  /** The gate's rounds, when it has two or more, and the one picked (undefined: the newest). */
+  rounds?: Rounds;
+  onRound?: (n: number | undefined) => void;
   youSub?: string;
   /** Px the docked pane takes on the right. */
   right?: number;
@@ -25,7 +39,7 @@ type Props = {
 
 /** A gate's node view (GateView.dc.html): reviewer → line → you, the message,
  *  the document, and the reject branch. */
-export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub, right = 0, onAdd, onReviewer, onGate, onBackground }: Props) {
+export function GateView({ gate, reviewer: r, message, doc, reject, note, said, review, rounds, onRound, youSub, right = 0, onAdd, onReviewer, onGate, onBackground }: Props) {
   const ran = r && (r.state === "done" || r.state === "current");
   const gateLabel = r || onAdd ? "you" : gate.id;
   return (
@@ -60,15 +74,38 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>
         {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={14} />{doc.label}</button>}
+        {said && <NotePreview key={said.n} className="gateview-said" note={said.note} onRead={said.onRead} />}
+        {review && (
+          <section className="gateview-review" aria-label="Review">
+            {review.outcome && <span className="gateview-review-outcome">{review.outcome}</span>}
+            {review.summary && <NotePreview className="gateview-review-summary" note={review.summary} label="Read the review" onRead={review.onRead} />}
+            <span className="gateview-review-count">{review.count}</span>
+            {review.threads.length > 0 && (
+              <ul className="gateview-review-threads">
+                {review.threads.map((t) => (
+                  <li key={t.id}>
+                    <span className="gateview-review-where">{t.where}</span>
+                    {t.label && <span className="gateview-review-label">{t.label}</span>}
+                    <span className="gateview-review-body"><InlineMarkdown text={t.body} /></span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link className="link-btn" to={review.href}>Open in review</Link>
+          </section>
+        )}
         {reject && (
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />
-            <span className="gateview-reject-word" aria-hidden="true">reject</span>
-            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} {...hint("Open the target node")} onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
+            <span className="gateview-reject-word" aria-hidden="true">{reject.fixed ? "fixed" : reject.taken ? "rejected to" : "reject"}</span>
+            {!reject.fixed && (
+              <button type="button" className={`gateview-target${reject.taken ? " is-taken" : ""}`} aria-label={`${reject.taken ? "rejected" : "reject"} to ${reject.label ?? reject.id}`} {...hint("Open the target node")} onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
+            )}
           </div>
         )}
         {note && <p className="gateview-note">{note}</p>}
       </div>
+      {rounds && onRound && <div className="gateview-foot" style={{ right: 12 }}><RoundPicker rounds={rounds} onPick={onRound} gate /></div>}
     </div>
   );
 }
